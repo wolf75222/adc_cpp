@@ -2,7 +2,7 @@
 
 A moment model represents a kinetic distribution by a finite set of its velocity moments and
 transports them as a hyperbolic system. This page explains what the moments are, why the truncated
-system is not closed on its own, how a closure repairs that, and what the `adc.moments` generator
+system is not closed on its own, how a closure repairs that, and what the `pops.moments` generator
 derives for you. The [HyQMOM tutorial](../tutorials/moment-model-hyqmom15.md) puts it to work; the
 [moment models reference](../reference/moment-models.md) is the API.
 
@@ -48,7 +48,7 @@ the standardized moments one order higher. Two are common:
 
 - **Gaussian (Levermore)** closure: assume the distribution is a local Maxwellian. The standardized
   higher moments follow a fixed recurrence; odd orders vanish. It is entropy-stable and exact when the
-  flow really is Gaussian. `adc.moments.gaussian_closure(order)` provides it.
+  flow really is Gaussian. `pops.moments.gaussian_closure(order)` provides it.
 - **HyQMOM** (hyperbolicity-preserving quadrature method of moments): a polynomial closure of the
   order-5 standardized moments chosen so the flux Jacobian has real eigenvalues, which keeps the
   transport hyperbolic away from the realizability boundary. The
@@ -61,7 +61,7 @@ it against a reference.
 
 ## What the generator derives
 
-From the closure alone, `adc.moments.build_moment_model` produces a full
+From the closure alone, `pops.moments.build_moment_model` produces a full
 [symbolic DSL model](../reference/symbolic-dsl.md): the mean velocities and central moments, the
 standardization and its inverse, the reconstruction of the order-$(k+1)$ raw moments, the **flux** by
 the order shift $F_x[M_{pq}] = M_{p+1,q}$, and -- by automatic differentiation of that flux plus a
@@ -89,7 +89,7 @@ after each step.
 
 - [Build and simulate a moment model (HyQMOM)](../tutorials/moment-model-hyqmom15.md) -- the
   step-by-step tutorial.
-- [Moment models reference](../reference/moment-models.md) -- the `adc.moments` API.
+- [Moment models reference](../reference/moment-models.md) -- the `pops.moments` API.
 - [Conservative and primitive variables](conservative-primitive-variables.md) and
   [fluxes, sources, and eigenvalues](fluxes-sources-eigenvalues.md) -- the model contract the
   generated moment model fills in.

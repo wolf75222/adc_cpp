@@ -1,24 +1,24 @@
 # System
 
 
-`adc.System` builds the coupler. The configuration passed as keywords describes only the
+`pops.System` builds the coupler. The configuration passed as keywords describes only the
 mesh (`n`, `L`, `periodic`): the domain is a `[0, L]^2` square of `n x n` cells.
 
 ```python
 import numpy as np
-import adc
+import pops
 
-sim = adc.System(n=128, L=1.0, periodic=False)
+sim = pops.System(n=128, L=1.0, periodic=False)
 ```
 
 You then add one block per model. A model is a brick composition
-(`adc.Model(state, transport, source, elliptic)`); the block additionally receives a spatial scheme
-(`adc.Spatial` / `adc.FiniteVolume`) and a time policy (`adc.Explicit`, `adc.IMEX`...).
+(`pops.Model(state, transport, source, elliptic)`); the block additionally receives a spatial scheme
+(`pops.Spatial` / `pops.FiniteVolume`) and a time policy (`pops.Explicit`, `pops.IMEX`...).
 
 ```python
-model = adc.Model(state=adc.Scalar(), transport=adc.ExB(B0=1.0),
-                  source=adc.NoSource(), elliptic=adc.BackgroundDensity(alpha=1.0, n0=0.0))
-sim.add_block("ne", model=model, spatial=adc.Spatial(minmod=True), time=adc.Explicit())
+model = pops.Model(state=pops.Scalar(), transport=pops.ExB(B0=1.0),
+                  source=pops.NoSource(), elliptic=pops.BackgroundDensity(alpha=1.0, n0=0.0))
+sim.add_block("ne", model=model, spatial=pops.Spatial(minmod=True), time=pops.Explicit())
 ```
 
 The system Poisson is shared by all blocks: its right-hand side is the sum of the elliptic
@@ -51,7 +51,7 @@ diagnostics are forwarded to the compiled facade. On the C++ side the coupler li
 by `python/bindings/core/bindings.cpp`. The backend (serial / OpenMP / Kokkos GPU / MPI) is the one with which
 `libadc` was compiled; the physics never sees the backend.
 
-> AMR variant. `adc.AmrSystem(n=, L=, periodic=)` is the refined counterpart of `System`:
+> AMR variant. `pops.AmrSystem(n=, L=, periodic=)` is the refined counterpart of `System`:
 > same `add_block` / `add_equation` / `set_poisson` / `set_density` / `step_cfl` signatures,
 > plus `set_refinement(threshold)` (refines where the density exceeds a threshold) and
 > `set_phi_refinement(grad_threshold)` (refines on `|grad phi|`). The regrid cadence is set
@@ -69,20 +69,20 @@ time policy. In multi-block, the block name indexes `set_density(name)` / `densi
 
 ```python
 n = 48
-electrons = adc.Model(state=adc.FluidState("compressible", gamma=1.4),
-                      transport=adc.CompressibleFlux(),
-                      source=adc.PotentialForce(charge=-1.0),
-                      elliptic=adc.ChargeDensity(charge=-1.0))
-ions = adc.Model(state=adc.FluidState("isothermal", cs2=0.5),
-                 transport=adc.IsothermalFlux(),
-                 source=adc.PotentialForce(charge=+1.0),
-                 elliptic=adc.ChargeDensity(charge=+1.0))
+electrons = pops.Model(state=pops.FluidState("compressible", gamma=1.4),
+                      transport=pops.CompressibleFlux(),
+                      source=pops.PotentialForce(charge=-1.0),
+                      elliptic=pops.ChargeDensity(charge=-1.0))
+ions = pops.Model(state=pops.FluidState("isothermal", cs2=0.5),
+                 transport=pops.IsothermalFlux(),
+                 source=pops.PotentialForce(charge=+1.0),
+                 elliptic=pops.ChargeDensity(charge=+1.0))
 
-sim = adc.System(n=n, L=1.0, periodic=True)
+sim = pops.System(n=n, L=1.0, periodic=True)
 sim.add_block("electrons", model=electrons,
-              spatial=adc.Spatial(vanleer=True, flux="hllc"),
-              time=adc.IMEX(substeps=10))           # stiff: implicit source, subcycled
-sim.add_block("ions", model=ions, spatial=adc.Spatial(minmod=True), time=adc.Explicit())
+              spatial=pops.Spatial(vanleer=True, flux="hllc"),
+              time=pops.IMEX(substeps=10))           # stiff: implicit source, subcycled
+sim.add_block("ions", model=ions, spatial=pops.Spatial(minmod=True), time=pops.Explicit())
 sim.set_poisson(rhs="charge_density", solver="geometric_mg")
 sim.set_density("electrons", ne0)
 sim.set_density("ions", np.ones((n, n)))
@@ -95,21 +95,21 @@ Inter-species coupled sources. In addition to the coupling by the field, inter-s
 energy between blocks. Three fixed forms are added via `sim.add_coupling(...)` (or the direct
 methods `add_ionization` / `add_collision` / `add_thermal_exchange`):
 
-- `adc.Ionization(electron, ion, neutral, rate)`: ionization `n_g -> n_i + n_e` (rate
+- `pops.Ionization(electron, ion, neutral, rate)`: ionization `n_g -> n_i + n_e` (rate
   `k n_e n_g`), mass transferred from the neutral to the ion;
-- `adc.Collision(a, b, rate)`: inter-species friction (force `k (u_a - u_b)`), momentum
+- `pops.Collision(a, b, rate)`: inter-species friction (force `k (u_a - u_b)`), momentum
   conserved (fluid blocks, >= 3 variables);
-- `adc.ThermalExchange(a, b, rate)`: thermal exchange `k (T_a - T_b)`, energy conserved
+- `pops.ThermalExchange(a, b, rate)`: thermal exchange `k (T_a - T_b)`, energy conserved
   (Euler blocks with 4 variables).
 
 ```python
 sim.add_ionization(electron="ne", ion="ni", neutral="ng", rate=0.5)   # n_g decreases, n_i increases
-sim.add_coupling(adc.Collision("a", "b", rate=1.0))                    # momentum transfer a -> b
+sim.add_coupling(pops.Collision("a", "b", rate=1.0))                    # momentum transfer a -> b
 sim.add_thermal_exchange("a", "b", rate=1.0)                           # energy hot -> cold
 ```
 
 For a generic inter-species source (described in formulas rather than fixed), the DSL
-`adc.dsl.CoupledSource(...).compile(...)` produces a descriptor that `sim.add_coupling(...)`
+`pops.dsl.CoupledSource(...).compile(...)` produces a descriptor that `sim.add_coupling(...)`
 plugs in too (interpreted bytecode on the C++ side, no per-cell Python callback, MPI-safe). The
 detail of the multi-species / plasma case is in
 [ALGORITHMS.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/ALGORITHMS.md) (section 18, "composition runtime and multi-species

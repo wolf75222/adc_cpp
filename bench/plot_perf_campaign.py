@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Trace les graphes de la campagne perf ADC a partir de CSV.
+"""Trace les graphes de la campagne perf PoPS a partir de CSV.
 
 Le script ne lance aucun bench et n'invente aucune valeur. Il lit les fichiers
 CSV decrits dans docs/PERF_SCALING_FRONTENDS_AUDIT_2026-06-08.md et produit les

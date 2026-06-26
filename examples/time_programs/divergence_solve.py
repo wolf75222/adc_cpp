@@ -4,8 +4,8 @@
 Builds a matrix-free operator ``A(phi) = phi - alpha*div(grad phi)`` whose apply is an IR sub-block
 (``P.set_apply``) written with ``P.gradient`` (into a 2-component buffer) chained into ``P.divergence``,
 then solves ``A phi = b`` with ``P.solve_linear`` -- which lowers to the runtime's matrix-free Krylov
-loop (``adc::bicgstab_solve``). This exercises ``ctx.divergence`` (the centered finite-volume divergence
-``adc::apply_divergence``, the ``div(flux)`` structure of the condensed-Schur operator) inside a real
+loop (``pops::bicgstab_solve``). This exercises ``ctx.divergence`` (the centered finite-volume divergence
+``pops::apply_divergence``, the ``div(flux)`` structure of the condensed-Schur operator) inside a real
 matrix-free solve.
 
 The centered ``div(grad)`` is the WIDE-stencil Laplacian ``(x(i+2) - 2 x(i) + x(i-2))/(4 h^2)`` (not the
@@ -15,13 +15,13 @@ SAME discrete operator. The single conservative variable doubles as the scalar f
 ``(I - alpha*div(grad)) phi = U`` and commits ``phi`` back into the block.
 
 This is the scalar divergence + Krylov building block of the condensed-Schur Program (acceptance 32);
-the FULL anisotropic ``adc.time.std.condensed_schur`` macro (ADC-421) is in
+the FULL anisotropic ``pops.time.std.condensed_schur`` macro (ADC-421) is in
 ``condensed_schur_program.py`` and ``python/tests/test_time_condensed_schur.py``. The native
-``adc.CondensedSchur`` source stepper remains supported. Run::
+``pops.CondensedSchur`` source stepper remains supported. Run::
 
     python examples/time_programs/divergence_solve.py
 
-Requires a C++ compiler and a visible Kokkos (``ADC_KOKKOS_ROOT``); prints a skip notice and exits 0
+Requires a C++ compiler and a visible Kokkos (``POPS_KOKKOS_ROOT``); prints a skip notice and exits 0
 otherwise. cf. docs/sphinx/reference/time-program.md.
 """
 import sys
@@ -29,11 +29,11 @@ import sys
 try:
     import numpy as np
 
-    import adc
-    from adc import dsl
-    from adc import time as adctime
-except Exception as exc:  # noqa: BLE001  -- adc/numpy unavailable in this interpreter
-    print("skip divergence_solve (adc/numpy unavailable: %s)" % exc)
+    import pops
+    from pops import dsl
+    from pops import time as adctime
+except Exception as exc:  # noqa: BLE001  -- pops/numpy unavailable in this interpreter
+    print("skip divergence_solve (pops/numpy unavailable: %s)" % exc)
     sys.exit(0)
 
 ALPHA = 0.1  # Helmholtz coefficient: A = I - alpha*div(grad) = I - alpha*Lap is SPD (no null space)
@@ -113,21 +113,21 @@ def offline_cg(apply, b, tol=1e-10, max_iter=2000):
 
 def main():
     n = 16
-    if not hasattr(adc.System(n=8, L=1.0, periodic=True), "install_program"):
-        print("skip divergence_solve (_adc lacks the install_program binding; rebuild _adc)")
+    if not hasattr(pops.System(n=8, L=1.0, periodic=True), "install_program"):
+        print("skip divergence_solve (_pops lacks the install_program binding; rebuild _pops)")
         return 0
 
     try:
-        compiled = adc.compile_problem(model=passive_model("div_prog"), time=solve_program())
+        compiled = pops.compile_problem(model=passive_model("div_prog"), time=solve_program())
         block_model = passive_model("div_blk").compile(backend="production")
     except RuntimeError as exc:  # no compiler / no Kokkos visible / compile failed
         print("skip divergence_solve (compile_problem could not build the .so: %s)" % str(exc)[:160])
         return 0
 
-    sim = adc.System(n=n, L=1.0, periodic=True)
+    sim = pops.System(n=n, L=1.0, periodic=True)
     sim.add_equation("blk", block_model,
-                     spatial=adc.FiniteVolume(limiter="none", riemann="rusanov"),
-                     time=adc.Explicit(method="euler"))
+                     spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                     time=pops.Explicit(method="euler"))
     x = (np.arange(n) + 0.5) / n
     X, Y = np.meshgrid(x, x, indexing="ij")
     b = 1.0 + 0.3 * np.sin(2 * np.pi * X) * np.cos(2 * np.pi * Y)  # the right-hand side (= U)

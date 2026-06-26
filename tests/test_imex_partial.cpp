@@ -7,30 +7,30 @@
 // var 0 et forward-Euler a la var 1, en comparant a un modele SANS trait (tout
 // implicite) : la var 0 coincide, la var 1 differe (3.5 explicite vs 4.0 implicite).
 
-#include <adc/core/model/coupled_system.hpp>
-#include <adc/core/state/state.hpp>
-#include <adc/coupling/system/system_coupler.hpp>
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/layout/distribution_mapping.hpp>
-#include <adc/mesh/geometry/geometry.hpp>
-#include <adc/mesh/storage/multifab.hpp>
+#include <pops/core/model/coupled_system.hpp>
+#include <pops/core/state/state.hpp>
+#include <pops/coupling/system/system_coupler.hpp>
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/layout/distribution_mapping.hpp>
+#include <pops/mesh/geometry/geometry.hpp>
+#include <pops/mesh/storage/multifab.hpp>
 
 #include <cmath>
 #include <cstdio>
 
-using namespace adc;
+using namespace pops;
 
 // Deux relaxations independantes. eq = (1, 2), k = (100, 1).
 struct TwoVarRelax {
   using State = StateVec<2>;
-  using Aux = adc::Aux;
+  using Aux = pops::Aux;
   static constexpr int n_vars = 2;
-  ADC_HD State flux(const State&, const Aux&, int) const { return State{}; }
-  ADC_HD Real max_wave_speed(const State&, const Aux&, int) const { return Real(0); }
-  ADC_HD State source(const State& u, const Aux&) const {
+  POPS_HD State flux(const State&, const Aux&, int) const { return State{}; }
+  POPS_HD Real max_wave_speed(const State&, const Aux&, int) const { return Real(0); }
+  POPS_HD State source(const State& u, const Aux&) const {
     return State{-Real(100) * (u[0] - Real(1)), -Real(1) * (u[1] - Real(2))};
   }
-  ADC_HD Real elliptic_rhs(const State& u) const { return u[0]; }
+  POPS_HD Real elliptic_rhs(const State& u) const { return u[0]; }
 };
 
 // Variante IMEX partiel : seule la var 0 (raide) est implicite.

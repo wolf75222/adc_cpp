@@ -3,7 +3,7 @@
 Verifie que cse=True et cse=False produisent le MEME resultat numerique (la CSE ne change pas la
 valeur, seulement le nombre de calculs) mais que la version CSE factorise effectivement : locales
 'cseK_' presentes, et moins d'appels std::sqrt (la vitesse du son calculee une fois). Reutilise la
-brique Euler et le harnais de comparaison a adc::Euler de test_dsl_brick.
+brique Euler et le harnais de comparaison a pops::Euler de test_dsl_brick.
 """
 import os
 import shutil
@@ -43,15 +43,15 @@ def main():
 
     cxx = shutil.which("c++") or shutil.which("g++") or shutil.which("clang++")
     if not cxx or not os.path.isdir(INCLUDE):
-        print("skip  compilateur ou en-tetes adc absents -> comparaison numerique sautee")
+        print("skip  compilateur ou en-tetes pops absents -> comparaison numerique sautee")
         print("test_dsl_cse : OK (forme seulement)")
         return
 
-    # (3) meme resultat numerique des deux cotes (et tous deux == adc::Euler)
+    # (3) meme resultat numerique des deux cotes (et tous deux == pops::Euler)
     d_cse = compile_run(brick_cse)
     d_raw = compile_run(brick_raw)
-    assert d_cse < 1e-12 and d_raw < 1e-12, "une version ne reproduit pas adc::Euler"
-    print("OK  cse et non-cse == adc::Euler (ecarts %.1e / %.1e)" % (d_cse, d_raw))
+    assert d_cse < 1e-12 and d_raw < 1e-12, "une version ne reproduit pas pops::Euler"
+    print("OK  cse et non-cse == pops::Euler (ecarts %.1e / %.1e)" % (d_cse, d_raw))
     print("test_dsl_cse : tout est vert")
 
 

@@ -28,10 +28,10 @@ The reference case is a 256x256 grid, one box, `bc=periodic`, `solver=geometric_
 ## Run the profile
 
 The harness lives in `bench/profile_step.cpp` and is driven by `bench/run_bench.sh`. It
-is out of the default build (`ADC_BUILD_BENCH=OFF`), so the build script enables and
+is out of the default build (`POPS_BUILD_BENCH=OFF`), so the build script enables and
 compiles it for you. Run the serial CPU profile first, passing the Kokkos Serial install root
 as `KROOT` (the build is Kokkos-only; you may instead export `$KOKKOS_ROOT` or
-`$ADC_KOKKOS_ROOT` and omit the argument). Replace `KROOT` with the path to your Kokkos install:
+`$POPS_KOKKOS_ROOT` and omit the argument). Replace `KROOT` with the path to your Kokkos install:
 
 ```sh
 bench/run_bench.sh serie KROOT
@@ -45,7 +45,7 @@ bench/run_bench.sh kokkos-omp KROOT
 ```
 
 To profile MPI on CPU, pass the Kokkos Serial install root as `KROOT` and the rank count as
-`NP` (the third argument). You may instead export `$KOKKOS_ROOT` / `$ADC_KOKKOS_ROOT` and pass
+`NP` (the third argument). You may instead export `$KOKKOS_ROOT` / `$POPS_KOKKOS_ROOT` and pass
 `NP` as the third argument. Replace `KROOT` with your Kokkos install and `NP` with the rank
 count:
 

@@ -21,8 +21,8 @@ import tempfile
 
 import numpy as np
 
-import adc
-from adc import dsl
+import pops
+from pops import dsl
 
 fails = 0
 INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "include"))
@@ -87,7 +87,7 @@ def iso3_dsl(name, roe=False, p_decl=True):
 
 cxx = shutil.which("c++") or shutil.which("g++") or shutil.which("clang++")
 if not cxx or not os.path.isdir(INCLUDE):
-    print("skip test_dsl_roe : compilateur ou en-tetes adc absents")
+    print("skip test_dsl_roe : compilateur ou en-tetes pops absents")
     sys.exit(0)
 
 tmp = tempfile.mkdtemp()
@@ -101,19 +101,19 @@ try:
     z = np.zeros((n, n))
     p0 = 1.0 + 0.0 * rho0
 
-    sd = adc.System(n=n, L=1.0, periodic=True)
+    sd = pops.System(n=n, L=1.0, periodic=True)
     sd.set_poisson()
-    sd.add_equation("gas", model=cm, spatial=adc.FiniteVolume(limiter="minmod", riemann="roe"),
-                    time=adc.Explicit())
+    sd.add_equation("gas", model=cm, spatial=pops.FiniteVolume(limiter="minmod", riemann="roe"),
+                    time=pops.Explicit())
     sd.set_primitive_state("gas", rho=rho0, u=z + 0.1, v=z, p=p0)
 
-    sn = adc.System(n=n, L=1.0, periodic=True)
+    sn = pops.System(n=n, L=1.0, periodic=True)
     sn.set_poisson()
     sn.add_block("gas",
-                 adc.Model(state=adc.FluidState("compressible", gamma=GAMMA),
-                           transport=adc.CompressibleFlux(), source=adc.NoSource(),
-                           elliptic=adc.BackgroundDensity(alpha=0.0, n0=0.0)),
-                 spatial=adc.FiniteVolume(limiter="minmod", riemann="roe"))
+                 pops.Model(state=pops.FluidState("compressible", gamma=GAMMA),
+                           transport=pops.CompressibleFlux(), source=pops.NoSource(),
+                           elliptic=pops.BackgroundDensity(alpha=0.0, n0=0.0)),
+                 spatial=pops.FiniteVolume(limiter="minmod", riemann="roe"))
     sn.set_primitive_state("gas", rho=rho0, u=z + 0.1, v=z, p=p0)
 
     for _ in range(8):
@@ -127,10 +127,10 @@ try:
     print("== (2) 3-var isotherme + enable_roe : accepte, fini, cisaillement EXACT ==")
     cm3 = iso3_dsl("iso3_roe", roe=True).compile(os.path.join(tmp, "iso3_roe.so"), INCLUDE,
                                                  backend="production")
-    s3 = adc.System(n=n, L=1.0, periodic=True)
+    s3 = pops.System(n=n, L=1.0, periodic=True)
     s3.set_poisson()
-    s3.add_equation("f", model=cm3, spatial=adc.FiniteVolume(limiter="minmod", riemann="roe"),
-                    time=adc.Explicit())
+    s3.add_equation("f", model=cm3, spatial=pops.FiniteVolume(limiter="minmod", riemann="roe"),
+                    time=pops.Explicit())
     x = (np.arange(n) + 0.5) / n
     vshear = np.tile(0.3 * np.sin(2 * np.pi * x), (n, 1))
     s3.set_primitive_state("f", rho=1.0 + z, u=z, v=vshear)
@@ -145,8 +145,8 @@ try:
     cm_no = iso3_dsl("iso3_noroe").compile(os.path.join(tmp, "iso3_noroe.so"), INCLUDE,
                                            backend="production")
     try:
-        s = adc.System(n=16, L=1.0, periodic=True)
-        s.add_equation("f", model=cm_no, spatial=adc.FiniteVolume(limiter="minmod",
+        s = pops.System(n=16, L=1.0, periodic=True)
+        s.add_equation("f", model=cm_no, spatial=pops.FiniteVolume(limiter="minmod",
                                                                   riemann="roe"))
         chk(False, "roe sans capability sur 3-var aurait du lever")
     except (ValueError, RuntimeError) as e:

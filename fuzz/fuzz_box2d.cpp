@@ -6,7 +6,7 @@
 /// trivial par construction -- les coordonnees d'un vrai maillage tiennent largement dans ces
 /// bornes, et refine(8) y reste loin de INT_MAX.
 
-#include <adc/mesh/index/box2d.hpp>
+#include <pops/mesh/index/box2d.hpp>
 
 #include <cstdint>
 #include <cstdio>
@@ -23,28 +23,28 @@ void expect(bool ok, const char* what) {
   }
 }
 
-adc::Box2D make_box(ByteReader& br) {
+pops::Box2D make_box(ByteReader& br) {
   const int B = 1 << 20;
   const int lx = br.range(-B, B), ly = br.range(-B, B);
   // Largeurs dans [-2, 64] : ~1 boite sur 20 est VIDE (hi < lo), exactement la classe de bord
   // (boites degenerees) qui mord dans le code geometrique.
   const int w = br.range(-2, 64), h = br.range(-2, 64);
-  return adc::Box2D{{lx, ly}, {lx + w, ly + h}};
+  return pops::Box2D{{lx, ly}, {lx + w, ly + h}};
 }
 
 }  // namespace
 
 extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size) {
   ByteReader br{data, size};
-  const adc::Box2D a = make_box(br);
-  const adc::Box2D b = make_box(br);
+  const pops::Box2D a = make_box(br);
+  const pops::Box2D b = make_box(br);
   const int r = br.range(1, 8);
   const int g = br.range(0, 16);
   const int d = br.range(0, 1);
   const int s = br.range(-1000, 1000);
 
   // intersect : symetrique ; non vide -> contenue dans chaque operande.
-  const adc::Box2D i1 = a.intersect(b), i2 = b.intersect(a);
+  const pops::Box2D i1 = a.intersect(b), i2 = b.intersect(a);
   expect(i1 == i2, "a.intersect(b) == b.intersect(a)");
   if (!i1.empty()) {
     expect(a.contains(i1) && b.contains(i1), "intersection contenue dans chaque operande");

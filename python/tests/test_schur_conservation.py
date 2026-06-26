@@ -2,9 +2,9 @@
 """Conservation DISCRETE + POSITIVITE du chemin cartesien-fluide-Schur (Hoffart et
 al., arXiv:2510.11808 ; Euler-Poisson magnetise isotherme). Premieres briques
 structure-preserving sur ce chemin : System cartesien + modele a roles
-Density/MomentumX/MomentumY[/Energy] + adc.Split(hyperbolic=Explicit,
-source=adc.CondensedSchur). L'etage source condense (CondensedSchurSourceStepper,
-include/adc/coupling/condensed_schur_source_stepper.hpp) GELE rho et ne traite que
+Density/MomentumX/MomentumY[/Energy] + pops.Split(hyperbolic=Explicit,
+source=pops.CondensedSchur). L'etage source condense (CondensedSchurSourceStepper,
+include/pops/coupling/condensed_schur_source_stepper.hpp) GELE rho et ne traite que
 la vitesse (+ l'energie cinetique via le SchurEnergyKernel).
 
 ATTENTION FV (PAS FE). Le schema spatial est en VOLUMES FINIS, pas en elements
@@ -54,7 +54,7 @@ mesurees sont citees dans chaque assertion.
 
 Test enregistre, mais lance comme un simple script python3 (pas pytest : la CI lance
 ces tests directement, pytest n'est pas installe). Se saute proprement si le module
-_adc n'est pas importable (build absent) -> la CI le valide.
+_pops n'est pas importable (build absent) -> la CI le valide.
 """
 
 import sys
@@ -62,9 +62,9 @@ import sys
 import numpy as np
 
 try:
-    import adc
+    import pops
 except ImportError as e:  # pragma: no cover - environnement sans build
-    print("skip  module adc absent (PYTHONPATH ? build ?) : %s" % e)
+    print("skip  module pops absent (PYTHONPATH ? build ?) : %s" % e)
     sys.exit(0)
 
 
@@ -96,22 +96,22 @@ def iso_model(cs2=1.0, alpha=3.0, n0=0.0):
     Modele MINIMAL accepte par l'etage source condense. Fond neutralisant
     f = alpha (n - n0) : n0 = moyenne(rho) rend le Poisson periodique compatible
     (RHS a moyenne nulle)."""
-    return adc.Model(
-        state=adc.FluidState(kind="isothermal", cs2=cs2),
-        transport=adc.IsothermalFlux(),
-        source=adc.NoSource(),
-        elliptic=adc.BackgroundDensity(alpha=alpha, n0=n0),
+    return pops.Model(
+        state=pops.FluidState(kind="isothermal", cs2=cs2),
+        transport=pops.IsothermalFlux(),
+        source=pops.NoSource(),
+        elliptic=pops.BackgroundDensity(alpha=alpha, n0=n0),
     )
 
 
 def euler_model(gamma=1.4, alpha=3.0):
     """Fluide compressible natif : roles Density / MomentumX / MomentumY / Energy
     (4 var). Le role Energy active le SchurEnergyKernel de l'etage source."""
-    return adc.Model(
-        state=adc.FluidState(kind="compressible", gamma=gamma),
-        transport=adc.CompressibleFlux(),
-        source=adc.NoSource(),
-        elliptic=adc.BackgroundDensity(alpha=alpha, n0=0.0),
+    return pops.Model(
+        state=pops.FluidState(kind="compressible", gamma=gamma),
+        transport=pops.CompressibleFlux(),
+        source=pops.NoSource(),
+        elliptic=pops.BackgroundDensity(alpha=alpha, n0=0.0),
     )
 
 
@@ -126,8 +126,8 @@ def ring_axisym(n, L, rho0=1.0, drho=0.6, r0=0.25, w=0.06):
 
 
 def split_time(theta=1.0, alpha=3.0):
-    return adc.Split(hyperbolic=adc.Explicit(),
-                     source=adc.CondensedSchur(kind="electrostatic_lorentz",
+    return pops.Split(hyperbolic=pops.Explicit(),
+                     source=pops.CondensedSchur(kind="electrostatic_lorentz",
                                                theta=theta, alpha=alpha))
 
 
@@ -148,11 +148,11 @@ def test_masse():
     rho0, u0, v0 = ring_axisym(n, L)
     n0 = float(rho0.mean())  # fond neutralisant -> RHS Poisson a moyenne nulle (periodique bien pose)
 
-    sim = adc.System(n=n, L=L, periodic=True)
+    sim = pops.System(n=n, L=L, periodic=True)
     sim.set_poisson(bc="periodic")
     sim.set_magnetic_field(B0 * np.ones((n, n)))
     sim.add_equation("ions", model=iso_model(alpha=alpha, n0=n0),
-                     spatial=adc.FiniteVolume(limiter="minmod", riemann="rusanov",
+                     spatial=pops.FiniteVolume(limiter="minmod", riemann="rusanov",
                                               variables="conservative"),
                      time=split_time(theta=1.0, alpha=alpha))
     sim.set_primitive_state("ions", rho=rho0, u=u0, v=v0)
@@ -184,7 +184,7 @@ def test_masse():
 def _run_momentum(periodic, sym, n=64, L=1.0, B0=4.0, alpha=3.0, N=20, dt_fac=0.3):
     """Renvoie (m0, dmx, dmy) apres N pas. sym=True : anneau axisymetrique centre ;
     sym=False : bosse de densite DECENTREE (force nette non nulle)."""
-    sim = adc.System(n=n, L=L, periodic=periodic)
+    sim = pops.System(n=n, L=L, periodic=periodic)
     sim.set_poisson(bc="periodic" if periodic else "dirichlet")
     sim.set_magnetic_field(B0 * np.ones((n, n)))
     if sym:
@@ -198,7 +198,7 @@ def _run_momentum(periodic, sym, n=64, L=1.0, B0=4.0, alpha=3.0, N=20, dt_fac=0.
         u0 = v0 = 0.0 * X
         n0 = float(rho0.mean()) if periodic else 0.0
     sim.add_equation("ions", model=iso_model(alpha=alpha, n0=n0),
-                     spatial=adc.FiniteVolume(limiter="minmod", riemann="rusanov",
+                     spatial=pops.FiniteVolume(limiter="minmod", riemann="rusanov",
                                               variables="conservative"),
                      time=split_time(theta=1.0, alpha=alpha))
     sim.set_primitive_state("ions", rho=rho0, u=u0, v=v0)
@@ -273,12 +273,12 @@ def test_momentum():
 # ---------------------------------------------------------------------------
 
 def _run_energy(with_schur, n=48, L=1.0, B0=4.0, alpha=3.0, gamma=1.4, N=30):
-    sim = adc.System(n=n, L=L, periodic=False)
+    sim = pops.System(n=n, L=L, periodic=False)
     sim.set_poisson(bc="dirichlet")
     sim.set_magnetic_field(B0 * np.ones((n, n)))
-    time = split_time(theta=1.0, alpha=alpha) if with_schur else adc.Explicit()
+    time = split_time(theta=1.0, alpha=alpha) if with_schur else pops.Explicit()
     sim.add_equation("ions", model=euler_model(gamma=gamma, alpha=alpha),
-                     spatial=adc.FiniteVolume(limiter="minmod", riemann="rusanov",
+                     spatial=pops.FiniteVolume(limiter="minmod", riemann="rusanov",
                                               variables="conservative"),
                      time=time)
     rho0, u0, v0 = ring_axisym(n, L)
@@ -353,11 +353,11 @@ def test_positivite_densite():
     n, L = 64, 1.0
     B0, alpha, cs2 = 4.0, 3.0, 1.0
     for limiter in ("minmod", "vanleer", "weno5"):
-        sim = adc.System(n=n, L=L, periodic=False)
+        sim = pops.System(n=n, L=L, periodic=False)
         sim.set_poisson(bc="dirichlet")
         sim.set_magnetic_field(B0 * np.ones((n, n)))
         sim.add_equation("ions", model=iso_model(cs2=cs2, alpha=alpha),
-                         spatial=adc.FiniteVolume(limiter=limiter, riemann="rusanov",
+                         spatial=pops.FiniteVolume(limiter=limiter, riemann="rusanov",
                                                   variables="primitive"),  # recon_prim
                          time=split_time(theta=1.0, alpha=alpha))
         # Anneau RAIDE : fond bas (0.2), forte amplitude, paroi fine.

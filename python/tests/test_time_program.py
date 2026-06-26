@@ -1,4 +1,4 @@
-"""adc.time.Program -- compiled time-program IR, builder mode (ADC-401, Phase 2a).
+"""pops.time.Program -- compiled time-program IR, builder mode (ADC-401, Phase 2a).
 
 Pure Python; no compilation. The Program is a typed intermediate representation built by Python and
 later lowered to C++ (other ADC-399 phases). This test exercises ONLY the IR construction layer:
@@ -11,9 +11,9 @@ later lowered to C++ (other ADC-399 phases). This test exercises ONLY the IR con
   - the IR hash is deterministic and sensitive to a coefficient change.
 
 It does NOT compile or run anything (no ProgramContext, no .so) -- that is Phase 2b/2c.
-Run with python3 (PYTHONPATH = built adc package).
+Run with python3 (PYTHONPATH = built pops package).
 """
-from adc import time as adctime
+from pops import time as adctime
 
 
 def _coeff(node, value):

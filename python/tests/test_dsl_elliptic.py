@@ -1,14 +1,14 @@
 """Test du codegen elliptique (emit_cpp_elliptic) : meme mecanique que source / flux.
 
-La brique de second membre generee (rhs(U)) doit reproduire adc::ChargeDensity ecrite a la main.
-Pur Python ; gate sur compilateur + en-tetes adc, sinon skip propre.
+La brique de second membre generee (rhs(U)) doit reproduire pops::ChargeDensity ecrite a la main.
+Pur Python ; gate sur compilateur + en-tetes pops, sinon skip propre.
 """
 import os
 import shutil
 import subprocess
 import tempfile
 
-from adc import dsl
+from pops import dsl
 
 Q = -1.0
 INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "include"))
@@ -22,18 +22,18 @@ def build_charge():
 
 
 HARNESS = r"""
-#include <adc/physics/bricks/bricks.hpp>
+#include <pops/physics/bricks/bricks.hpp>
 %s
 #include <cstdio>
 #include <cmath>
 
 int main() {
-  adc::ChargeDensity ref; ref.q = %r;
-  adc_generated::GenCharge gen;
+  pops::ChargeDensity ref; ref.q = %r;
+  pops_generated::GenCharge gen;
   const double S[] = {0.0, 0.5, 1.0, 2.5, -0.3};
   double maxdiff = 0.0;
   for (int k=0;k<5;++k){
-    adc::StateVec<1> u{}; u[0]=S[k];
+    pops::StateVec<1> u{}; u[0]=S[k];
     double d = std::fabs(ref.rhs(u) - gen.rhs(u));
     if (d>maxdiff) maxdiff=d;
   }
@@ -51,7 +51,7 @@ def main():
 
     cxx = shutil.which("c++") or shutil.which("g++") or shutil.which("clang++")
     if not cxx or not os.path.isdir(INCLUDE):
-        print("skip  compilateur ou en-tetes adc absents -> verification sautee")
+        print("skip  compilateur ou en-tetes pops absents -> verification sautee")
         print("test_dsl_elliptic : OK (forme du struct seulement)")
         return
 
@@ -65,8 +65,8 @@ def main():
         out = subprocess.run([exe], capture_output=True, text=True, check=True).stdout
 
     d = float(out.strip())
-    assert d < 1e-12, "elliptique genere != adc::ChargeDensity (ecart max %.2e)" % d
-    print("OK  GenCharge::rhs == adc::ChargeDensity{%g} (ecart max %.1e)" % (Q, d))
+    assert d < 1e-12, "elliptique genere != pops::ChargeDensity (ecart max %.2e)" % d
+    print("OK  GenCharge::rhs == pops::ChargeDensity{%g} (ecart max %.1e)" % (Q, d))
     print("test_dsl_elliptic : tout est vert")
 
 

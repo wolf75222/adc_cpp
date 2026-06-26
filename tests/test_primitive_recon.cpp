@@ -4,14 +4,14 @@
 // conversions ; on verifie ici leur exactitude (round-trip) et la centralisation du calcul
 // des variables primitives. Imprime "OK test_primitive_recon" en cas de succes.
 
-#include <adc/core/model/physical_model.hpp>
-#include <adc/physics/bricks/bricks.hpp>
-#include <adc/physics/fluids/euler.hpp>
+#include <pops/core/model/physical_model.hpp>
+#include <pops/physics/bricks/bricks.hpp>
+#include <pops/physics/fluids/euler.hpp>
 
 #include <cmath>
 #include <cstdio>
 
-using namespace adc;
+using namespace pops;
 
 static int fails = 0;
 static void chk(bool c, const char* label) {

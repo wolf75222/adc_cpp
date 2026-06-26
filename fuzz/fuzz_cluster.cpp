@@ -8,9 +8,9 @@
 /// chop final) est exactement la classe de code geometrique ou les bords degeneres mordent
 /// (boites 1x1, lignes vides, domaines plats 1xN).
 
-#include <adc/amr/tagging/cluster.hpp>
-#include <adc/amr/tagging/tag_box.hpp>
-#include <adc/mesh/index/box2d.hpp>
+#include <pops/amr/tagging/cluster.hpp>
+#include <pops/amr/tagging/tag_box.hpp>
+#include <pops/mesh/index/box2d.hpp>
 
 #include <cstdint>
 #include <cstdio>
@@ -37,9 +37,9 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size
   const int h = br.range(1, 48);
   const int ox = br.range(-64, 64);
   const int oy = br.range(-64, 64);
-  const adc::Box2D dom{{ox, oy}, {ox + w - 1, oy + h - 1}};
+  const pops::Box2D dom{{ox, oy}, {ox + w - 1, oy + h - 1}};
 
-  adc::TagBox tags(dom);
+  pops::TagBox tags(dom);
   for (int j = dom.lo[1]; j <= dom.hi[1]; ++j) {
     for (int i = dom.lo[0]; i <= dom.hi[0]; ++i) {
       if (br.bit()) {
@@ -48,15 +48,15 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size
     }
   }
 
-  adc::ClusterParams p;
+  pops::ClusterParams p;
   p.min_efficiency = 0.05 + 0.9 * (double(br.range(0, 100)) / 100.0);
   p.min_box_size = br.range(1, 4);
   p.max_box_size = br.range(p.min_box_size, 32);
 
-  const std::vector<adc::Box2D> boxes = adc::berger_rigoutsos(tags, p);
+  const std::vector<pops::Box2D> boxes = pops::berger_rigoutsos(tags, p);
 
   // Contrat cote boxes : non vides, dans le domaine, chopees a max_box_size.
-  for (const adc::Box2D& b : boxes) {
+  for (const pops::Box2D& b : boxes) {
     expect(!b.empty(), "box rendue non vide");
     expect(dom.contains(b), "box rendue contenue dans le domaine");
     expect(b.hi[0] - b.lo[0] + 1 <= p.max_box_size && b.hi[1] - b.lo[1] + 1 <= p.max_box_size,
@@ -70,7 +70,7 @@ extern "C" int LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size
         continue;
       }
       bool covered = false;
-      for (const adc::Box2D& b : boxes) {
+      for (const pops::Box2D& b : boxes) {
         if (b.contains(i, j)) {
           covered = true;
           break;

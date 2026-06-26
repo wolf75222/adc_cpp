@@ -103,7 +103,7 @@ void init_system(py::module_& m) {
       // ABI is untouched; CompiledTime(substeps=, stride=) threads through here. Both must be >= 1.
       .def("set_program_cadence", &System::set_program_cadence, py::arg("substeps"),
            py::arg("stride"))
-      // ADC-406b: IR hash of the installed compiled Program (the .so's adc_program_hash), or "" if
+      // ADC-406b: IR hash of the installed compiled Program (the .so's pops_program_hash), or "" if
       // none. sim.checkpoint records it; sim.restart rejects a restart against a DIFFERENT Program.
       .def("installed_program_hash", &System::installed_program_hash)
       // ADC-466 (Spec criterion 24): configured field (Poisson) solver token (the last set_poisson
@@ -171,7 +171,7 @@ void init_system(py::module_& m) {
       .def("add_collision", &System::add_collision, py::arg("a"), py::arg("b"), py::arg("rate"))
       .def("add_thermal_exchange", &System::add_thermal_exchange, py::arg("a"), py::arg("b"),
            py::arg("rate"))
-      // Schur-condensed source stage (OPT-IN, adc.Split(source=adc.CondensedSchur(...))): replaces
+      // Schur-condensed source stage (OPT-IN, pops.Split(source=pops.CondensedSchur(...))): replaces
       // the block's explicit / IMEX source with the C++ condensed stage (CondensedSchurSourceStepper, #126)
       // after the hyperbolic transport. kind='electrostatic_lorentz'. Default (without the call) unchanged.
       // ADC-214: Python surface UNCHANGED (same flat krylov_* kwargs / descriptors, same
@@ -222,7 +222,7 @@ void init_system(py::module_& m) {
       // step, bit-identical) or "evolve" (after phi^0, no more re-solve; the Schur stage evolves phi
       // without restart, like the paper). Cf. System::set_gauss_policy.
       .def("set_gauss_policy", &System::set_gauss_policy, py::arg("policy"))
-      // Generic COUPLED source (adc.dsl.CoupledSource, P5): flat ABI (postfix bytecode). Reads
+      // Generic COUPLED source (pops.dsl.CoupledSource, P5): flat ABI (postfix bytecode). Reads
       // fields (block, role) and writes source terms compiled into a stack machine, applied by
       // explicit splitting after the transport (same seam as add_ionization). Without the call, unchanged.
       // ADC-214: Python surface UNCHANGED (same flat kwargs in_blocks/.../freq_prog_args, same
@@ -318,7 +318,7 @@ void init_system(py::module_& m) {
           },
           py::arg("bz"))
       // NAMED aux fields (ADC-70 phase 1): by canonical COMPONENT (>= 5). The name -> comp
-      // resolution lives in the Python facade (adc.System.set_aux_field), which calls these two methods.
+      // resolution lives in the Python facade (pops.System.set_aux_field), which calls these two methods.
       .def(
           "set_aux_field_component",
           [](System& s, int comp,
@@ -326,8 +326,8 @@ void init_system(py::module_& m) {
             s.set_aux_field_component(comp, flat(arr));
           },
           py::arg("comp"), py::arg("field"))
-      // ADC-369: per-field aux halo policy (bc_type = adc::BCType Foextrap=1 / Dirichlet=2). The Python
-      // facade (adc.System.set_aux_field(..., halo=adc.AuxHalo(...))) resolves name -> comp and calls this.
+      // ADC-369: per-field aux halo policy (bc_type = pops::BCType Foextrap=1 / Dirichlet=2). The Python
+      // facade (pops.System.set_aux_field(..., halo=pops.AuxHalo(...))) resolves name -> comp and calls this.
       .def(
           "set_aux_field_halo_component",
           [](System& s, int comp, int bc_type, double value) {
@@ -350,7 +350,7 @@ void init_system(py::module_& m) {
           py::arg("name"), py::arg("rho"))
       // Init from the PRIMITIVES: prim = array (ncomp, n, n) component-major in the order of
       // primitive_vars(name); converted to conservative by the block's model. The Python facade
-      // (adc.System.set_primitive_state(**prims)) assembles this array from the named kwargs.
+      // (pops.System.set_primitive_state(**prims)) assembles this array from the named kwargs.
       .def(
           "set_primitive_state",
           [](System& s, const std::string& name,
@@ -465,5 +465,5 @@ void init_system(py::module_& m) {
           },
           py::arg("name"), py::arg("li"))
       .def_static("abi_key", &System::abi_key,
-                  "Module ABI key (cf. adc.abi_key); compared to that of a native loader.");
+                  "Module ABI key (cf. pops.abi_key); compared to that of a native loader.");
 }

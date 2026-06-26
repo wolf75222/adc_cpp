@@ -5,14 +5,14 @@
 // knapsack equilibre au moins aussi bien que la SFC (il optimise le desequilibre
 // max, la SFC le troque contre la localite).
 
-#include <adc/mesh/index/box2d.hpp>
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/parallel/load_balance.hpp>
+#include <pops/mesh/index/box2d.hpp>
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/parallel/load_balance.hpp>
 
 #include <cstdio>
 #include <vector>
 
-using namespace adc;
+using namespace pops;
 
 // nombre de changements de rang le long de l'ordre de Morton.
 static int rank_transitions(const BoxArray& ba, const DistributionMapping& dm) {

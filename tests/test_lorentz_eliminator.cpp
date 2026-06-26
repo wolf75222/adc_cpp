@@ -9,13 +9,13 @@
 //      et B^{-1} ramene au vecteur initial (norme conservee par B^{-1} o B).
 //   4. Cas degenere B_z=0 : B=I, B^{-1}=I, det=1.
 
-#include <adc/numerics/linalg/lorentz_eliminator.hpp>
+#include <pops/numerics/linalg/lorentz_eliminator.hpp>
 
 #include <cmath>
 #include <cstdio>
 
-using adc::LorentzEliminator;
-using adc::Real;
+using pops::LorentzEliminator;
+using pops::Real;
 
 // Valeur absolue sans appel flottant conditionnel hors std::fabs.
 static inline double dabs(double x) {

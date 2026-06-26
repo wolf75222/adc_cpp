@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""adc.time.std.rk -- generic explicit Runge-Kutta from a Butcher tableau (epic ADC-399 / ADC-423).
+"""pops.time.std.rk -- generic explicit Runge-Kutta from a Butcher tableau (epic ADC-399 / ADC-423).
 
 ``std.rk(P, block, tableau)`` lowers an arbitrary EXPLICIT Butcher tableau (A, b, c) to the SAME stage
 chain the hard-coded `rk4` macro emits (solve_fields + rhs + linear_combine, no RK class):
@@ -12,7 +12,7 @@ chain the hard-coded `rk4` macro emits (solve_fields + rhs + linear_combine, no 
     combination U + dt(1/2 k1 + 1/2 k2); the tableau validation rejects an implicit (non-lower-tri)
     tableau and a b that does not sum to 1.
 
-(B) Compiled trajectory parity (skips cleanly without _adc / a compiler / a visible Kokkos): the
+(B) Compiled trajectory parity (skips cleanly without _pops / a compiler / a visible Kokkos): the
     compiled rk(RK4_TABLEAU) program and the compiled rk4 program step an identical System to the SAME
     state bit-for-bit (they ARE the same IR). Self-skips, never fakes the engine.
 
@@ -21,11 +21,11 @@ Pure-Python IR construction is always available; the compiled section gates on t
 import sys
 
 
-def _adc_time():
+def _pops_time():
     try:
-        import adc.time as t
-    except Exception as exc:  # adc not importable here -> skip, never fake
-        print("skip test_time_std_rk (adc.time unavailable: %s)" % exc)
+        import pops.time as t
+    except Exception as exc:  # pops not importable here -> skip, never fake
+        print("skip test_time_std_rk (pops.time unavailable: %s)" % exc)
         sys.exit(0)
     return t
 
@@ -113,20 +113,20 @@ def _run_section_b(t):
     try:
         import numpy as np
 
-        import adc
-        from adc import dsl
+        import pops
+        from pops import dsl
     except Exception as exc:  # noqa: BLE001
-        print("-- (B) skipped: adc/numpy unavailable: %s --" % exc)
+        print("-- (B) skipped: pops/numpy unavailable: %s --" % exc)
         return
-    if not hasattr(adc.System(n=8, L=1.0, periodic=True), "install_program"):
-        print("-- (B) skipped: _adc lacks install_program (rebuild _adc) --")
+    if not hasattr(pops.System(n=8, L=1.0, periodic=True), "install_program"):
+        print("-- (B) skipped: _pops lacks install_program (rebuild _pops) --")
         return
 
     def compiled_so(build, name):
         P = t.Program(name)
         build(P)
         try:
-            return adc.compile_problem(model=_passive_model(dsl, name + "_m"), time=P)
+            return pops.compile_problem(model=_passive_model(dsl, name + "_m"), time=P)
         except RuntimeError as exc:
             print("-- (B) skipped: compile_problem could not build the .so: %s --" % str(exc)[:160])
             return None
@@ -144,14 +144,14 @@ def _run_section_b(t):
     rho0 = 1.0 + 0.3 * np.sin(2 * np.pi * X) * np.cos(2 * np.pi * Y)
 
     def run(handle):
-        sim = adc.System(n=n, L=1.0, periodic=True)
+        sim = pops.System(n=n, L=1.0, periodic=True)
         try:
             cm = _passive_model(dsl, "rk_block").compile(backend="production")
         except RuntimeError as exc:
             print("-- (B) skipped: model compile failed: %s --" % str(exc)[:160])
             return None
-        sim.add_equation("blk", cm, spatial=adc.FiniteVolume(limiter="none", riemann="rusanov"),
-                         time=adc.Explicit(method="euler"))
+        sim.add_equation("blk", cm, spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                         time=pops.Explicit(method="euler"))
         sim.set_state("blk", np.stack([rho0]))
         sim.install_program(handle.so_path)
         for _ in range(5):
@@ -168,7 +168,7 @@ def _run_section_b(t):
 
 
 def _run():
-    t = _adc_time()
+    t = _pops_time()
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:
         fn(t)

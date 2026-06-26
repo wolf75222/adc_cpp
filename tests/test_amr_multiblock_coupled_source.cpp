@@ -22,23 +22,23 @@
 // On travaille au niveau du MOTEUR AmrRuntime + build_amr_block (les briques de cette PR), ou l'on
 // construit la hierarchie partagee et l'on accede aux densites/masses par bloc et au RHS Poisson.
 
-#include <adc/coupling/source/coupled_source_program.hpp>  // CsOp (opcodes du bytecode P5)
-#include <adc/runtime/builders/compiled/amr_dsl_block.hpp>  // detail::make_shared_amr_layout / dispatch_amr_block
-#include <adc/runtime/amr/amr_runtime.hpp>    // AmrRuntime, AmrRuntimeBlock
-#include <adc/runtime/builders/factory/model_factory.hpp>  // detail::dispatch_model
-#include <adc/runtime/config/model_spec.hpp>
-#include <adc/mesh/storage/multifab.hpp>
+#include <pops/coupling/source/coupled_source_program.hpp>  // CsOp (opcodes du bytecode P5)
+#include <pops/runtime/builders/compiled/amr_dsl_block.hpp>  // detail::make_shared_amr_layout / dispatch_amr_block
+#include <pops/runtime/amr/amr_runtime.hpp>    // AmrRuntime, AmrRuntimeBlock
+#include <pops/runtime/builders/factory/model_factory.hpp>  // detail::dispatch_model
+#include <pops/runtime/config/model_spec.hpp>
+#include <pops/mesh/storage/multifab.hpp>
 
 #include <cmath>
 #include <cstdio>
 #include <string>
 #include <vector>
 
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
 #include <Kokkos_Core.hpp>
 #endif
 
-using namespace adc;
+using namespace pops;
 
 // Spec ExB scalaire (1 var) a charge q : advection pilotee par grad phi (le couplage Poisson lit q*n).
 // q=0 -> bloc neutre (ne contribue PAS au Poisson), advecte par le MEME phi que les autres.
@@ -119,7 +119,7 @@ static AmrRuntime make_two_block(int N, double L, double B0, const std::vector<d
 
 // Enregistre une source ionisation-like CONSERVATIVE entre "ions" (gagne) et "neutrals" (perd) sur le
 // role density, terme S = k * n_ions * n_neutrals. Bytecode postfixe construit A LA MAIN, EXACTEMENT
-// comme l'emettrait adc.dsl.CoupledSource.add_pair (gain = +S ; perte = Neg(gain) = -S, MEME programme
+// comme l'emettrait pops.dsl.CoupledSource.add_pair (gain = +S ; perte = Neg(gain) = -S, MEME programme
 // + un Neg) -> les deux contributions par cellule sont opposees au signe pres (echange conservatif).
 //   registres : r0 = n_ions (entree), r1 = n_neutrals (entree), r2 = k (constante)
 //   gain  : PushReg 0, PushReg 1, Mul, PushReg 2, Mul        -> k * n_ions * n_neutrals
@@ -142,7 +142,7 @@ static void register_ionization(AmrRuntime& rt, double k) {
 }
 
 int main(int argc, char** argv) {
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   Kokkos::ScopeGuard guard(argc, argv);
 #else
   (void)argc;

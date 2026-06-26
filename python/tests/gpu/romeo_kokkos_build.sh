@@ -2,7 +2,7 @@
 # Build Kokkos (CUDA + Serial, Hopper90) puis le harnais utilisant la brique generee, et execute
 # sur le GPU. Tout sur le noeud GPU (aarch64) ou nvcc s'execute.
 module load cuda/12.6
-cd "$HOME/adc_dsl_kk" || exit 3
+cd "$HOME/pops_dsl_kk" || exit 3
 echo "noeud=$(hostname) arch=$(uname -m)"
 NW="$PWD/kokkos/bin/nvcc_wrapper"
 
@@ -24,7 +24,7 @@ echo KOKKOS_OK
 NWI="$(ls -d "$PWD"/kinstall/bin/nvcc_wrapper 2>/dev/null || echo "$NW")"
 cmake -S harness -B hbuild \
   -DCMAKE_CXX_COMPILER="$NWI" \
-  -DKokkos_ROOT="$PWD/kinstall" -DADC_INCLUDE="$PWD/include" \
+  -DKokkos_ROOT="$PWD/kinstall" -DPOPS_INCLUDE="$PWD/include" \
   -DCMAKE_BUILD_TYPE=Release > harness_cfg.log 2>&1 || { echo HARNESS_CFG_FAIL; tail -30 harness_cfg.log; exit 1; }
 cmake --build hbuild -j 8 > harness_build.log 2>&1 || { echo HARNESS_BUILD_FAIL; tail -30 harness_build.log; exit 1; }
 echo HARNESS_OK

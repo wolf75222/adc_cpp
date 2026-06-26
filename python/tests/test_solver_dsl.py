@@ -1,6 +1,6 @@
 """Spec 3 section 20 / criterion 23: a custom solver DSL that BUILDS IR.
 
-``@adc.lib.solver`` registers a GENERATED-brick solver whose body is a Python
+``@pops.lib.solver`` registers a GENERATED-brick solver whose body is a Python
 builder. Running the builder authors a SOLVER IR (matrix-free Krylov primitives:
 norm2 / dot / apply / linear_combine / while) and computes NOTHING in Python --
 no float arithmetic on real data, no numpy callback is captured. The generated
@@ -13,7 +13,7 @@ honest deferral. They never run a custom solver numerically.
 """
 import pytest
 
-lib = pytest.importorskip("adc.lib")
+lib = pytest.importorskip("pops.lib")
 
 
 def _richardson(ctx, A, b, *, omega=0.5, tol=1e-8, max_iter=100):
@@ -206,7 +206,7 @@ def test_cpp_generation_lowers_to_a_real_cpp_loop_over_shared_primitives():
 
     The kernel must drive the solve entirely in C++ -- a REAL ``for (;;)`` whose convergence
     predicate re-evaluates each pass, calling the SHARED matrix-free HPC primitives
-    (``adc::dot`` / ``adc::saxpy``). It must NOT contain a Python callback, a ``std::function``,
+    (``pops::dot`` / ``pops::saxpy``). It must NOT contain a Python callback, a ``std::function``,
     a heap ``new`` in the loop, or a per-cell string lookup (criterion 24.9).
     """
     @lib.solver(name="richardson_codegen", signature="(A, b)")
@@ -222,8 +222,8 @@ def test_cpp_generation_lowers_to_a_real_cpp_loop_over_shared_primitives():
     assert "for (;;" in src
     assert "break;" in src
     # The shared HPC primitives are the backend (the residual norm / the affine update).
-    assert "adc::dot(" in src
-    assert "adc::saxpy(" in src
+    assert "pops::dot(" in src
+    assert "pops::saxpy(" in src
     assert "A(" in src  # the matrix-free matvec A(out, x)
 
     # The no-Python-callback / no-std::function / no-heap proof (criterion 24.9): the kernel is pure
@@ -238,7 +238,7 @@ def test_cpp_generation_binds_the_iteration_cap_to_the_real_loop_counter():
     """The authored ``it < max_iter`` cap must bound the GENERATED loop for real.
 
     An SSA scalar literal cannot mutate, so the cap is lowered against the live C++ loop counter
-    (``adc_iters``), not frozen on the initial ``it = 0``. The compare against the max literal must
+    (``pops_iters``), not frozen on the initial ``it = 0``. The compare against the max literal must
     reference that counter.
     """
     @lib.solver(name="capped", signature="(A, b)")
@@ -246,10 +246,10 @@ def test_cpp_generation_binds_the_iteration_cap_to_the_real_loop_counter():
         return _richardson(ctx, A, b, max_iter=37)
 
     src = lib.generate_solver_cpp(s)
-    assert "adc_iters" in src
+    assert "pops_iters" in src
     # The authored cap (37) appears as a literal compared against the loop counter.
     assert "37" in src
-    assert "adc_iters) < static_cast<adc::Real>(37" in src
+    assert "pops_iters) < static_cast<pops::Real>(37" in src
 
 
 def test_cpp_generation_allocates_scratch_once_before_the_loop():
@@ -264,7 +264,7 @@ def test_cpp_generation_allocates_scratch_once_before_the_loop():
     # The only MultiFab constructed after the loop is the post-loop residual diagnostic; no scratch
     # is constructed INSIDE the loop body (between the for and its matching closing brace region).
     body = src[loop_at:src.index("// Final relative residual")]
-    assert "adc::MultiFab " not in body, "no MultiFab may be constructed inside the convergence loop"
+    assert "pops::MultiFab " not in body, "no MultiFab may be constructed inside the convergence loop"
 
 
 def test_builder_signature_and_name_are_validated():

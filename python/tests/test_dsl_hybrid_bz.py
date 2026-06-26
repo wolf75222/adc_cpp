@@ -15,8 +15,8 @@ import tempfile
 
 import numpy as np
 
-import adc
-from adc import dsl
+import pops
+from pops import dsl
 
 INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "include"))
 
@@ -33,13 +33,13 @@ def build_bz_source():
 def main():
     cxx = shutil.which("c++") or shutil.which("g++") or shutil.which("clang++")
     if not cxx or not os.path.isdir(INCLUDE):
-        print("skip  compilateur ou en-tetes adc absents -> hybride B_z saute")
+        print("skip  compilateur ou en-tetes pops absents -> hybride B_z saute")
         print("test_dsl_hybrid_bz : OK (rien a compiler)")
         return
 
-    m = adc.CompositeModel(transport=adc.ExB(B0=1.0),
+    m = pops.CompositeModel(transport=pops.ExB(B0=1.0),
                            source=build_bz_source().compile(),
-                           elliptic=adc.ChargeDensity(charge=1.0))
+                           elliptic=pops.ChargeDensity(charge=1.0))
     assert m.n_vars == 1, "transport scalaire ExB attendu (1 variable)"
     assert m.n_aux == 4, "largeur aux B_z non propagee dans le composite (n_aux=%d)" % m.n_aux
 
@@ -53,8 +53,8 @@ def main():
         X, Y = np.meshgrid(xs, xs)
         dens = 1.0 + 0.2 * np.exp(-((X - 0.5) ** 2 + (Y - 0.5) ** 2) / 0.03)  # non uniforme -> derive
 
-        sim = adc.System(n=n, L=L, periodic=True)
-        sim.add_equation("bz", co, spatial=adc.FiniteVolume(limiter="none", riemann="rusanov"),
+        sim = pops.System(n=n, L=L, periodic=True)
+        sim.add_equation("bz", co, spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
                          names=["n"])
         sim.set_poisson(rhs="charge_density", solver="geometric_mg")
         sim.set_density("bz", dens)
@@ -79,8 +79,8 @@ def main():
         s_te = dsl.SourceBrick("te")
         (nn_te,) = s_te.conservative_vars("n")
         s_te.source([s_te.aux("T_e") * nn_te])
-        m_te = adc.CompositeModel(transport=adc.ExB(B0=1.0), source=s_te.compile(),
-                                  elliptic=adc.ChargeDensity(charge=1.0))
+        m_te = pops.CompositeModel(transport=pops.ExB(B0=1.0), source=s_te.compile(),
+                                  elliptic=pops.ChargeDensity(charge=1.0))
         assert m_te.n_aux == 5, "largeur aux T_e non propagee dans le composite (n_aux=%d)" % m_te.n_aux
         print("OK  T_e (aux index 4) propage aussi : composite n_aux=5 (meme marshaling que B_z)")
         print("test_dsl_hybrid_bz : tout est vert")

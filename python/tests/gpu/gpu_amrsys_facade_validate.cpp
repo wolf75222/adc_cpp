@@ -12,25 +12,25 @@
 // Imprime exec=, masses par bloc, checksums grossier+fin par bloc (%.17g) ; --dump=<prefixe> ecrit
 // U(grossier+fin, par bloc) pour un diff binaire Cuda vs Serial (dmax par cellule).
 
-#include <adc/core/model/coupled_system.hpp>
-#include <adc/core/model/equation_block.hpp>
-#include <adc/core/state/state.hpp>
-#include <adc/core/foundation/types.hpp>  // ADC_HD
-#include <adc/coupling/system/amr_system_coupler.hpp>
-#include <adc/coupling/base/elliptic_rhs.hpp>  // ChargeDensityRhs
-#include <adc/mesh/index/box2d.hpp>
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/layout/distribution_mapping.hpp>
-#include <adc/mesh/execution/for_each.hpp>  // device_fence
-#include <adc/mesh/geometry/geometry.hpp>
-#include <adc/mesh/storage/mf_arith.hpp>  // sum, norm_inf
-#include <adc/mesh/storage/multifab.hpp>
-#include <adc/mesh/layout/refinement.hpp>                  // coarsen_index
-#include <adc/numerics/fv/spatial_discretisation.hpp>  // FirstOrder, MusclMinmod
-#include <adc/numerics/time/amr/reflux/amr_reflux_mf.hpp>      // AmrLevelMP
-#include <adc/numerics/time/integrators/time_integrator.hpp>    // ExplicitTime
-#include <adc/numerics/time/integrators/time_steppers.hpp>      // SSPRK2
-#include <adc/parallel/comm.hpp>                    // n_ranks
+#include <pops/core/model/coupled_system.hpp>
+#include <pops/core/model/equation_block.hpp>
+#include <pops/core/state/state.hpp>
+#include <pops/core/foundation/types.hpp>  // POPS_HD
+#include <pops/coupling/system/amr_system_coupler.hpp>
+#include <pops/coupling/base/elliptic_rhs.hpp>  // ChargeDensityRhs
+#include <pops/mesh/index/box2d.hpp>
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/layout/distribution_mapping.hpp>
+#include <pops/mesh/execution/for_each.hpp>  // device_fence
+#include <pops/mesh/geometry/geometry.hpp>
+#include <pops/mesh/storage/mf_arith.hpp>  // sum, norm_inf
+#include <pops/mesh/storage/multifab.hpp>
+#include <pops/mesh/layout/refinement.hpp>                  // coarsen_index
+#include <pops/numerics/fv/spatial_discretisation.hpp>  // FirstOrder, MusclMinmod
+#include <pops/numerics/time/amr/reflux/amr_reflux_mf.hpp>      // AmrLevelMP
+#include <pops/numerics/time/integrators/time_integrator.hpp>    // ExplicitTime
+#include <pops/numerics/time/integrators/time_steppers.hpp>      // SSPRK2
+#include <pops/parallel/comm.hpp>                    // n_ranks
 
 #include <cmath>
 #include <cstdio>
@@ -38,25 +38,25 @@
 #include <string>
 #include <vector>
 
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
 #include <Kokkos_Core.hpp>
 #endif
 
-using namespace adc;
+using namespace pops;
 
 // Advection lineaire 1 variable, couplee a Poisson par elliptic_rhs = u (densite de charge ponderee
-// par le poids du bloc dans ChargeDensityRhs). ADC_HD : memes fermetures hote/device.
+// par le poids du bloc dans ChargeDensityRhs). POPS_HD : memes fermetures hote/device.
 struct AdvectX {
   using State = StateVec<1>;
-  using Aux = adc::Aux;
+  using Aux = pops::Aux;
   static constexpr int n_vars = 1;
   Real a = Real(1);
-  ADC_HD State flux(const State& u, const Aux&, int dir) const {
+  POPS_HD State flux(const State& u, const Aux&, int dir) const {
     return State{dir == 0 ? a * u[0] : Real(0)};
   }
-  ADC_HD Real max_wave_speed(const State&, const Aux&, int) const { return a < 0 ? -a : a; }
-  ADC_HD State source(const State&, const Aux&) const { return State{Real(0)}; }
-  ADC_HD Real elliptic_rhs(const State& u) const { return u[0]; }
+  POPS_HD Real max_wave_speed(const State&, const Aux&, int) const { return a < 0 ? -a : a; }
+  POPS_HD State source(const State&, const Aux&) const { return State{Real(0)}; }
+  POPS_HD Real elliptic_rhs(const State& u) const { return u[0]; }
 };
 
 // Remplit U(comp 0) par une fonction de l'indice GROSSIER (le fin echantillonne la meme fonction via
@@ -85,7 +85,7 @@ static void collect(const MultiFab& U, std::vector<double>& out) {
 }
 
 int main(int argc, char** argv) {
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   Kokkos::initialize(argc, argv);
 #else
   (void)argc;
@@ -103,7 +103,7 @@ int main(int argc, char** argv) {
       ++fails;
     }
   };
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   const char* space = Kokkos::DefaultExecutionSpace::name();
 #else
   const char* space = "Serial(host)";
@@ -189,7 +189,7 @@ int main(int argc, char** argv) {
     }
   }
 
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   Kokkos::finalize();
 #endif
   if (fails == 0)

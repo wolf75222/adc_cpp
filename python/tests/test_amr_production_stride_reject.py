@@ -3,14 +3,14 @@
 masque IMEX partiel (implicit_vars / implicit_roles) sur le CHEMIN PRODUCTION AMR (CompiledModel
 backend='production', target='amr_system' -> AmrSystem.add_native_block).
 
-POURQUOI un rejet et pas un fix : l'ABI PLATE du loader .so (symbole adc_install_native_amr,
+POURQUOI un rejet et pas un fix : l'ABI PLATE du loader .so (symbole pops_install_native_amr,
 add_native_block) ne transporte NI stride NI le masque IMEX. Passes par ce chemin, ils prendraient
 leurs defauts EN SILENCE (stride=1, masque vide = backward-Euler plein) -> demi-fix silencieux interdit.
 La facade les rejette donc clairement (meme esprit que System.add_equation, qui rejette stride>1 et le
 masque sur les backends compiles .so : cf. python/tests/test_stride.py section 8).
 
 Route explicite vers les chemins qui SUPPORTENT ces parametres :
-  - AmrSystem.add_block (modele natif adc.Model(...)) : stride + masque cables (et FORWARDES par
+  - AmrSystem.add_block (modele natif pops.Model(...)) : stride + masque cables (et FORWARDES par
     add_equation sur la branche ModelSpec) ;
   - add_compiled_model(AmrSystem&) en DIRECT (C++) : stride + masque exposes (exerce par le test C++
     tests/test_amr_multiblock_compiled.cpp, cas (F)).
@@ -22,8 +22,8 @@ inexistant) suffit (deterministe en CI minimale ; meme recette que test_stride.p
 
 import sys
 
-import adc
-from adc import dsl
+import pops
+from pops import dsl
 
 fails = 0
 
@@ -48,23 +48,23 @@ def fake_production_amr():
         abi_key="k", model_hash="h", cxx="c++", std="c++20", target="amr_system")
 
 
-# ---- 1. stride > 1 via adc.IMEX(stride=...) -> ValueError claire -------------------------------
+# ---- 1. stride > 1 via pops.IMEX(stride=...) -> ValueError claire -------------------------------
 print("== production AMR : stride>1 (IMEX) rejete explicitement ==")
-sim = adc.AmrSystem(n=16, periodic=True)
+sim = pops.AmrSystem(n=16, periodic=True)
 try:
-    sim.add_equation("gas", fake_production_amr(), spatial=adc.FiniteVolume(),
-                     time=adc.IMEX(stride=5))
+    sim.add_equation("gas", fake_production_amr(), spatial=pops.FiniteVolume(),
+                     time=pops.IMEX(stride=5))
     chk(False, "add_equation(time=IMEX(stride=5), production AMR) doit lever ValueError")
 except ValueError as ex:
     chk("stride" in str(ex) and "production" in str(ex),
         "add_equation(stride=5, production AMR) leve une ValueError claire (stride/production)")
 
-# stride > 1 aussi via adc.Explicit(stride=...) (la cadence n'est pas specifique a l'IMEX).
+# stride > 1 aussi via pops.Explicit(stride=...) (la cadence n'est pas specifique a l'IMEX).
 print("== production AMR : stride>1 (Explicit) rejete explicitement ==")
-sim_e = adc.AmrSystem(n=16, periodic=True)
+sim_e = pops.AmrSystem(n=16, periodic=True)
 try:
-    sim_e.add_equation("gas", fake_production_amr(), spatial=adc.FiniteVolume(),
-                       time=adc.Explicit(stride=5))
+    sim_e.add_equation("gas", fake_production_amr(), spatial=pops.FiniteVolume(),
+                       time=pops.Explicit(stride=5))
     chk(False, "add_equation(time=Explicit(stride=5), production AMR) doit lever ValueError")
 except ValueError as ex:
     chk("stride" in str(ex) and "production" in str(ex),
@@ -72,20 +72,20 @@ except ValueError as ex:
 
 # ---- 2. masque IMEX partiel (implicit_vars / implicit_roles) -> ValueError claire --------------
 print("== production AMR : implicit_vars (masque IMEX partiel) rejete explicitement ==")
-sim2 = adc.AmrSystem(n=16, periodic=True)
+sim2 = pops.AmrSystem(n=16, periodic=True)
 try:
-    sim2.add_equation("gas", fake_production_amr(), spatial=adc.FiniteVolume(),
-                      time=adc.IMEX(implicit_vars=["rho_u"]))
+    sim2.add_equation("gas", fake_production_amr(), spatial=pops.FiniteVolume(),
+                      time=pops.IMEX(implicit_vars=["rho_u"]))
     chk(False, "add_equation(IMEX(implicit_vars=['rho_u']), production AMR) doit lever ValueError")
 except ValueError as ex:
     chk("implicit" in str(ex) and "production" in str(ex),
         "add_equation(implicit_vars, production AMR) leve une ValueError claire (implicit/production)")
 
 print("== production AMR : implicit_roles (masque IMEX partiel) rejete explicitement ==")
-sim3 = adc.AmrSystem(n=16, periodic=True)
+sim3 = pops.AmrSystem(n=16, periodic=True)
 try:
-    sim3.add_equation("gas", fake_production_amr(), spatial=adc.FiniteVolume(),
-                      time=adc.IMEX(implicit_roles=["momentum_x"]))
+    sim3.add_equation("gas", fake_production_amr(), spatial=pops.FiniteVolume(),
+                      time=pops.IMEX(implicit_roles=["momentum_x"]))
     chk(False, "add_equation(IMEX(implicit_roles=['momentum_x']), production AMR) doit lever ValueError")
 except ValueError as ex:
     chk("implicit" in str(ex) and "production" in str(ex),
@@ -95,20 +95,20 @@ except ValueError as ex:
 # Le defaut (Explicit, stride=1, masque vide) doit traverser la garde et echouer PLUS LOIN au dlopen
 # du .so inexistant (RuntimeError) -- jamais une ValueError stride/masque. Idem IMEX sans masque.
 print("== production AMR : stride=1 / masque vide NE levent PAS (pas de faux positif) ==")
-sim_ok = adc.AmrSystem(n=16, periodic=True)
+sim_ok = pops.AmrSystem(n=16, periodic=True)
 try:
-    sim_ok.add_equation("gas", fake_production_amr(), spatial=adc.FiniteVolume(),
-                        time=adc.Explicit())  # stride=1, masque vide : DEFAUT
+    sim_ok.add_equation("gas", fake_production_amr(), spatial=pops.FiniteVolume(),
+                        time=pops.Explicit())  # stride=1, masque vide : DEFAUT
     chk(False, "add_equation(Explicit(), production AMR) : attendu un echec au dlopen (.so inexistant)")
 except ValueError as ex:
     chk(False, "add_equation(Explicit(), production AMR) ne doit PAS lever de ValueError (%s)" % ex)
 except Exception:  # noqa: BLE001  RuntimeError du dlopen attendu : la garde a laisse passer
     chk(True, "add_equation(Explicit(), production AMR) : pas de rejet (echec au dlopen attendu)")
 
-sim_ok_imex = adc.AmrSystem(n=16, periodic=True)
+sim_ok_imex = pops.AmrSystem(n=16, periodic=True)
 try:
-    sim_ok_imex.add_equation("gas", fake_production_amr(), spatial=adc.FiniteVolume(),
-                             time=adc.IMEX())  # stride=1, masque vide : IMEX plein backward-Euler
+    sim_ok_imex.add_equation("gas", fake_production_amr(), spatial=pops.FiniteVolume(),
+                             time=pops.IMEX())  # stride=1, masque vide : IMEX plein backward-Euler
     chk(False, "add_equation(IMEX(), production AMR) : attendu un echec au dlopen (.so inexistant)")
 except ValueError as ex:
     chk(False, "add_equation(IMEX(), production AMR) ne doit PAS lever de ValueError (%s)" % ex)

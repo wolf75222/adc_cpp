@@ -17,14 +17,14 @@ set -u
 module load cuda/12.6
 romeo_load_armgpu_env
 spack load openmpi +cuda
-cd "$HOME/adc_gpu_p1" || exit 3
+cd "$HOME/pops_gpu_p1" || exit 3
 echo "noeud=$(hostname) arch=$(uname -m)"
 NW="$PWD/kinstall/bin/nvcc_wrapper"
 INC="$PWD/gpuval2_include"
 SRC="$PWD/gpuval2_mpi_src"
 rm -rf gpuval2_mpi_build
 cmake -S "$SRC" -B gpuval2_mpi_build -DCMAKE_CXX_COMPILER="$NW" -DKokkos_ROOT="$PWD/kinstall" \
-  -DADC_INCLUDE="$INC" -DCMAKE_BUILD_TYPE=Release > gpuval2_mpi_cfg.log 2>&1 \
+  -DPOPS_INCLUDE="$INC" -DCMAKE_BUILD_TYPE=Release > gpuval2_mpi_cfg.log 2>&1 \
   || { echo CFG_FAIL; tail -50 gpuval2_mpi_cfg.log; exit 1; }
 cmake --build gpuval2_mpi_build -j 8 > gpuval2_mpi_build.log 2>&1 \
   || { echo BUILD_FAIL; grep -iE "error" gpuval2_mpi_build.log | head -40; exit 1; }

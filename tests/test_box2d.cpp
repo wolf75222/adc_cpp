@@ -2,16 +2,16 @@
 // intersect, contains), y compris la division plancher du coarsen sur les
 // indices negatifs des ghosts.
 
-#include <adc/mesh/index/box2d.hpp>
+#include <pops/mesh/index/box2d.hpp>
 
-#include "test_harness.hpp"  // adc::test::Checker (compteur + assertion partages)
+#include "test_harness.hpp"  // pops::test::Checker (compteur + assertion partages)
 
 #include <cstdio>
 
-using namespace adc;
+using namespace pops;
 
 int main() {
-  adc::test::Checker chk;  // style terse : n'imprime que les echecs (FAIL <libelle>)
+  pops::test::Checker chk;  // style terse : n'imprime que les echecs (FAIL <libelle>)
 
   Box2D b = Box2D::from_extents(4, 3);  // [0..3] x [0..2]
   chk(b.nx() == 4 && b.ny() == 3, "extents");

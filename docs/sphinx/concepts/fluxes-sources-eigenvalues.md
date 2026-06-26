@@ -1,6 +1,6 @@
 # Fluxes, sources and eigenvalues
 
-A model in `adc` is, at its core, three pointwise functions: a flux that transports
+A model in `pops` is, at its core, three pointwise functions: a flux that transports
 matter across cell faces, a source that adds or removes it in place, and a set of
 eigenvalues that tells the time stepper how fast information travels. This page explains
 what each piece means, why they are kept separate, and how the numerical flux turns the

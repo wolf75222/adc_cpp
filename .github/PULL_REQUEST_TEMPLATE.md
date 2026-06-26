@@ -1,6 +1,6 @@
-<!-- Title: ADC-NN short imperative description. One Linear issue = one PR. -->
+<!-- Title: PoPS-NN short imperative description. One Linear issue = one PR. -->
 
-Fixes ADC-NN
+Fixes PoPS-NN
 
 ## What / why
 
@@ -43,8 +43,8 @@ Fixes ADC-NN
 ## Suggested review order (multi-file PRs)
 
 <!-- Guide the reviewer instead of leaving them to wander, e.g.:
-     1. include/adc/numerics/flux.hpp   (the new flux)
-     2. include/adc/runtime/system.cpp  (dispatch wiring)
+     1. include/pops/numerics/flux.hpp   (the new flux)
+     2. include/pops/runtime/system.cpp  (dispatch wiring)
      3. python/bindings.cpp             (Python surface)
      4. tests/test_flux.cpp             (regression)
      5. docs/sphinx/reference/bricks_reference.md -->

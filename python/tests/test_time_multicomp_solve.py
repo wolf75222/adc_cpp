@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""adc.time MULTI-COMPONENT matrix-free linear solve (epic ADC-399 / ADC-416).
+"""pops.time MULTI-COMPONENT matrix-free linear solve (epic ADC-399 / ADC-416).
 
 ADC-416 extends ``P.matrix_free_operator`` + ``P.solve_linear`` from scalar-only to vector /
 state-valued (multi-component) fields -- the foundation the full condensed_schur macro builds on. The
 operator declares ``domain="state"`` (or ``"vector"``) with an ``ncomp``; its apply runs on an ncomp
-buffer and the runtime Krylov loop (``adc::cg_solve`` etc.) reduces its inner products over ALL
-components (adc::dot_all), so EVERY component is solved -- a component-0-only norm would converge on
+buffer and the runtime Krylov loop (``pops::cg_solve`` etc.) reduces its inner products over ALL
+components (pops::dot_all), so EVERY component is solved -- a component-0-only norm would converge on
 component 0 alone and leave the rest unsolved.
 
 (A) Pure Python, always runs: a state-valued operator (ncomp=2) builds, its apply in / out buffers and
@@ -21,17 +21,17 @@ component 0 alone and leave the rest unsolved.
     numpy CG on the SAME 2-component discrete operator. Asserts BOTH components match ~1e-10 (the comp-1
     match is the regression guard for the full-component norm: with a comp-0-only dot the loop would stop
     on component 0's residual and leave component 1 unsolved). A scalar (ncomp=1) solve still matches the
-    same offline CG bit-for-bit. Self-skips (exit 0) without numpy / _adc / install_program / a compiler
+    same offline CG bit-for-bit. Self-skips (exit 0) without numpy / _pops / install_program / a compiler
     / a visible Kokkos -- never fakes the engine.
 """
 import sys
 
 
-def _adc_time():
+def _pops_time():
     try:
-        import adc.time as t
-    except Exception as exc:  # adc not importable here -> skip, never fake
-        print("skip test_time_multicomp_solve (adc.time unavailable: %s)" % exc)
+        import pops.time as t
+    except Exception as exc:  # pops not importable here -> skip, never fake
+        print("skip test_time_multicomp_solve (pops.time unavailable: %s)" % exc)
         sys.exit(0)
     return t
 
@@ -144,7 +144,7 @@ def test_multicomp_codegen(t):
     src = _mc_program(t, 2).emit_cpp_program()
     n = src.count("ctx.alloc_scalar_field(2, 1)")  # lap scratch + accumulator + solution
     assert n >= 3, "the 2-component solve allocates 2-component scratch/acc/solution\n%s" % src
-    assert "adc::cg_solve" in src and "ctx.laplacian" in src, src
+    assert "pops::cg_solve" in src and "ctx.laplacian" in src, src
     # the scalar path still allocates 1-component fields only
     src1 = _mc_program(t, 1).emit_cpp_program()
     assert "ctx.alloc_scalar_field(1, 1)" in src1 and "alloc_scalar_field(2, 1)" not in src1, src1
@@ -154,7 +154,7 @@ def test_multicomp_codegen(t):
 def _np_cg_mc(apply, b, *, tol=1e-10, max_iter=2000):
     """Plain numpy CG solving A x = b from x = 0 with a FULL-component L2 norm (b shaped (ncomp, n, n));
     A is the per-component discrete periodic Helmholtz matvec. The reference for the compiled
-    multi-component matrix-free CG -- the inner products sum over every component (matching adc::dot_all),
+    multi-component matrix-free CG -- the inner products sum over every component (matching pops::dot_all),
     so the loop converges all components together. Returns (x, iters)."""
     import numpy as np
 
@@ -183,7 +183,7 @@ def _np_cg_mc(apply, b, *, tol=1e-10, max_iter=2000):
 
 def _discrete_helmholtz_mc(n, alpha):
     """The discrete periodic 5-point Helmholtz matvec A x = x - alpha*Lap(x) applied PER COMPONENT on an
-    (ncomp, n, n) array (dx = dy = 1/n), matching adc::apply_laplacian's bare path (now per component)
+    (ncomp, n, n) array (dx = dy = 1/n), matching pops::apply_laplacian's bare path (now per component)
     with periodic ghosts."""
     import numpy as np
 
@@ -213,22 +213,22 @@ def _passive_model(dsl, name, cons):
     return m
 
 
-def _run_one(t, adc, np, ncomp, init):
+def _run_one(t, pops, np, ncomp, init):
     """Compile + install + step the (I - alpha*Lap) solve on an ncomp-component block, compare to the
     offline numpy CG on the SAME discrete operator. @p init is (ncomp, n, n) the initial state. Returns
     (out, phi_ref, iters) or None if the toolchain is unavailable."""
     n = init.shape[1]
-    sim = adc.System(n=n, L=1.0, periodic=True)
+    sim = pops.System(n=n, L=1.0, periodic=True)
     if not hasattr(sim, "install_program"):
-        print("-- (B) skipped: _adc lacks the install_program binding (rebuild _adc) --")
+        print("-- (B) skipped: _pops lacks the install_program binding (rebuild _pops) --")
         return None
 
-    from adc import dsl
+    from pops import dsl
 
     cons = tuple("c%d" % i for i in range(ncomp))
     tol = 1e-10
     try:
-        compiled = adc.compile_problem(
+        compiled = pops.compile_problem(
             model=_passive_model(dsl, "mc_prog%d" % ncomp, cons),
             time=_mc_program(t, ncomp, name="mc_step%d" % ncomp, method="cg", tol=tol, max_iter=200))
         compiled_model = _passive_model(dsl, "mc_block%d" % ncomp, cons).compile(backend="production")
@@ -237,8 +237,8 @@ def _run_one(t, adc, np, ncomp, init):
         return None
 
     sim.add_equation("blk", compiled_model,
-                     spatial=adc.FiniteVolume(limiter="none", riemann="rusanov"),
-                     time=adc.Explicit(method="euler"))
+                     spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                     time=pops.Explicit(method="euler"))
     sim.set_state("blk", init)
     sim.install_program(compiled.so_path)
     sim.step(0.05)  # dt is irrelevant: the solve is dt-free
@@ -253,9 +253,9 @@ def _run_section_b(t):
     try:
         import numpy as np
 
-        import adc
-    except Exception as exc:  # noqa: BLE001  -- numpy / _adc unavailable in this interpreter
-        print("-- (B) skipped: adc/numpy unavailable: %s --" % exc)
+        import pops
+    except Exception as exc:  # noqa: BLE001  -- numpy / _pops unavailable in this interpreter
+        print("-- (B) skipped: pops/numpy unavailable: %s --" % exc)
         return None
 
     n = 16
@@ -263,12 +263,12 @@ def _run_section_b(t):
     X, Y = np.meshgrid(x, x, indexing="ij")
     # Component 0 and component 1 get DIFFERENT right-hand sides: a comp-0-only convergence norm would
     # stop on component 0's residual and leave component 1 unsolved -- so the component-1 match below is
-    # the regression guard for the full-component (adc::dot_all) norm.
+    # the regression guard for the full-component (pops::dot_all) norm.
     c0 = 1.0 + 0.3 * np.sin(2 * np.pi * X) * np.cos(2 * np.pi * Y)
     c1 = 0.5 - 0.4 * np.cos(2 * np.pi * X) * np.sin(4 * np.pi * Y)
     init2 = np.stack([c0, c1])
 
-    res2 = _run_one(t, adc, np, 2, init2)
+    res2 = _run_one(t, pops, np, 2, init2)
     if res2 is None:
         return None
     out2, ref2, iters2 = res2
@@ -284,7 +284,7 @@ def _run_section_b(t):
     assert iters2 > 1, "the offline (and compiled) solve must take > 1 iteration, got %d" % iters2
 
     # A scalar (ncomp=1) solve still matches the offline CG bit-for-bit (the scalar path is unchanged).
-    res1 = _run_one(t, adc, np, 1, np.stack([c0]))
+    res1 = _run_one(t, pops, np, 1, np.stack([c0]))
     if res1 is None:
         return None
     out1, ref1, _ = res1
@@ -295,7 +295,7 @@ def _run_section_b(t):
 
 
 def _run():
-    t = _adc_time()
+    t = _pops_time()
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:
         fn(t)

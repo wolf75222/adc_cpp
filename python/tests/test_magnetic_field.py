@@ -12,21 +12,21 @@ import sys
 
 import numpy as np
 
-import adc
+import pops
 
 n = 32
 
 
 def diocotron():
     # modele de base : ExB lit grad phi, PAS B_z (n_aux = 3).
-    return adc.Model(state=adc.Scalar(), transport=adc.ExB(B0=1.0),
-                     source=adc.NoSource(),
-                     elliptic=adc.BackgroundDensity(alpha=1.0, n0=0.0))
+    return pops.Model(state=pops.Scalar(), transport=pops.ExB(B0=1.0),
+                     source=pops.NoSource(),
+                     elliptic=pops.BackgroundDensity(alpha=1.0, n0=0.0))
 
 
 def make():
-    s = adc.System(n=n, L=1.0, periodic=True)
-    s.add_block("ne", model=diocotron(), spatial=adc.Spatial(minmod=True))
+    s = pops.System(n=n, L=1.0, periodic=True)
+    s.add_block("ne", model=diocotron(), spatial=pops.Spatial(minmod=True))
     s.set_poisson()
     rho = 1.0 + 0.05 * np.cos(2 * np.pi * np.arange(n) / n)[None, :] * np.ones((n, 1))
     s.set_density("ne", rho)

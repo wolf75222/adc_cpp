@@ -2,7 +2,7 @@
 // sur le device. Le portage precedent n'avait valide que load_aux<4> (B_z, comp 3) ; on ajoute ici
 // la comp 4 (T_e). Un modele declarant n_aux=5 lit a.T_e dans sa source S = T_e * u ; le residu
 // passe par assemble_rhs -> load_aux<aux_comps<Model>()=5>(a,i,j) (a.T_e = a(i,j,4)) dans le
-// FONCTEUR NOMME AssembleRhsKernel (for_each_cell ADC_HD) -> chemin device sous Cuda.
+// FONCTEUR NOMME AssembleRhsKernel (for_each_cell POPS_HD) -> chemin device sous Cuda.
 //
 // On valide ce chemin par assemble_rhs HEADER-ONLY (et NON via System+add_compiled_model). Raison
 // d'honnetete : add_compiled_model instancie des lambdas etendues __host__ __device__ dans la TU
@@ -15,19 +15,19 @@
 // profil NON CONSTANT T_e(x,y) = 1 + x + 2 y pour que la source depende vraiment de la cellule.
 // Imprime exec=, max|R - T_e*u|, et dump binaire de R -> diff_bin Cuda vs Serial (dmax par cellule).
 
-#include <adc/core/model/physical_model.hpp>
-#include <adc/core/state/state.hpp>
-#include <adc/mesh/index/box2d.hpp>
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/layout/distribution_mapping.hpp>
-#include <adc/mesh/storage/fab2d.hpp>
-#include <adc/mesh/execution/for_each.hpp>  // device_fence
-#include <adc/mesh/geometry/geometry.hpp>
-#include <adc/mesh/storage/multifab.hpp>
-#include <adc/numerics/fv/numerical_flux.hpp>    // RusanovFlux
-#include <adc/numerics/fv/reconstruction.hpp>    // NoSlope
-#include <adc/numerics/spatial_operator.hpp>  // assemble_rhs, load_aux, aux_comps
-#include <adc/parallel/comm.hpp>
+#include <pops/core/model/physical_model.hpp>
+#include <pops/core/state/state.hpp>
+#include <pops/mesh/index/box2d.hpp>
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/layout/distribution_mapping.hpp>
+#include <pops/mesh/storage/fab2d.hpp>
+#include <pops/mesh/execution/for_each.hpp>  // device_fence
+#include <pops/mesh/geometry/geometry.hpp>
+#include <pops/mesh/storage/multifab.hpp>
+#include <pops/numerics/fv/numerical_flux.hpp>    // RusanovFlux
+#include <pops/numerics/fv/reconstruction.hpp>    // NoSlope
+#include <pops/numerics/spatial_operator.hpp>  // assemble_rhs, load_aux, aux_comps
+#include <pops/parallel/comm.hpp>
 
 #include <cmath>
 #include <cstdint>
@@ -36,33 +36,33 @@
 #include <string>
 #include <vector>
 
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
 #include <Kokkos_Core.hpp>
 #endif
 
-using namespace adc;
+using namespace pops;
 
 // Modele jouet qui LIT T_e (composante aux 4). flux nul, pas de couplage elliptique ; source
 // S = T_e * u. n_aux=5 -> assemble_rhs instancie load_aux<5> et remplit a.T_e = a(i,j,4).
 struct TeProbe {
   using State = StateVec<1>;
-  using Aux = adc::Aux;
+  using Aux = pops::Aux;
   static constexpr int n_vars = 1;
   static constexpr int n_aux = 5;  // phi, grad_x, grad_y, B_z, T_e
-  ADC_HD State flux(const State&, const Aux&, int) const { return State{Real(0)}; }
-  ADC_HD Real max_wave_speed(const State&, const Aux&, int) const { return Real(0); }
-  ADC_HD State source(const State& u, const Aux& a) const {
+  POPS_HD State flux(const State&, const Aux&, int) const { return State{Real(0)}; }
+  POPS_HD Real max_wave_speed(const State&, const Aux&, int) const { return Real(0); }
+  POPS_HD State source(const State& u, const Aux& a) const {
     State s{};
     s[0] = a.T_e * u[0];  // lit la composante aux 4 (T_e)
     return s;
   }
-  ADC_HD Real elliptic_rhs(const State&) const { return Real(0); }
+  POPS_HD Real elliptic_rhs(const State&) const { return Real(0); }
 };
 static_assert(PhysicalModel<TeProbe>);
 static_assert(aux_comps<TeProbe>() == 5, "TeProbe lit T_e (composante aux 4)");
 
 int main(int argc, char** argv) {
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   Kokkos::initialize(argc, argv);
 #else
   (void)argc;
@@ -80,7 +80,7 @@ int main(int argc, char** argv) {
       ++fails;
     }
   };
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   const char* space = Kokkos::DefaultExecutionSpace::name();
 #else
   const char* space = "Serial(host)";
@@ -147,7 +147,7 @@ int main(int argc, char** argv) {
 
   if (fails == 0)
     std::printf("OK gpu_aux_validate (exec=%s)\n", space);
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   Kokkos::finalize();
 #endif
   return fails == 0 ? 0 : 1;

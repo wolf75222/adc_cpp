@@ -8,7 +8,7 @@ void init_amr(py::module_& m) {
   // NB: the two-fluid AP integrator (BESPOKE asymptotic-preserving scheme, not composable
   // block by block) has left the core: it is not a generic brick but a SCENARIO. It now lives
   // in adc_cases (cf. adc_cases/two_fluid_ap/), compiled on the fly against the generic
-  // headers of adc_cpp; it is no longer exposed by the _adc module.
+  // headers of adc_cpp; it is no longer exposed by the _pops module.
 
   // AmrSystem: generic single-species composition on AMR.
   py::class_<AmrSystemConfig>(m, "AmrSystemConfig")
@@ -97,7 +97,7 @@ void init_amr(py::module_& m) {
            py::arg("recon") = "conservative", py::arg("time") = "explicit", py::arg("gamma") = 1.4,
            py::arg("substeps") = 1,
            // Zhang-Shu positivity floor (ADC-322): marshaled down the regenerated .so loader
-           // (adc_install_native_amr). 0 (default) = inactive, bit-identical.
+           // (pops_install_native_amr). 0 (default) = inactive, bit-identical.
            py::arg("positivity_floor") = 0.0)
       // Regrid criterion: refine where the SELECTED variable exceeds threshold. Default = component 0
       // (historical density), bit-identical 1e30 no-op. ADC-296: select it PER BLOCK by NAME (variable=)
@@ -146,7 +146,7 @@ void init_amr(py::module_& m) {
             s.set_aux_field_component(comp, flat(arr));
           },
           py::arg("comp"), py::arg("field"))
-      // ADC-369: per-field aux halo policy (bc_type = adc::BCType Foextrap=1 / Dirichlet=2).
+      // ADC-369: per-field aux halo policy (bc_type = pops::BCType Foextrap=1 / Dirichlet=2).
       .def(
           "set_aux_field_halo_component",
           [](AmrSystem& s, int comp, int bc_type, double value) {
@@ -203,7 +203,7 @@ void init_amr(py::module_& m) {
             s.set_conservative_state(name, flat(arr));
           },
           py::arg("name"), py::arg("U"))
-      // Inter-species COUPLED source (compiled adc.dsl.CoupledSource, P5 bytecode), MULTI-BLOCK on the
+      // Inter-species COUPLED source (compiled pops.dsl.CoupledSource, P5 bytecode), MULTI-BLOCK on the
       // SHARED AMR hierarchy: applied after the transport at each macro-step, by explicit
       // splitting, level by level + fine -> coarse cascade (consistent covered cells). SAME
       // flat ABI as System.add_coupled_source. Without the call, unchanged. cf. AmrSystem::add_coupled_source.
@@ -252,7 +252,7 @@ void init_amr(py::module_& m) {
       .def("patch_boxes",
            [](AmrSystem& s) {
              py::list out;
-             for (const adc::PatchBox& b : s.patch_boxes())
+             for (const pops::PatchBox& b : s.patch_boxes())
                out.append(py::make_tuple(b.level, b.ilo, b.jlo, b.ihi, b.jhi));
              return out;
            })
@@ -310,10 +310,10 @@ void init_amr(py::module_& m) {
       .def(
           "set_hierarchy",
           [](AmrSystem& s, const std::vector<std::tuple<int, int, int, int, int>>& boxes) {
-            std::vector<adc::PatchBox> bx;
+            std::vector<pops::PatchBox> bx;
             bx.reserve(boxes.size());
             for (const auto& b : boxes)
-              bx.push_back(adc::PatchBox{std::get<0>(b), std::get<1>(b), std::get<2>(b),
+              bx.push_back(pops::PatchBox{std::get<0>(b), std::get<1>(b), std::get<2>(b),
                                          std::get<3>(b), std::get<4>(b)});
             s.set_hierarchy(bx);
           },

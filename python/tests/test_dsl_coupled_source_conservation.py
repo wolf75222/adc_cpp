@@ -1,4 +1,4 @@
-"""Echange CONSERVATIF par paire (adc.dsl.CoupledSource.add_pair) -- finding A2.
+"""Echange CONSERVATIF par paire (pops.dsl.CoupledSource.add_pair) -- finding A2.
 
 L'API manuelle .add(+expr) / .add(-expr) sur deux blocs NE GARANTIT PAS la conservation : rien
 n'empeche d'ecrire par megarde deux formules legerement differentes -> la quantite totale derive
@@ -19,8 +19,8 @@ Invariants verifies :
 """
 import numpy as np
 
-import adc
-from adc import dsl
+import pops
+from pops import dsl
 
 
 def chk(cond, msg, fails):
@@ -44,14 +44,14 @@ def build_exchange(k):
 def density_block(n0=1.0):
     """Bloc scalaire (densite) transporte par la derive E x B ; densite uniforme + fond cale dessus
     -> transport exactement nul, seules les sources couplees agissent (meme montage que coupled_source)."""
-    return adc.Model(state=adc.Scalar(), transport=adc.ExB(B0=1.0),
-                     source=adc.NoSource(), elliptic=adc.BackgroundDensity(alpha=1.0, n0=n0))
+    return pops.Model(state=pops.Scalar(), transport=pops.ExB(B0=1.0),
+                     source=pops.NoSource(), elliptic=pops.BackgroundDensity(alpha=1.0, n0=n0))
 
 
 def make_system(n, na0, nb0):
-    sim = adc.System(n=n, L=1.0, periodic=True)
-    sim.add_block("alpha", model=density_block(n0=na0), spatial=adc.Spatial(none=True))
-    sim.add_block("beta", model=density_block(n0=nb0), spatial=adc.Spatial(none=True))
+    sim = pops.System(n=n, L=1.0, periodic=True)
+    sim.add_block("alpha", model=density_block(n0=na0), spatial=pops.Spatial(none=True))
+    sim.add_block("beta", model=density_block(n0=nb0), spatial=pops.Spatial(none=True))
     sim.set_poisson(rhs="charge_density", solver="geometric_mg")
     sim.set_density("alpha", np.full((n, n), na0))
     sim.set_density("beta", np.full((n, n), nb0))

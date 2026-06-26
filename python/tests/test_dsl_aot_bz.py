@@ -3,7 +3,7 @@
 Pendant de test_dsl_jit_bz (chemin JIT add_dynamic_block) pour le chemin de PRODUCTION : un
 modele DSL qui lit B_z (aux('B_z')) -> brique GenSrc avec n_aux=4 -> CompositeModel::n_aux=4 ->
 .so AOT (compile_aot / compile_or_jit(mode='compile')) charge par add_compiled_block. Le .so
-expose adc_compiled_naux()=4 ; le System elargit le canal aux partage (ensure_aux_width) et
+expose pops_compiled_naux()=4 ; le System elargit le canal aux partage (ensure_aux_width) et
 marshale 4 composantes vers l'ABI extern "C", qui alloue son aux interne a 4 comp et la peuple
 (load_aux<4> lit a.B_z dans assemble_rhs). set_magnetic_field peuple B_z.
 On verifie de bout en bout cote Python : eval_rhs du bloc compile = source = B_z * n.
@@ -14,8 +14,8 @@ import tempfile
 
 import numpy as np
 
-import adc
-from adc import dsl
+import pops
+from pops import dsl
 
 INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "include"))
 
@@ -37,7 +37,7 @@ def build_bz_scalar():
 def main():
     cxx = shutil.which("c++") or shutil.which("g++") or shutil.which("clang++")
     if not cxx or not os.path.isdir(INCLUDE):
-        print("skip  compilateur ou en-tetes adc absents -> AOT B_z saute")
+        print("skip  compilateur ou en-tetes pops absents -> AOT B_z saute")
         print("test_dsl_aot_bz : OK (rien a compiler)")
         return
 
@@ -47,8 +47,8 @@ def main():
     try:
         so = m.compile_or_jit(os.path.join(tmp, "bzscalar_aot.so"), INCLUDE, mode="compile")
 
-        sim = adc.System(n=n, L=L, periodic=True)
-        # add_compiled_block : adc_compiled_naux()=4 -> ensure_aux_width(4)
+        sim = pops.System(n=n, L=L, periodic=True)
+        # add_compiled_block : pops_compiled_naux()=4 -> ensure_aux_width(4)
         sim.add_compiled_block("bz", so, limiter="none", riemann="rusanov",
                                recon="conservative", time="explicit", names=["n"])
         sim.set_poisson(rhs="charge_density", solver="geometric_mg")

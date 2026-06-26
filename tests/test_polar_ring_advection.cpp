@@ -38,25 +38,25 @@
 //   SUCCESS  si perte_polaire <= 2% ET rapport >= 5 (ordre de grandeur).
 //   ABORT    si rapport < 5.
 
-#include <adc/mesh/index/box2d.hpp>
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/layout/distribution_mapping.hpp>
-#include <adc/mesh/storage/fab2d.hpp>
-#include <adc/mesh/execution/for_each.hpp>
-#include <adc/mesh/geometry/geometry.hpp>
-#include <adc/mesh/storage/mf_arith.hpp>
-#include <adc/mesh/storage/multifab.hpp>
-#include <adc/mesh/boundary/physical_bc.hpp>
-#include <adc/numerics/fv/reconstruction.hpp>
-#include <adc/numerics/fv/numerical_flux.hpp>
-#include <adc/numerics/spatial_operator.hpp>
-#include <adc/numerics/time/integrators/time_steppers.hpp>
+#include <pops/mesh/index/box2d.hpp>
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/layout/distribution_mapping.hpp>
+#include <pops/mesh/storage/fab2d.hpp>
+#include <pops/mesh/execution/for_each.hpp>
+#include <pops/mesh/geometry/geometry.hpp>
+#include <pops/mesh/storage/mf_arith.hpp>
+#include <pops/mesh/storage/multifab.hpp>
+#include <pops/mesh/boundary/physical_bc.hpp>
+#include <pops/numerics/fv/reconstruction.hpp>
+#include <pops/numerics/fv/numerical_flux.hpp>
+#include <pops/numerics/spatial_operator.hpp>
+#include <pops/numerics/time/integrators/time_steppers.hpp>
 
 #include <cmath>
 #include <cstdio>
 #include <vector>
 
-using namespace adc;
+using namespace pops;
 
 static constexpr double kPi = 3.14159265358979323846;
 
@@ -69,19 +69,19 @@ static constexpr double kPi = 3.14159265358979323846;
 //   aux.grad_y = omega * y   ->  vx = -omega * y
 struct RotationModel {
   using State = StateVec<1>;
-  using Aux = adc::Aux;
+  using Aux = pops::Aux;
   static constexpr int n_vars = 1;
   Real B0 = 1.0;
-  ADC_HD State flux(const State& u, const Aux& a, int dir) const {
+  POPS_HD State flux(const State& u, const Aux& a, int dir) const {
     const Real v = (dir == 0) ? (-a.grad_y / B0) : (a.grad_x / B0);
     return State{u[0] * v};
   }
-  ADC_HD Real max_wave_speed(const State&, const Aux& a, int dir) const {
+  POPS_HD Real max_wave_speed(const State&, const Aux& a, int dir) const {
     const Real v = (dir == 0) ? (-a.grad_y / B0) : (a.grad_x / B0);
     return v < 0 ? -v : v;
   }
-  ADC_HD State source(const State&, const Aux&) const { return State{Real(0)}; }
-  ADC_HD Real elliptic_rhs(const State&) const { return Real(0); }
+  POPS_HD State source(const State&, const Aux&) const { return State{Real(0)}; }
+  POPS_HD Real elliptic_rhs(const State&) const { return Real(0); }
 };
 
 // Parametes physiques

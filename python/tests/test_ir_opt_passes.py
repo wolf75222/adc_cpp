@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""adc.time IR optimization passes -- CSE / redundant field-solve / liveness / estimate / GPU
+"""pops.time IR optimization passes -- CSE / redundant field-solve / liveness / estimate / GPU
 detectors (ADC-465, Spec 3 s28).
 
 The dead-node pass and its parity guards live in ``test_ir_passes.py``; this file pins the REST of
@@ -27,7 +27,7 @@ import sys
 
 import pytest
 
-adctime = pytest.importorskip("adc.time")
+adctime = pytest.importorskip("pops.time")
 
 
 # --------------------------------------------------------------------------- fixtures

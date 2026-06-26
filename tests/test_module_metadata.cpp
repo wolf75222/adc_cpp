@@ -1,10 +1,10 @@
-// Locks the GeneratedModule metadata reader (include/adc/runtime/program/module_metadata.hpp,
+// Locks the GeneratedModule metadata reader (include/pops/runtime/program/module_metadata.hpp,
 // Spec 2 / ADC-442): the typed operator registry a problem.so exports for introspection and
 // install-time validation. OperatorId is the registration index; the reader degrades gracefully on
-// a pre-Spec-2 .so (no adc_module_* symbols) by returning present=false. Deliberately light: it does
+// a pre-Spec-2 .so (no pops_module_* symbols) by returning present=false. Deliberately light: it does
 // NOT build a .so (the end-to-end read of a real generated .so is validated on the Kokkos/AOT path,
 // ROMEO); it pins the struct semantics + the absence handling the install path relies on.
-#include <adc/runtime/program/module_metadata.hpp>
+#include <pops/runtime/program/module_metadata.hpp>
 
 #include <dlfcn.h>
 
@@ -12,7 +12,7 @@
 #include <string>
 #include <vector>
 
-using namespace adc::runtime::program;
+using namespace pops::runtime::program;
 
 namespace {
 
@@ -49,13 +49,13 @@ int main() {
   check(m.find("explicit_rhs")->kind == "local_rate", "operator kind is carried");
   check(m.find("nope") == nullptr, "find on an unknown operator returns nullptr");
 
-  // (3) Reading a null handle, or a handle that exports no adc_module_* symbols (the running program
+  // (3) Reading a null handle, or a handle that exports no pops_module_* symbols (the running program
   // itself), yields a not-present descriptor -- the backward-compatible / graceful path the install
   // routine takes for a pre-Spec-2 .so.
   check(!read_module_metadata(nullptr).present, "read_module_metadata(nullptr) is not present");
   void* self = dlopen(nullptr, RTLD_NOW | RTLD_LOCAL);
   check(!read_module_metadata(self).present,
-        "reading a handle without adc_module_* symbols is not present");
+        "reading a handle without pops_module_* symbols is not present");
   if (self != nullptr) {
     dlclose(self);
   }

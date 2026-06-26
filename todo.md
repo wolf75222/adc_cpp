@@ -1,6 +1,6 @@
 # TODO - adc_cpp
 
-> **Source of truth — read first.** Active work-tracking lives in **Linear** (team ADC), not here.
+> **Source of truth — read first.** Active work-tracking lives in **Linear** (team PoPS), not here.
 > This file is a **historical method/worklog** : it records the reasoning behind work waves and is
 > cross-referenced by `docs/PAPER_ROADMAP.md` (e.g. "section 6", Hoffart M1/M2/M3) and kept per
 > `docs/DOC_REFONTE_AUDIT.md`. Open research items live in `docs/RESEARCH_BACKLOG.md`. Treat it as a
@@ -67,7 +67,7 @@ rate vs theory (l=3/4/5, O5, n=384/512) remains the ROMEO run.
 - [x] **AMR capstone (iv) #175**: runtime facade honors per-block substeps/stride + substeps-aware step_cfl
   (mirror of `AmrSystemCoupler::step`; mono-block bit-identical via AmrCouplerMP routing; multirate test
   with neutralize-and-fail). MERGE-SAFE (4-lens review, 0 blocker).
-- [x] **Lot A.5 core/ #173**: comment convention on `include/adc/core/` (comments only,
+- [x] **Lot A.5 core/ #173**: comment convention on `include/pops/core/` (comments only,
   no-code-change verified, ctest 96/96).
 - [x] **Doc honesty #172**: DSL docstring (CoupledSource/add_pair paragraph) + classification of the 3
   physics bricks (AdvectionDiffusion/LangmuirMode/TwoFluidLinear = TEST/VALIDATION, not used by
@@ -136,7 +136,7 @@ NB: D.2 and D.3 are INVARIANTS TO MAINTAIN (do not let TensorKrylovSolver own th
 CondensedSchurSourceStepper become a model.source), not tasks to do.
 
 REMAINING (audit):
-- [x] **Lot B.3 SystemBlockStore: DONE #197**: `class SystemBlockStore` (include/adc/runtime/system_block_
+- [x] **Lot B.3 SystemBlockStore: DONE #197**: `class SystemBlockStore` (include/pops/runtime/system_block_
   store.hpp, 165 l) OWNS the registry `std::vector<BlockState>` (ex-Species) + index/find/copy_comp0/copy_state/
   write_state; Impl delegates. CONSERVATIVE decision: alias `using Species=...` + `std::vector<Species>& sp=
   blocks_.blocks` to NOT churn the templates already extracted (SystemFieldSolver/SystemStepper/native_loader).
@@ -166,21 +166,21 @@ REMAINING (audit):
   #185/#195/#199.) RESIDUAL NOTE: 2 pre-existing non-ASCII typos (abi_key.hpp "batis", system_field_
   solver.hpp "ind+ependants" = broken em-dash) to fix in a dedicated ASCII pass.
 - [x] **Lot A.3: DONE #194**: SourceImplicit (local, per cell) vs CondensedSchur (global, Schur) note
-  in the docstrings python/adc/__init__.py + docs/SCHUR_CONDENSATION_DESIGN.md (no examples/
+  in the docstrings python/pops/__init__.py + docs/SCHUR_CONDENSATION_DESIGN.md (no examples/
   folder in adc_cpp; the runnable examples are in adc_cases). Doc-only, 28 insertions.
 - [x] **Lot E.4: DONE #201**: per-backend coverage audit. VERDICT: per-backend-path coverage was
   ALREADY complete (every C++ test outside the MPI-block runs Serial/Kokkos-Serial/Kokkos-OpenMP/MPI-np1; MPI tests in
   the MPI job; names already explicit test_mpi_*/_npN). Only gap = STALE doc (13 C++ + 10 py missing in the
   table) -> docs/BACKEND_COVERAGE.md brought up to date (AMR capstone section + recomputed balance), 0 test churn.
   New gap #6 noted: the multi-block capstone validated on 4 CPU backends, no device ROMEO harness yet.
-- [x] **Role-fallback fix on the AMR side: DONE #191**: `AmrRuntime::add_coupled_source` (include/adc/runtime/
+- [x] **Role-fallback fix on the AMR side: DONE #191**: `AmrRuntime::add_coupled_source` (include/pops/runtime/
   amr_runtime.hpp, resolve lambda) hardened strict (mirror #181): unknown block/non-canonical role/canonical role
   not exposed -> throw naming block+role, no more silent fallback comp=0. Test tests/test_amr_coupled_source_
   role_strict.cpp (ctest #94): valid/absent/unknown role. Build 214/214, ctest 100/100. (verified 06/06)
 
 REMAINING (scientific / outside audit):
 - [x] **High-resolution Hoffart run (ROMEO/GH200): n=384 AND n=512 DONE**: -fPIC build resolved (Kokkos PIC
-  /scratch_p/rmdraux/kokkos-install-pic); _adc module aarch64+CUDA built (adc_gpu_hires/adc_cpp/build-gpu-py).
+  /scratch_p/rmdraux/kokkos-install-pic); _pops module aarch64+CUDA built (pops_gpu_hires/adc_cpp/build-gpu-py).
   O5 WENO5/SSPRK3 on 1 GH200 (Kokkos Cuda np=1):
     n=384 (job 644126): l=3 -2.3%, l=4 -4.9%, l=5 +11.2%
     n=512 (job 647010): l=3 -0.38%, l=4 -8.4%, l=5 +16.0%
@@ -200,7 +200,7 @@ REMAINING (scientific / outside audit):
 - [x] **Perf: Poisson MG small-box under Kokkos: DONE (PR #206)**: `for_each_cell` runs in SERIAL (host
   loop) if box < 4096 cells UNDER a Kokkos backend with HOST execution (Serial/OpenMP); the Cuda/GH200 device
   path is strictly UNCHANGED (guard `if constexpr DefaultExecutionSpace==DefaultHostExecutionSpace`). Threshold 4096
-  (overridable ADC_FOREACH_SERIAL_THRESHOLD). ROMEO PROFILE (Kokkos OpenMP, poisson phase ms/step): n=128/16th
+  (overridable POPS_FOREACH_SERIAL_THRESHOLD). ROMEO PROFILE (Kokkos OpenMP, poisson phase ms/step): n=128/16th
   -91%, n=256/16th -80%, n=512/16th -55%, and 1-thread at/below baseline everywhere (the MG WORSENED with threads
   before). BIT-IDENTITY PROVEN: FNV hash of the final phi identical threshold=0 vs 4096 on n=64..512 at 1/8/16 threads
   (for_each_cell with no inter-iteration dependence: red-black GS colored; reduce NOT touched). 7 elliptic tests OK.
@@ -228,7 +228,7 @@ invariants NOT to violate:
 - **Schur PR6 = CARTESIAN only** (measurement of the TEMPORAL effect on a stiff magnetized fluid). The
   POLAR path is EXPLICIT-ONLY: the Schur stage is NOT wired there. Do NOT claim that "polar
   Schur" works; wiring it would be a later feature. (The Hoffart PAPER, for its part, does the
-  COMPLETE stiff Euler-Poisson system with its Schur complement; the adc Schur stack #118-128 is its
+  COMPLETE stiff Euler-Poisson system with its Schur complement; the pops Schur stack #118-128 is its
   FV analogue: reproducing the paper's METHOD = a separate work item, not Schur PR6.)
 - **RING EDGE = TRANSPORTED density discontinuity, NOT a wall.** Do NOT put a transport
   "wall" on it (physically wrong); valid levers = polar / high order / AMR.
@@ -242,9 +242,9 @@ invariants NOT to violate:
 Two ways to write a model, both executed in native C++ (zero cell-by-cell loop
 in Python on the performant path):
 
-- **Compose native bricks**: `adc.Model(state, transport, source, elliptic)` -> assembles a
+- **Compose native bricks**: `pops.Model(state, transport, source, elliptic)` -> assembles a
   `ModelSpec` from state / transport / source / elliptic bricks already compiled in the lib.
-- **Write the model in formulas**: `adc.dsl.Model(...)` (symbolic DSL) then `m.compile(...)`. The
+- **Write the model in formulas**: `pops.dsl.Model(...)` (symbolic DSL) then `m.compile(...)`. The
   RECOMMENDED backend is **`production`** (zero-copy native loader `add_native_block`, target
   MPI/GPU/AMR); mark it as the advised default of the DSL.
 
@@ -253,7 +253,7 @@ ADVANCED / LEGACY / TEST paths (NOT the main user path):
   development / portability paths, doubled by `production`.
 - `System.add_dynamic_block` (JIT) and `System.add_compiled_block` (AOT): low-level adders; prefer
   `add_native_block` (production) via the DSL facade.
-- `adc.PythonFlux`: PROTOTYPING backend, pure HOST path (numpy, order 1 Rusanov periodic), OUTSIDE
+- `pops.PythonFlux`: PROTOTYPING backend, pure HOST path (numpy, order 1 Rusanov periodic), OUTSIDE
   the GPU/MPI hot path. To quickly test a novel flux without recompiling, NOT for production.
 
 ## 1. "Extensible aux" work item (auxiliary fields beyond phi / grad)
@@ -261,7 +261,7 @@ ADVANCED / LEGACY / TEST paths (NOT the main user path):
 Goal: a model declares/reads ADDITIONAL aux fields (magnetic B_z, electronic T_e)
 without breaking the existing one, in bit-exact backward compatibility (`n_aux` default = 3 -> strictly identical).
 
-- [x] **Inc. 1 - Read**: `adc::Aux` + `B_z` (comp 3), `kAuxBaseComps=3`, `aux_comps<Model>()`,
+- [x] **Inc. 1 - Read**: `pops::Aux` + `B_z` (comp 3), `kAuxBaseComps=3`, `aux_comps<Model>()`,
       `load_aux<NComp>`. The named functors read `load_aux<aux_comps<Model>()>`. (#24)
 - [x] **Inc. 2 - Coupler population** mono-block: `fill_bz`, aux allocated at `aux_comps<Model>()`. (#24)
 - [x] **Inc. 3 - SystemAssembler population** multi-block (aux = max over the blocks). (#25)
@@ -422,7 +422,7 @@ without breaking the existing one, in bit-exact backward compatibility (`n_aux` 
       verified, Lie+Strang). Before: T1 #217 generic Strang, T2 #216 mask contract, #214 polar Lorentz,
       #215 polar Schur facade.
       NATIVE ABI BUG found + fixed (#225 adc_cpp, in CI): compile_native froze c++23 whereas the loader
-      _adc is c++20 under Kokkos (CUDA 12.x without c++23) -> add_native_block rejected -> NO native GH200 run
+      _pops is c++20 under Kokkos (CUDA 12.x without c++23) -> add_native_block rejected -> NO native GH200 run
       possible (CI invisible: model compiled at runtime). Fix = the model follows loader_cxx_std() + CI test
       add_native_block under Kokkos (Kokkos -fPIC). Also fixed: ssprk3 not supported in native
       (add_native_block=explicit|imex) -> case in ssprk2 (aligned baseline); matplotlib rendering optional
@@ -457,7 +457,7 @@ without breaking the existing one, in bit-exact backward compatibility (`n_aux` 
       NOT a physics deficit). Reproducible diag: `/tmp/diag_polar_omega.py`.
 - [~] **(SUPERSEDED by RESOLVED T2+T3 at the top of the section: "Lie not Strang" and "no 2pi for full" corrected; kept for history)** **COMPLETE Hoffart MODEL: NOT yet validated at paper fidelity (honesty correction, Codex June 2026)**:
       WARNING: the "-0.38% l=3 n=512" cited above is the REDUCED ExB-SCALAR DIOCOTRON (adc_cases/diocotron/,
-      models.diocotron, CARTESIAN + circular wall, ROMEO sweep ~/adc_gpu_hires/.../diocotron/sweep.py). It validates
+      models.diocotron, CARTESIAN + circular wall, ROMEO sweep ~/pops_gpu_hires/.../diocotron/sweep.py). It validates
       the NORMALIZATION 2pi/rhobar + the method on the REDUCED MODEL (standard Petri benchmark): NOT the complete
       Hoffart system. The COMPLETE MODEL (continuity + momentum + Lorentz + isothermal pressure + Gauss via Schur)
       EXISTS = adc_cases/hoffart_euler_poisson_dsl, on the branch feat/normalization-and-schur-measurement (NOT master).
@@ -522,7 +522,7 @@ without breaking the existing one, in bit-exact backward compatibility (`n_aux` 
       tests suffice (the scheme is FV, momentum not exact by construction)?
 - [x] **M2 / M2b**: AMR on the ring edge (triples the rate at equal base) + multi-level Poisson.
 - [~] Resolution increase / convergence toward the analytical rate: DONE (n=384/512 GH200, l=3 -0.38%).
-      SAMRAI integration = EXTERNAL-BIG, DEFERRED (adc's homemade AMR is capstone-complete and covers the
+      SAMRAI integration = EXTERNAL-BIG, DEFERRED (pops's homemade AMR is capstone-complete and covers the
       science path; cf docs/RESEARCH_BACKLOG.md for the reopening criterion). NOT auto-completable.
 
 ## 7. Cleanup / consolidation (wave P1/P2, June 2026)
@@ -566,13 +566,13 @@ domain, Schur EPM, multi-block AMR, Hoffart repro): all DEFERRED. One PR per blo
 - [x] **`CoarseFineInterface` + `SubcyclingSchedule` routing** extracted from `subcycle_level_mp` into named
       types, bit-identical (Serial 74/74, MPI 95/95 np=1/2/4). (#82)
 - [x] **Distinct `production` DSL backend**: zero-copy native loader `add_native_block` (inline
-      `add_compiled_model<ProdModel>`, ABI-key gate, `ADC_EXPORT` symbols), `production` no longer points
-      to `aot`. ELF portability (promotion of `_adc` to global scope). CPU parity bit-identical to
+      `add_compiled_model<ProdModel>`, ABI-key gate, `POPS_EXPORT` symbols), `production` no longer points
+      to `aot`. ELF portability (promotion of `_pops` to global scope). CPU parity bit-identical to
       `add_block`. (#85)
 
-## 8. Ideal ADC Plan: write the model in Python, run in native C++
+## 8. Ideal PoPS Plan: write the model in Python, run in native C++
 
-Goal: the user writes the equations in Python (symbolic DSL), ADC generates/compiles a NATIVE
+Goal: the user writes the equations in Python (symbolic DSL), PoPS generates/compiles a NATIVE
 C++ brick wired into `adc_cpp` like a hand-written model; no cell-by-cell loop
 in Python on the performant path. Three backends: `prototype` (NumPy/host), `aot` (.so flat ABI),
 `production` (zero-copy native, target MPI/GPU/AMR).
@@ -597,7 +597,7 @@ in Python on the performant path. Three backends: `prototype` (NumPy/host), `aot
       no multi-species; **LOCAL IMEX source OK (Gap 2 #132)** but no GLOBAL Schur on AMR; native multi-box
       not wired on the facade side. (HLLC/Roe/primitive reconstruction: **Gap 1 LIFTED on the facade side**.)
 - [x] **Step 6 - MPI/GPU validation of the `production` path**: **np=1 GPU VALIDATED on GH200.** The device
-      crash in `solve_fields()` was due to inline extended `ADC_HD` lambdas (elliptic/mesh kernels
+      crash in `solve_fields()` was due to inline extended `POPS_HD` lambdas (elliptic/mesh kernels
       `copy_shifted`/`fill_boundary`/MG, first cross-TU instantiation -> null nvcc kernel stub in
       Release without `-g`); converted into NAMED FUNCTORS (#97, same recipe as #64). GH200 proof (ROMEO job
       640236, Release without `-g`): `geometric_mg` AND `fft` Cuda np=1 exit 0 (were 139),
@@ -665,7 +665,7 @@ stable implicit step at large dt. Model = physics; SchurCondensation = algo. Con
 
 - [x] **PR0 - doc** `docs/SCHUR_CONDENSATION_DESIGN.md`: sign convention locked
       `A_op = I + theta^2 dt^2 alpha rho B^-1`, A non symmetric -> Krylov needed. (#119)
-- [x] **PR2 - LorentzEliminator**: `B`, analytical `B^-1` (`apply_Binv`, `binv_ij`), POD/`ADC_HD`. (#118)
+- [x] **PR2 - LorentzEliminator**: `B`, analytical `B^-1` (`apply_Binv`, `binv_ij`), POD/`POPS_HD`. (#118)
 - [x] **PR1 - TensorEllipticOperator**: `-div(A grad phi) + kappa phi`, cross terms (9-point stencil,
       named functor `cross_div`), `set_cross_terms`. A=I/diag bit-identical. (#120)
 - [x] **PR3 - matrix-free BiCGStab Krylov** non symmetric, preconditioned by MG on the symmetric
@@ -674,13 +674,13 @@ stable implicit step at large dt. Model = physics; SchurCondensation = algo. Con
       over the roles. (#124)
 - [x] **PR4 - source stage** `CondensedSchurSourceStepper`: build -> Krylov -> reconstructs v ->
       energy -> extrapolates U^{n+1} -> ghosts. Implicit relation 1e-15, stable at 8x the explicit dt. (#126)
-- [x] **PR5 - Python binding**: `adc.Split(hyperbolic, source=adc.CondensedSchur(...))` + `adc.Role` +
+- [x] **PR5 - Python binding**: `pops.Split(hyperbolic, source=pops.CondensedSchur(...))` + `pops.Role` +
       `set_source_stage` routing (no-op if nullptr, after transport). (#128)
 - [x] **Review fix (findings 1+2)**: precond AND matvec at HOMOGENEOUS BC under non-zero Dirichlet (the matvec
       of r0 keeps the affine; matvec in loop + precond linearized by subtracting their offset);
       `op_`!=`precond_` enforced. Bit-identical to zero Dirichlet. (#134)
 - [x] **Device-clean GPU**: the Schur stack was SILENTLY WRONG on Cuda (Geometry/Box2D accessors
-      not `ADC_HD` -> wrong RHS/reductions, BiCGStab "0 iters rel=0 then NaN"). Fix in #135 (in flight,
+      not `POPS_HD` -> wrong RHS/reductions, BiCGStab "0 iters rel=0 then NaN"). Fix in #135 (in flight,
       awaits GH200 validation). Host = correct, CI green.
 - [~] **PR6 - polar diocotron-Schur measurement: UNBLOCKED, IN PROGRESS**: the POLAR Schur capability is DONE
       (tensor elliptic #210 + source stage #212, dt gain 2000x); facade wiring step 2c IN FLIGHT
@@ -700,7 +700,7 @@ stable implicit step at large dt. Model = physics; SchurCondensation = algo. Con
 - [x] **P2 - clarify Implicit/IMEX**: rename `SourceImplicit`, deprecation of `Implicit`. (#123)
 - [x] **P3 - `implicit_vars` mask** on the time policy / the block (NOT on the model). (#125)
 - [x] **P4 - `set/get_primitive_state`** (init/diagnostic in primitive variables). (#127)
-- [x] **P5 - CoupledSource DSL**: `adc.dsl.CoupledSource` -> postfix bytecode interpreted by a
+- [x] **P5 - CoupledSource DSL**: `pops.dsl.CoupledSource` -> postfix bytecode interpreted by a
       named device functor in `apply_couplings`; generic inter-species; 3 species + conservation,
       MPI np=1/2/4 bit-identical. (#131)
 - [x] **P6 - multi-block AMR** = capstone Gap 4, see section 15.
@@ -714,13 +714,13 @@ Scientific conclusion: the growth-rate blocker is the CARTESIAN advection of the
 gradient; the POLAR geometry preserves it (proto: ratio 73 vs 1.0 cartesian). The Schur
 does NOT address this gap (it stabilizes time). So the lever = put in the polar geometry.
 
-- [x] **Mesh abstraction**: `adc.PolarMesh` / `adc.CartesianMesh` -> `System(mesh=)` (NOT
+- [x] **Mesh abstraction**: `pops.PolarMesh` / `pops.CartesianMesh` -> `System(mesh=)` (NOT
       `FiniteVolume(geometry=)`). `PolarGeometry`, polar divergence `(1/r)d_r(r F_r)+(1/r)d_th F_th`,
       `ExBVelocityPolar` `v_r=-(1/(Br))d_th phi`, `v_th=(1/B)d_r phi`. (#116)
 - [x] **Phase 2a - direct polar Poisson** on the ring: FFT-in-theta + tridiagonal-in-r (robust,
       avoids the MG-in-polar which stagnates). (#130)
 - [x] **Device**: polar flux/metric SILENTLY WRONG on Cuda (same cause #135: `r_cell`/`theta_cell`
-      not `ADC_HD`). Fix #135 (in flight).
+      not `POPS_HD`). Fix #135 (in flight).
 - [x] **Phase 2b (#168, DONE)**: transport + polar Poisson wired into `System.step` on a GLOBAL
       ring (NO cartesian<->polar coupling in v1; cartesian default bit-identical). `derive_aux_polar`
       (aux in local base e_r/e_theta), solid radial wall (wall_radial), polar `mass`/`step_cfl`/`step_adaptive`,
@@ -738,7 +738,7 @@ confirmed real out of 12. Disposition:
 - [x] **F3 - step_cfl substeps>1 not bit-identical**: DECISION = keep the substeps-aware CFL
       (correct), fix the wording + tests. In flight #138.
 - [x] **F4 - `evolve=False` silently ignored on prototype/aot**: explicit rejection. DONE #137.
-- [x] **F5 - `adc.Split` silently lost on AmrSystem**: explicit rejection. DONE #137.
+- [x] **F5 - `pops.Split` silently lost on AmrSystem**: explicit rejection. DONE #137.
 - [x] **F6 - `CondensedSchur` descriptors never transmitted** (dead API code): non-default rejection. DONE #137.
 - [x] **F7 - `max_wave_speed_mf` non-collective** (divergent dt per MPI rank): `all_reduce_max`. In #135.
 - [x] **F8 - `fab(0)` without `local_size()` guard** in the marshaling: DONE #204 (local_size guard posed; no half-fix because a half-fix
@@ -771,7 +771,7 @@ local spatial. NO per-species hierarchy in v1 (Phase 3 only if real scientific n
 KEY OBSERVATION (confirmed by scoping June 2026 on master = #154): the multi-block engine ALREADY EXISTS =
 `AmrSystemCoupler` (compile-time: shared hierarchy, Poisson sum, per-block scheme/substeps/stride,
 IMEX-callback, level-by-level sources + average_down trailing #169, shared B_z; `same_layout_or_throw`).
-The RUNTIME FACADE `AmrRuntime` (#154, `include/adc/runtime/amr_runtime.hpp`) exposes a type-erased
+The RUNTIME FACADE `AmrRuntime` (#154, `include/pops/runtime/amr_runtime.hpp`) exposes a type-erased
 registry by name and ALREADY runs 2 explicit blocks, but does not yet TRANSMIT substeps/stride/IMEX/coupled
 sources/regrid from the facade to the engine. So COMPLETION on the facade side, not creation. The `stride_due`
 bug is ALREADY fixed (#140: cadence `(macro_step_+1) % stride`, hold-then-catch-up). Mono-block still goes

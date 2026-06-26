@@ -7,9 +7,9 @@ compose like any RHS; the coupled-rate KERNEL codegen is the deferred ADC-457 ru
 
 Run: python3 examples/spec3/rate_bundle_collisions.py
 """
-import adc.model as model
-import adc.time as adctime
-from adc import dsl
+import pops.model as model
+import pops.time as adctime
+from pops import dsl
 
 
 def build_bundle():

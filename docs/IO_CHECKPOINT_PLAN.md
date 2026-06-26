@@ -86,5 +86,5 @@ serializing C++/Python closures.
 
 - No serialization of the compositions (blocks/couplings) nor of the Python callbacks.
 - No proprietary format : HDF5/VTK/NPZ only.
-- Cross-version restart (different adc headers) is NOT guaranteed : the checkpoint embeds
+- Cross-version restart (different pops headers) is NOT guaranteed : the checkpoint embeds
   `abi_key`/`model_hash` to DETECT it, not to convert it.

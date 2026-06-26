@@ -1,15 +1,15 @@
 """Spec 3 external C++ bricks (ADC-463, criterion 20).
 
 A Spec 3 brick is native / generated / macro / external-C++. These tests cover
-the last category: ``adc.lib.load_cpp_library(path)`` dlopens a user ``.so``,
+the last category: ``pops.lib.load_cpp_library(path)`` dlopens a user ``.so``,
 reads its JSON manifest (over the C++ ``BrickRegistry``), and registers the ids
-in an in-process catalog; ``adc.lib.riemann.User(id)`` / ``adc.lib.external(id)``
+in an in-process catalog; ``pops.lib.riemann.User(id)`` / ``pops.lib.external(id)``
 then surface an ``external_cpp`` descriptor carrying the manifest's requirements.
 An id that was never loaded raises a CLEAR error.
 
 The manifest-parsing seam (``_register_manifest``) is exercised directly so the
 test needs no compiled ``.so``; ``load_cpp_library`` is the real ``.so`` path on
-top of it. The real ``adc.lib`` functions are used -- adc is never faked.
+top of it. The real ``pops.lib`` functions are used -- pops is never faked.
 """
 import os
 import json
@@ -18,18 +18,18 @@ import subprocess
 
 import pytest
 
-lib = pytest.importorskip("adc.lib")
+lib = pytest.importorskip("pops.lib")
 
 _INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "include"))
 
-# A minimal external brick .so: ADC_REGISTER_BRICK populates the host registry at static-init time and
-# ADC_DEFINE_BRICK_MANIFEST exports the C reader load_cpp_library dlopens. No numerics here -- the
+# A minimal external brick .so: POPS_REGISTER_BRICK populates the host registry at static-init time and
+# POPS_DEFINE_BRICK_MANIFEST exports the C reader load_cpp_library dlopens. No numerics here -- the
 # manifest path only needs the identity + requirements (the static-dispatch ABI is the C++ test).
 _BRICK_SRC = """
-#include <adc/runtime/program/external_brick.hpp>
+#include <pops/runtime/program/external_brick.hpp>
 #include <string>
-ADC_REGISTER_BRICK("my_so_riemann", "riemann", "pressure,wave_speeds");
-ADC_DEFINE_BRICK_MANIFEST();
+POPS_REGISTER_BRICK("my_so_riemann", "riemann", "pressure,wave_speeds");
+POPS_DEFINE_BRICK_MANIFEST();
 """
 
 
@@ -134,11 +134,11 @@ def test_load_cpp_library_rejects_a_missing_path():
 
 def test_load_cpp_library_dlopens_a_real_so_and_surfaces_the_descriptor(tmp_path):
     """The deferred half: compile a REAL brick .so, dlopen it via load_cpp_library, and assert
-    riemann.User surfaces its manifest. Self-skips if no C++ compiler / adc headers are present
+    riemann.User surfaces its manifest. Self-skips if no C++ compiler / pops headers are present
     (the registry-seam tests above cover the parsing without a toolchain)."""
     so = _compile_brick_so(str(tmp_path))
     if so is None:
-        pytest.skip("no C++ compiler or adc headers to build the brick .so")
+        pytest.skip("no C++ compiler or pops headers to build the brick .so")
     # The registry .so is header-light (only external_brick.hpp): plain flags, no Kokkos needed.
     n = lib.load_cpp_library(so)
     assert n == 1
@@ -150,8 +150,8 @@ def test_load_cpp_library_dlopens_a_real_so_and_surfaces_the_descriptor(tmp_path
 
 
 def test_load_cpp_library_rejects_a_non_brick_so(tmp_path):
-    """A loadable library that does NOT export adc_brick_manifest() is rejected clearly (it is not an
-    adc brick .so), never silently treated as carrying zero bricks."""
+    """A loadable library that does NOT export pops_brick_manifest() is rejected clearly (it is not an
+    pops brick .so), never silently treated as carrying zero bricks."""
     cxx = shutil.which("c++") or shutil.which("g++") or shutil.which("clang++")
     if not cxx:
         pytest.skip("no C++ compiler to build the non-brick .so")
@@ -169,4 +169,4 @@ def test_load_cpp_library_rejects_a_non_brick_so(tmp_path):
         pytest.skip("could not build the non-brick .so")
     with pytest.raises(ValueError) as exc:
         lib.load_cpp_library(so)
-    assert "adc_brick_manifest" in str(exc.value)
+    assert "pops_brick_manifest" in str(exc.value)

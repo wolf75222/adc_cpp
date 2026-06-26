@@ -21,15 +21,15 @@
 // tailles -- 16 (radix-2) et 12 (NON puissance de 2 -> repli DFT directe O(n^2) de PoissonFFT, le
 // chemin du remap jusqu'ici non couvert) -- toutes deux machine-zero sous np = 1/2/4.
 
-#include <adc/numerics/elliptic/poisson/poisson_fft_solver.hpp>  // RemappedFFTSolver, BoxArray (direct residual check)
-#include <adc/mesh/geometry/geometry.hpp>                         // Geometry, Box2D
-#include <adc/physics/composition/composite.hpp>
-#include <adc/physics/bricks/hyperbolic.hpp>  // ExBVelocity
-#include <adc/physics/bricks/source.hpp>      // NoSource
-#include <adc/runtime/builders/compiled/dsl_block.hpp>   // add_compiled_model
-#include <adc/runtime/system.hpp>
+#include <pops/numerics/elliptic/poisson/poisson_fft_solver.hpp>  // RemappedFFTSolver, BoxArray (direct residual check)
+#include <pops/mesh/geometry/geometry.hpp>                         // Geometry, Box2D
+#include <pops/physics/composition/composite.hpp>
+#include <pops/physics/bricks/hyperbolic.hpp>  // ExBVelocity
+#include <pops/physics/bricks/source.hpp>      // NoSource
+#include <pops/runtime/builders/compiled/dsl_block.hpp>   // add_compiled_model
+#include <pops/runtime/system.hpp>
 
-#include <adc/parallel/comm.hpp>
+#include <pops/parallel/comm.hpp>
 
 #include <cmath>
 #include <cstdio>
@@ -37,15 +37,15 @@
 #include <string>
 #include <vector>
 
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
 #include <Kokkos_Core.hpp>
 #endif
 
-#ifdef ADC_HAS_MPI
+#ifdef POPS_HAS_MPI
 #include <mpi.h>
 #endif
 
-using namespace adc;
+using namespace pops;
 static constexpr double kPi = 3.14159265358979323846;
 
 // Residu discret machine-zero du RemappedFFTSolver (le solveur "fft"/"fft_spectral" sous MPI) sur la
@@ -74,7 +74,7 @@ static double remap_residual(int N) {
 // Bloc de CHARGE : alimente le second membre du Poisson (elliptic_rhs = densite de charge q n).
 struct ChargeEll {
   template <class State>
-  ADC_HD Real rhs(const State& u) const {
+  POPS_HD Real rhs(const State& u) const {
     return u[0];
   }  // rho = comp 0
 };
@@ -99,7 +99,7 @@ static void build_problem(System& sys, int n, bool owns) {
 
 int main(int argc, char** argv) {
   comm_init(&argc, &argv);
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   Kokkos::ScopeGuard guard(argc, argv);
 #endif
   const int me = my_rank(), np = n_ranks();
@@ -269,7 +269,7 @@ int main(int argc, char** argv) {
     chk(rel < 5e-3, "npN_fft_matches_mg");
   }
 
-#ifdef ADC_HAS_MPI
+#ifdef POPS_HAS_MPI
   if (np > 1) {
     long g = 0;
     MPI_Allreduce(&fails, &g, 1, MPI_LONG, MPI_SUM, MPI_COMM_WORLD);

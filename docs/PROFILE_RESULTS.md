@@ -1,7 +1,7 @@
 # Profile of a representative time step (measurement only)
 
 Date: 2026-06-06. Branch: `feat/profiling-harness`. Author of the measurement: harness
-`bench/profile_step` (cf. `bench/`), built OUTSIDE the default build (`-DADC_BUILD_BENCH=ON`).
+`bench/profile_step` (cf. `bench/`), built OUTSIDE the default build (`-DPOPS_BUILD_BENCH=ON`).
 
 This document REPORTS measurements. It APPLIES NO optimization and RECOMMENDS no
 code change beyond a lead to investigate, in line with the owner's rule:
@@ -169,11 +169,11 @@ bench/run_bench.sh mpi 2
 
 The harness accepts `--n --steps --warmup --cfl --solver {geometric_mg|fft} --limiter
 {none|minmod|vanleer|weno5} --bc {periodic|dirichlet}`. It is OUTSIDE the default build (option
-`ADC_BUILD_BENCH=OFF`): the CI never configures nor compiles it.
+`POPS_BUILD_BENCH=OFF`): the CI never configures nor compiles it.
 
 ## 5. Guarantees
 
 - NO optimization, NO refactor of the hot path. `python/bindings/system/base/system.cpp` and the hot path headers
-  are NOT modified. Only additions: `bench/` (new) and the `ADC_BUILD_BENCH` option (OFF by
+  are NOT modified. Only additions: `bench/` (new) and the `POPS_BUILD_BENCH` option (OFF by
   default) + an `add_subdirectory(bench)` guarded in the root `CMakeLists.txt`.
 - `docs/PERFORMANCE.md` (historical) and `docs/BACKEND_COVERAGE.md` are NOT touched.

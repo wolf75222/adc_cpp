@@ -1,15 +1,15 @@
 # Moment models
 
-Reference for `adc.moments`, the generic 2D moment-hierarchy generator. It turns a single closure
+Reference for `pops.moments`, the generic 2D moment-hierarchy generator. It turns a single closure
 into a full [symbolic DSL model](symbolic-dsl.md): the central and standardized moments, the flux,
 and the signed wave speeds are all derived, so you write only the closure (and, optionally, the
 sources). For the concept see [moments and closures](../concepts/moments-and-closures.md); for a
 worked example see [the HyQMOM tutorial](../tutorials/moment-model-hyqmom15.md).
 
-`adc.moments` is a specialized generator and is imported explicitly:
+`pops.moments` is a specialized generator and is imported explicitly:
 
 ```python
-from adc import moments as gmom
+from pops import moments as gmom
 ```
 
 ## `build_moment_model`
@@ -20,7 +20,7 @@ gmom.build_moment_model(name, order, closure, blocks=None, exact_speeds=True,
                         roe=False)
 ```
 
-Builds and returns an `adc.dsl.Model` for the 2D velocity-moment hierarchy of the given `order`. The
+Builds and returns an `pops.dsl.Model` for the 2D velocity-moment hierarchy of the given `order`. The
 returned model is ready to `compile`, or you may add an `elliptic_rhs` or extra `param` first.
 
 | Parameter      | Meaning                                                                                       |
@@ -33,7 +33,7 @@ returned model is ready to `compile`, or you may add an `elliptic_rhs` or extra 
 | `blocks`       | Optional block structure of the flux Jacobian, passed through to the wave-speed solve (a dict `{"x": [...], "y": [...]}` of index lists). Default: the full matrix. Ignored when `exact_speeds=False`. |
 | `eps_m00`, `eps_cov` | Floor thresholds used when `robust=True`.                                               |
 | `sources`      | Optional callable `(model, M) -> list[Expr]`, one source per moment, wired with `m.source(...)`. `M` is a dict mapping `(p, q)` to the conservative `Var`. Use `lorentz_sources` (below). |
-| `roe`          | `True`: also emit the generic moment Roe dissipation (`m.roe_from_jacobian`), with `|A|` via `adc::roe_abs_apply` and a spectral-radius Rusanov fallback. Additive to `exact_speeds`, so it enables `riemann="roe"` for a moment hierarchy. Needs the `aot` or `production` backend. `False` (default): no Roe path. |
+| `roe`          | `True`: also emit the generic moment Roe dissipation (`m.roe_from_jacobian`), with `|A|` via `pops::roe_abs_apply` and a spectral-radius Rusanov fallback. Additive to `exact_speeds`, so it enables `riemann="roe"` for a moment hierarchy. Needs the `aot` or `production` backend. `False` (default): no Roe path. |
 
 You do not call `m.flux(...)` or `m.eigenvalues(...)` on the returned model when you use the
 generator: both are derived from the closure. The flux is the order shift `Fx[M_pq] = M_{p+1,q}`,
@@ -128,16 +128,16 @@ are the order the generated kernel expects.
 
 ## Simulating a moment model
 
-A compiled moment model is an ordinary `CompiledModel`, attached to an `adc.System` like any DSL
+A compiled moment model is an ordinary `CompiledModel`, attached to an `pops.System` like any DSL
 model:
 
 ```python
-import adc
-compiled = gmom.build_moment_model("mom", 4, my_closure).compile("mom.so", adc.adc_include())
-sim = adc.System(n=64, L=1.0, periodic=True)
+import pops
+compiled = gmom.build_moment_model("mom", 4, my_closure).compile("mom.so", pops.pops_include())
+sim = pops.System(n=64, L=1.0, periodic=True)
 sim.add_equation("mom", model=compiled,
-                 spatial=adc.FiniteVolume(limiter="none", riemann="hll"),
-                 time=adc.Explicit())
+                 spatial=pops.FiniteVolume(limiter="none", riemann="hll"),
+                 time=pops.Explicit())
 ```
 
 `riemann="hll"` requires the signed wave speeds that `exact_speeds=True` generates; `riemann="rusanov"`

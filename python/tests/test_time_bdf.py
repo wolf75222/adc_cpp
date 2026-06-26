@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""adc.time IMPLICIT-FLUX BDF via matrix-free Newton-Krylov (epic ADC-399 / ADC-431).
+"""pops.time IMPLICIT-FLUX BDF via matrix-free Newton-Krylov (epic ADC-399 / ADC-431).
 
 ADC-431 completes ``std.bdf``: today it lowers only a cell-local linear source (a block-diagonal
 ``solve_local_linear``); the IMPLICIT-FLUX case (the globally coupled ``-div F`` stencil) is the new
@@ -27,16 +27,16 @@ matrix-free apply sub-block, perturbing the frozen Newton iterate).
     the compiled one). Asserts: the compiled step satisfies ``||F(U^{n+1})|| ~ 0``; the compiled
     ``U^{n+1}`` matches the offline root ~1e-8; the offline Newton takes > 1 iteration; the inner GMRES
     runs (> 1 iteration). BDF2 is checked the same way (a cold-start history). Self-skips (exit 0)
-    without numpy / _adc / install_program / a compiler / a visible Kokkos -- never fakes the engine.
+    without numpy / _pops / install_program / a compiler / a visible Kokkos -- never fakes the engine.
 """
 import sys
 
 
-def _adc_time():
+def _pops_time():
     try:
-        import adc.time as t
-    except Exception as exc:  # adc not importable here -> skip, never fake
-        print("skip test_time_bdf (adc.time unavailable: %s)" % exc)
+        import pops.time as t
+    except Exception as exc:  # pops not importable here -> skip, never fake
+        print("skip test_time_bdf (pops.time unavailable: %s)" % exc)
         sys.exit(0)
     return t
 
@@ -48,7 +48,7 @@ def test_implicit_flux_bdf1_codegen(t):
     assert P.validate() is True, "the implicit-flux BDF1 Program must validate"
     assert P._ir_hash(), "the IR must serialize to a stable hash"
     src = P.emit_cpp_program(model=None)  # no model needed: the jacvec reuses the block rhs closure
-    assert src.count("adc::gmres_solve") == 3, ("one GMRES per Newton iteration\n%s" % src)
+    assert src.count("pops::gmres_solve") == 3, ("one GMRES per Newton iteration\n%s" % src)
     # the rhs-inside-apply enabler: rhs_into called inside the matrix-free apply lambda + the scratch
     assert "ctx.rhs_into(0" in src, "rhs(U^k + eps*v) inside the matrix-free apply\n%s" % src
     assert "jac_uk" in src and "jac_r0" in src and "jac_cdt" in src, "the FD-Jacobian scratch\n%s" % src
@@ -60,7 +60,7 @@ def test_implicit_flux_bdf2_codegen(t):
     t.std.bdf(P, "blk", 2, sources=["default"], newton_max=2, krylov_max=40)
     assert P.validate() is True
     src = P.emit_cpp_program(model=None)
-    assert src.count("adc::gmres_solve") == 2
+    assert src.count("pops::gmres_solve") == 2
     assert 'ctx.register_history("blk.U"' in src and 'ctx.store_history("blk.U"' in src, \
         "BDF2 reads U^{n-1} from the history ring\n%s" % src
     # the BDF2 implicit coefficient is c*dt = (2/3) dt
@@ -146,12 +146,12 @@ def _nonlinear_flux_model():
     one iteration. BackgroundDensity(n0=0) keeps solve_fields well-defined but INERT (no Poisson
     feedback into the flux), so the frozen-Poisson implicit step is exact -- the same trick the other
     compiled-program tests use. A real composed-brick model, never a fake engine."""
-    import adc
+    import pops
 
-    return adc.Model(state=adc.FluidState("isothermal", cs2=0.5),
-                     transport=adc.IsothermalFlux(),
-                     source=adc.NoSource(),
-                     elliptic=adc.BackgroundDensity(alpha=1.0, n0=0.0))
+    return pops.Model(state=pops.FluidState("isothermal", cs2=0.5),
+                     transport=pops.IsothermalFlux(),
+                     source=pops.NoSource(),
+                     elliptic=pops.BackgroundDensity(alpha=1.0, n0=0.0))
 
 
 def _bdf_program(t, order, *, name, newton_max, krylov_max, tol):
@@ -269,14 +269,14 @@ def _run_section_b(t):
     try:
         import numpy as np
 
-        import adc
+        import pops
     except Exception as exc:  # noqa: BLE001
-        print("-- (B) skipped: adc/numpy unavailable: %s --" % exc)
+        print("-- (B) skipped: pops/numpy unavailable: %s --" % exc)
         return None
 
-    probe = adc.System(n=8, L=1.0, periodic=True)
+    probe = pops.System(n=8, L=1.0, periodic=True)
     if not hasattr(probe, "install_program") or not hasattr(probe, "eval_rhs"):
-        print("-- (B) skipped: _adc lacks install_program / eval_rhs (rebuild _adc) --")
+        print("-- (B) skipped: _pops lacks install_program / eval_rhs (rebuild _pops) --")
         return None
 
     n = 16
@@ -290,7 +290,7 @@ def _run_section_b(t):
 
     def _build(order):
         try:
-            compiled = adc.compile_problem(
+            compiled = pops.compile_problem(
                 model=_nonlinear_flux_model(),
                 time=_bdf_program(t, order, name="bdf_iso_step%d" % order, newton_max=newton_max,
                                   krylov_max=200, tol=tol))
@@ -300,10 +300,10 @@ def _run_section_b(t):
         return compiled
 
     def _make_sim():
-        sim = adc.System(n=n, L=1.0, periodic=True)
+        sim = pops.System(n=n, L=1.0, periodic=True)
         sim.add_equation("blk", _nonlinear_flux_model(),
-                         spatial=adc.FiniteVolume(limiter="none", riemann="rusanov"),
-                         time=adc.Explicit(method="euler"))
+                         spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                         time=pops.Explicit(method="euler"))
         sim.set_poisson("charge_density", "geometric_mg")
         sim.set_state("blk", init)
         return sim
@@ -361,7 +361,7 @@ def _run_section_b(t):
 
 
 def _run():
-    t = _adc_time()
+    t = _pops_time()
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:
         fn(t)

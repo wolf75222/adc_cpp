@@ -18,7 +18,7 @@ Sources read for this audit:
 - cases `adc_cases/diocotron/{run.py,README.md,band_instability.py}`,
   `adc_cases/diocotron_amr/run.py`, `adc_cases/two_fluid_ap/`, `adc_cases/cases_manifest.toml`;
 - bindings: `python/bindings/system/base/system.cpp`, `python/bindings/amr/amr_system.cpp`, `python/bindings/core/bindings.cpp`,
-  `python/adc/__init__.py`, `python/adc/dsl.py`, `include/adc/numerics/elliptic/mg/geometric_mg.hpp`.
+  `python/pops/__init__.py`, `python/pops/dsl.py`, `include/pops/numerics/elliptic/mg/geometric_mg.hpp`.
 
 ## Reproduction status (factual)
 
@@ -28,7 +28,7 @@ Two levels in Hoffart (Section 5.3):
    REPRODUCED to 3 digits in numpy on the `adc_cases/diocotron/run.py` side:
    `gamma_3 = 0.772`, `gamma_4 = 0.912`, `gamma_5 = 0.687` (see case README). Out of the core
    scope: this is pure analytic numpy verification.
-2. **Numerical rate measured by `adc`**: full pipeline (composition `ExB` + `BackgroundDensity`,
+2. **Numerical rate measured by `pops`**: full pipeline (composition `ExB` + `BackgroundDensity`,
    Poisson of a system with a circular conducting wall `wall="circle"`, measurement of mode `l` of
    `phi` by azimuthal FFT, fit of `exp(gamma t)`). Runs, captures the instability (exponential
    growth, correct mode ordering, `l=4` dominant), but UNDERESTIMATES the rate:
@@ -44,7 +44,7 @@ candidate is the **Cartesian ring edge**.
 ## The structural blocker: Cartesian ring edge
 
 The Shortley-Weller cut-cell capability (`docs/ALGORITHMS.md` section 12) lives ONLY in
-`include/adc/numerics/elliptic/mg/geometric_mg.hpp`: it places the circular Dirichlet conducting wall
+`include/pops/numerics/elliptic/mg/geometric_mg.hpp`: it places the circular Dirichlet conducting wall
 at its REAL position for the POISSON solver. But the hyperbolic transport
 (`numerics/spatial_operator.hpp`, `numerics/numerical_flux.hpp`, `numerics/reconstruction.hpp`)
 has NO notion of an embedded boundary: the charge ring is advected on the full Cartesian grid.
@@ -93,10 +93,10 @@ revised to ~9-10 % at order 5.
 
 Two recommended user entry points, both on native bricks (GPU/MPI path):
 
-- **Compose native bricks**: `adc.Model(state, transport, source, elliptic)` assembles a
+- **Compose native bricks**: `pops.Model(state, transport, source, elliptic)` assembles a
   model from state / transport / source / elliptic bricks, consumed by
   `System.add_block(...)` (or `AmrSystem`). This is the path of the sweep diocotron cases.
-- **Write a model in formulas**: `adc.dsl.Model(...)` describes the equations symbolically, then
+- **Write a model in formulas**: `pops.dsl.Model(...)` describes the equations symbolically, then
   `m.compile(...)` produces a `.so`. For production, `backend="production"` is the recommended
   default (native zero-copy loader -> `add_native_block`, GPU/MPI path).
 
@@ -105,7 +105,7 @@ ADVANCED / LEGACY / TEST paths, NOT the main user path:
 - `backend="prototype"` (JIT, IModel, virtual dispatch, host order-1 Rusanov) and
   `backend="aot"` (host-marshaled AOT): iteration / verification, not production.
 - `add_dynamic_block` (JIT prototype) and `add_compiled_block` (AOT): corresponding low-level adders.
-- `adc.PythonFlux`: HOST numpy path (OUTSIDE the GPU/MPI hot path), to TEST a flux written in
+- `pops.PythonFlux`: HOST numpy path (OUTSIDE the GPU/MPI hot path), to TEST a flux written in
   formulas, not for production.
 
 ## Gap classification (4 baskets)
@@ -117,8 +117,8 @@ Capabilities wired and exposed, sufficient to push further without new code.
 - **Increasing RESOLUTION and ORDER**: pure tuning (the diocotron case already runs at variable n).
   This is the M3 path of `todo.md` section 6, and the resolution x order sweep is done (see
   `SWEEP_RESULTS.md`). The WENO5-Z + SSPRK3 order increase is now reachable from Python
-  (adc_cpp #88): `adc.Spatial(limiter="weno5")` (shortcut `weno5=True`) selects the
-  WENO5-Z reconstruction in `make_block`, and `adc.Explicit(method="ssprk3")` (shortcut
+  (adc_cpp #88): `pops.Spatial(limiter="weno5")` (shortcut `weno5=True`) selects the
+  WENO5-Z reconstruction in `make_block`, and `pops.Explicit(method="ssprk3")` (shortcut
   `ssprk3=True`) the SSPRK3 integrator, via the native path `add_block`. The default stays unchanged
   (Minmod / SSPRK2, bit-identical to pre-#88). WENO5 is now wired ALSO on the `.so` paths
   AOT and production (`add_compiled_block` / `add_native_block`, adc_cpp #102: `.so` grid at 3
@@ -129,7 +129,7 @@ Capabilities wired and exposed, sufficient to push further without new code.
   `System` (`python/bindings/core/bindings.cpp:97`) AND on `AmrSystem` (`python/bindings/core/bindings.cpp:193`,
   `python/bindings/amr/amr_system.cpp:78`). The elliptic cut-cell is validated (MMS order 2, multi-box, MPI;
   `docs/ALGORITHMS.md` section 12). Nothing to write for the Petri ring geometry.
-- **AMR on the ring edge**: `adc.AmrSystem` + `set_refinement(threshold)` runs and
+- **AMR on the ring edge**: `pops.AmrSystem` + `set_refinement(threshold)` runs and
   conserves mass (case `adc_cases/diocotron_amr/run.py`). M2/M2b of `todo.md` note that
   AMR triples the rate at equal base. Pushing the refinement / the number of levels is a
   config tuning. `AmrSystem.potential()` (reading `phi` from Python for the azimuthal
@@ -168,7 +168,7 @@ the production facade is consolidated. Reproducing Hoffart does NOT depend on th
 bricks suffice); this basket is only required if one wants to drive the full magnetized model
 in formulas from Python rather than by composing bricks.
 
-- **Consolidated `compile` facade**: `python/adc/dsl.py` exposes the ergonomic `m.compile(backend=...)`
+- **Consolidated `compile` facade**: `python/pops/dsl.py` exposes the ergonomic `m.compile(backend=...)`
   (auto-detection of the core include, `so_path` cache by ABI key, adc_cpp #103) on top of
   `compile_so` (JIT prototype), `compile_aot` (AOT) and `compile_native` (production, native zero-copy
   loader -> `add_native_block`, target `"system"` or `"amr_system"`). The native production
@@ -212,7 +212,7 @@ Capabilities partially present but incomplete for an advanced Hoffart use.
   multi-species); local source IMEX OK (Gap 2 #132, backward_euler_source /
   mf_apply_source_treatment) but global Schur on AMR and multi-block AMR remain to be done. The
   native multi-box is not wired on the facade side,
-  and the Python AMR facade WIRES HLLC/Roe and the primitive reconstruction with a pressure guard (see `python/adc/__init__.py`,
+  and the Python AMR facade WIRES HLLC/Roe and the primitive reconstruction with a pressure guard (see `python/pops/__init__.py`,
   safeguard `add_equation`): HLLC/Roe require a declared primitive `p` (or `enable_hllc()` / `enable_roe()`)
   (the `add_block` API accepts the primitive recon on the C++ side). WENO5 + Rusanov + conservative IS wired
   on the native AMR path (#105). A high-resolution + high-order AMR diocotron at `System`
@@ -235,8 +235,8 @@ Capabilities partially present but incomplete for an advanced Hoffart use.
 
 ### DONE (to date)
 
-- **WENO5-Z / SSPRK3 reachable from Python** (adc_cpp #88): `adc.Spatial(limiter="weno5")` +
-  `adc.Explicit(method="ssprk3")` via the native path `add_block`, default unchanged.
+- **WENO5-Z / SSPRK3 reachable from Python** (adc_cpp #88): `pops.Spatial(limiter="weno5")` +
+  `pops.Explicit(method="ssprk3")` via the native path `add_block`, default unchanged.
 - **Order x resolution sweep extended to O5 and to n=384/512** (see `SWEEP_RESULTS.md`): order
   `{O1, O2 minmod, O2 vanleer, O5 weno5}`, up to n=512 (high resolution on ROMEO x64cpu).
   Reading: l=3 plateaus ~ -9 % at O5 high resolution (cleanest structural candidate); l=4 does not

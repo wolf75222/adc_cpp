@@ -8,20 +8,20 @@
 //   3. BIT-IDENTIQUE a solve() sur un cas convergent (eff 224) : la phase 1 est le corps de solve(),
 //      donc phi doit etre identique au bit pres.
 
-#include <adc/numerics/elliptic/mg/geometric_mg.hpp>
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/layout/distribution_mapping.hpp>
-#include <adc/mesh/geometry/geometry.hpp>
-#include <adc/mesh/storage/mf_arith.hpp>
-#include <adc/mesh/storage/multifab.hpp>
-#include <adc/mesh/boundary/physical_bc.hpp>
+#include <pops/numerics/elliptic/mg/geometric_mg.hpp>
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/layout/distribution_mapping.hpp>
+#include <pops/mesh/geometry/geometry.hpp>
+#include <pops/mesh/storage/mf_arith.hpp>
+#include <pops/mesh/storage/multifab.hpp>
+#include <pops/mesh/boundary/physical_bc.hpp>
 
 #include <cmath>
 #include <cstdio>
 #include <functional>
 #include <vector>
 
-using namespace adc;
+using namespace pops;
 
 // remplit le RHS = anneau de charge (meme CI que le transport a derive en colonne) et remet phi a 0.
 static void set_ring_rhs(GeometricMG& mg, int nc, double dx) {

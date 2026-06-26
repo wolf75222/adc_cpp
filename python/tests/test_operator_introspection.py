@@ -8,10 +8,10 @@ exercised here on a CompiledProblem built directly (not via the Kokkos-only comp
 import sys
 
 try:
-    from adc import dsl, model
-    from adc import time as adctime
-except Exception as exc:  # adc not importable here -> skip, never fake
-    print("skip test_operator_introspection (adc unavailable: %s)" % exc)
+    from pops import dsl, model
+    from pops import time as adctime
+except Exception as exc:  # pops not importable here -> skip, never fake
+    print("skip test_operator_introspection (pops unavailable: %s)" % exc)
     sys.exit(0)
 
 

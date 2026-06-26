@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Operator-first predictor-corrector authored as a PURE adc.model.Module (Spec 2 / ADC-447).
+"""Operator-first predictor-corrector authored as a PURE pops.model.Module (Spec 2 / ADC-447).
 
-This is the spec's "model-free example target": the model is an ``adc.model.Module`` whose operators
+This is the spec's "model-free example target": the model is an ``pops.model.Module`` whose operators
 are declared by signature with IR (``dsl.Expr``) bodies -- a field operator (Poisson), a flux
 (grid operator), an electric source, a Lorentz local linear operator -- plus a composite rate
 ``explicit_rhs``. No PDE method (``m.flux`` / ``m.source_term``) is called on the model; the Module
 IS the model. The time algorithm is the GENERIC macro
-``adc.time.std.predictor_corrector_local_linear`` keyed on the three operator names -- it mentions no
+``pops.time.std.predictor_corrector_local_linear`` keyed on the three operator names -- it mentions no
 flux / source / poisson / lorentz.
 
 ``compile_problem(model=module, time=P)`` lowers the Module to the dsl codegen engine (Module.to_dsl,
@@ -18,7 +18,7 @@ Run::
 
     python examples/operator_modules/predictor_corrector_operator_first.py
 
-Requires a compiler + a visible Kokkos (``ADC_KOKKOS_ROOT``); prints a skip notice and exits 0
+Requires a compiler + a visible Kokkos (``POPS_KOKKOS_ROOT``); prints a skip notice and exits 0
 otherwise (run it on ROMEO). cf. docs/sphinx/reference/operator-modules.md.
 """
 import sys
@@ -26,12 +26,12 @@ import sys
 try:
     import numpy as np
 
-    import adc
-    from adc import dsl
-    from adc import model
-    from adc import time as adctime
+    import pops
+    from pops import dsl
+    from pops import model
+    from pops import time as adctime
 except Exception as exc:  # noqa: BLE001
-    print("skip predictor_corrector_operator_first (adc/numpy unavailable: %s)" % exc)
+    print("skip predictor_corrector_operator_first (pops/numpy unavailable: %s)" % exc)
     sys.exit(0)
 
 N = 16
@@ -99,11 +99,11 @@ def default_source_model(name="opfirst_ref"):
 
 
 def make_sim(block_model):
-    sim = adc.System(n=N, L=1.0, periodic=True)
+    sim = pops.System(n=N, L=1.0, periodic=True)
     compiled = block_model.compile(backend="production")
     sim.add_equation("plasma", compiled,
-                     spatial=adc.FiniteVolume(limiter="none", riemann="rusanov"),
-                     time=adc.Explicit(method="euler"))
+                     spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                     time=pops.Explicit(method="euler"))
     sim.set_poisson("charge_density", "geometric_mg")
     sim.set_magnetic_field(BZ * np.ones(N * N))
     x = (np.arange(N) + 0.5) / N
@@ -133,12 +133,12 @@ def lorentz_apply(u):
 
 
 def main():
-    if not hasattr(adc.System(n=8, L=1.0, periodic=True), "install_program"):
-        print("skip predictor_corrector_operator_first (_adc lacks install_program; rebuild _adc)")
+    if not hasattr(pops.System(n=8, L=1.0, periodic=True), "install_program"):
+        print("skip predictor_corrector_operator_first (_pops lacks install_program; rebuild _pops)")
         return 0
     try:
         mod = operator_module()
-        compiled = adc.compile_problem(model=mod, time=operator_first_program(mod))
+        compiled = pops.compile_problem(model=mod, time=operator_first_program(mod))
         sim, u0 = make_sim(mod.to_dsl())                  # the Module IS the block model
         ref = make_sim(default_source_model())[0]
     except RuntimeError as exc:

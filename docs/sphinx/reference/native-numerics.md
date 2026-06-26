@@ -1,45 +1,45 @@
 # Native numerics: Riemann solvers and reconstruction
 
-The hot-path finite-volume bricks are C++ native in `include/adc/numerics/fv`. Python never
+The hot-path finite-volume bricks are C++ native in `include/pops/numerics/fv`. Python never
 computes a Riemann flux or a WENO reconstruction; it selects a native brick (a descriptor,
 see {doc}`typed-bricks`) and supplies the model-dependent quantities the brick needs.
 
-## Native Riemann solvers (`include/adc/numerics/fv/numerical_flux.hpp`)
+## Native Riemann solvers (`include/pops/numerics/fv/numerical_flux.hpp`)
 
 | Brick | C++ type | Needs from the model |
 | --- | --- | --- |
-| Rusanov (local Lax-Friedrichs) | `adc::RusanovFlux` | `max_wave_speed` |
-| HLL | `adc::HLLFlux` | `physical_flux`, `wave_speeds` |
-| HLLC | `adc::HLLCFlux` | `physical_flux`, `pressure`, `wave_speeds`, `contact_speed`, `hllc_star_state` |
-| Roe | `adc::RoeFlux` | `physical_flux`, `roe_average` (or a `roe_dissipation` hook) |
+| Rusanov (local Lax-Friedrichs) | `pops::RusanovFlux` | `max_wave_speed` |
+| HLL | `pops::HLLFlux` | `physical_flux`, `wave_speeds` |
+| HLLC | `pops::HLLCFlux` | `physical_flux`, `pressure`, `wave_speeds`, `contact_speed`, `hllc_star_state` |
+| Roe | `pops::RoeFlux` | `physical_flux`, `roe_average` (or a `roe_dissipation` hook) |
 
 HLLC and Roe are generic over the model via capability traits (`HasHLLCStructure`,
 `HasRoeDissipation`); 2D Euler is only the fallback when no hooks are provided. A model that
 lacks a required capability is rejected with a clear message, e.g.
 `riemann HLLC requires model capability 'hllc_star_state' for state U`.
 
-## Native reconstruction / limiters (`include/adc/numerics/fv/reconstruction.hpp`)
+## Native reconstruction / limiters (`include/pops/numerics/fv/reconstruction.hpp`)
 
 | Brick | C++ type |
 | --- | --- |
-| First order (no slope) | `adc::NoSlope` |
-| MUSCL minmod | `adc::Minmod` |
-| MUSCL van Leer | `adc::VanLeer` |
-| WENO5-Z | `adc::Weno5` (this IS the WENO5-Z reconstruction) |
+| First order (no slope) | `pops::NoSlope` |
+| MUSCL minmod | `pops::Minmod` |
+| MUSCL van Leer | `pops::VanLeer` |
+| WENO5-Z | `pops::Weno5` (this IS the WENO5-Z reconstruction) |
 
 ## Selecting them from Python
 
 Today, a `dsl.Model` selects the solver/reconstruction by string
-(`adc.FiniteVolume(riemann="hllc", reconstruction="weno5z")`) and generates the model hooks
-from physical roles via `m.enable_hllc()` / `m.enable_roe()` (the hooks become `ADC_HD` C++
+(`pops.FiniteVolume(riemann="hllc", reconstruction="weno5z")`) and generates the model hooks
+from physical roles via `m.enable_hllc()` / `m.enable_roe()` (the hooks become `POPS_HD` C++
 functions the native solver calls statically; no Python callback, no per-cell string lookup).
 
 The Spec 3 descriptors name these native bricks without computing anything:
 
 ```python
-import adc.lib as lib
-lib.riemann.HLLC().native_id        # 'adc::HLLCFlux'
-lib.reconstruction.WENO5Z().native_id  # 'adc::Weno5'
+import pops.lib as lib
+lib.riemann.HLLC().native_id        # 'pops::HLLCFlux'
+lib.reconstruction.WENO5Z().native_id  # 'pops::Weno5'
 lib.riemann.HLLC().requirements     # {'capabilities': ['physical_flux', 'pressure', ...]}
 ```
 
@@ -52,11 +52,11 @@ them. HLLC/Roe require a pressure (a primitive `p` or a `pressure=` formula) and
 Density/MomentumX/MomentumY; HLL requires wave speeds; Rusanov requires only a max wave speed.
 Missing capabilities are rejected with a clear message, e.g.
 `riemann HLLC requires model capability 'pressure' for state 'U'`. When valid, `m.riemann` drives
-the dsl `enable_hllc()` / `enable_roe()` that generate the `ADC_HD` `contact_speed` /
+the dsl `enable_hllc()` / `enable_roe()` that generate the `POPS_HD` `contact_speed` /
 `hllc_star_state` / `roe_dissipation` hooks from the roles.
 
 Passing an explicit board formula for a single-state capability quantity overrides the
-role-derived hook with that formula's codegen: `m.riemann("hllc", pressure=<adc.math expr>)`
+role-derived hook with that formula's codegen: `m.riemann("hllc", pressure=<pops.math expr>)`
 emits the `pressure(U)` hook from the given expression instead of the primitive `p`. A formula
 that references a quantity the model cannot provide raises the same clear capability error at
 codegen.
@@ -66,5 +66,5 @@ codegen.
 The native solvers, the reconstruction bricks, the descriptor catalog, the board capability
 validation, the role-derived hook generation and the single-state formula override (`pressure=`)
 are in place. The two-state hooks (`contact_speed` / `star_state`, spanning UL/UR) take only a
-role-derived capability descriptor, not an arbitrary `adc.math` formula; that and the end-to-end
+role-derived capability descriptor, not an arbitrary `pops.math` formula; that and the end-to-end
 board-model compile path are the remaining part of ADC-456.

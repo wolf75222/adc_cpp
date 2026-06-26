@@ -17,23 +17,23 @@
 // Tests de CONTRAT (aucun calcul) : throws cibles + cas valides qui construisent. Compile
 // python/system.cpp et python/amr_system.cpp (objets runtime splices, cf. tests/CMakeLists.txt).
 
-#include <adc/runtime/amr_system.hpp>
-#include <adc/runtime/builders/factory/model_factory.hpp>  // detail::validate_model_spec (contrat de completude)
-#include <adc/runtime/config/model_spec.hpp>
-#include <adc/runtime/system.hpp>
+#include <pops/runtime/amr_system.hpp>
+#include <pops/runtime/builders/factory/model_factory.hpp>  // detail::validate_model_spec (contrat de completude)
+#include <pops/runtime/config/model_spec.hpp>
+#include <pops/runtime/system.hpp>
 
-#include "test_harness.hpp"  // adc::test::Checker (style verbose) + raises partages
+#include "test_harness.hpp"  // pops::test::Checker (style verbose) + raises partages
 
 #include <cstdio>
 #include <stdexcept>
 #include <string>
 
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
 #include <Kokkos_Core.hpp>
 #endif
 
-using namespace adc;
-using adc::test::raises;  // true si l'appelable leve std::runtime_error (le refus attendu)
+using namespace pops;
+using pops::test::raises;  // true si l'appelable leve std::runtime_error (le refus attendu)
 
 namespace {
 
@@ -63,13 +63,13 @@ ModelSpec exb_charge() {
 }  // namespace
 
 int main(int argc, char** argv) {
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   Kokkos::ScopeGuard guard(argc, argv);
 #else
   (void)argc;
   (void)argv;
 #endif
-  adc::test::Checker checker{adc::test::Checker::Style::Verbose};  // imprime [OK ]/[XX ] par ligne
+  pops::test::Checker checker{pops::test::Checker::Style::Verbose};  // imprime [OK ]/[XX ] par ligne
   auto chk = [&](bool c, const char* w) { checker(c, w); };
 
   // ============================================================================================

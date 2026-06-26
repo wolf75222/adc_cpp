@@ -1,7 +1,7 @@
 # Build and simulate a moment model (HyQMOM, 15 moments)
 
 Build the 2D fifteen-moment kinetic model the way the `hyqmom15` case does: declare the moment
-state, write one closure, let `adc.moments` generate the fluxes and the wave speeds, compile to a
+state, write one closure, let `pops.moments` generate the fluxes and the wave speeds, compile to a
 `.so`, and run the same model under three numerical methods. The point of this tutorial is the
 workflow, not the golden-file validation: you will see how little physics you write (a single
 closure) and how the generator derives the rest.
@@ -12,11 +12,11 @@ page explains how it is put together so you can write your own moment model the 
 
 ## Prerequisites
 
-- A built `adc` Python module. If you have not built it yet, follow
+- A built `pops` Python module. If you have not built it yet, follow
   [Installation](../getting-started/installation.md); the Kokkos Serial backend is enough.
 - `numpy` in the same Python environment.
 - The repository headers on disk, because the model is compiled to a `.so` against them. Set
-  `ADC_INCLUDE=$PWD/include`, or pass `include=` to `compile`.
+  `POPS_INCLUDE=$PWD/include`, or pass `include=` to `compile`.
 - Background, if you want it: the [moments and closures concept](../concepts/moments-and-closures.md)
   explains the moment hierarchy and the closure problem; the
   [moment models reference](../reference/moment-models.md) is the API. The DSL mechanics this builds
@@ -50,7 +50,7 @@ The order above is the canonical order of the generic generator. You do not rety
 generator for it, which also guarantees your indices match what the kernel expects.
 
 ```python
-from adc import moments as gmom
+from pops import moments as gmom
 
 names = gmom.moment_names(4)     # ['M00','M10','M20','M30','M40','M01', ... ,'M04'], 15 entries
 pq    = gmom.moment_indices(4)   # [(0,0),(1,0),(2,0), ... ,(0,4)], the (p,q) exponents
@@ -98,7 +98,7 @@ One call turns the closure into a full symbolic model:
 m = gmom.build_moment_model("hyqmom15", 4, hyqmom_closure)
 ```
 
-`build_moment_model(name, order, closure, ...)` returns an `adc.dsl.Model`. From the closure alone it
+`build_moment_model(name, order, closure, ...)` returns an `pops.dsl.Model`. From the closure alone it
 generates, as symbolic formulas:
 
 - the mean velocities `u = M10/M00`, `v = M01/M00`;
@@ -119,20 +119,20 @@ floors only where they protect the divisions and square roots.
 ## Step 4: compile to a `.so`
 
 ```python
-import adc
-compiled = m.compile("hyqmom15.so", adc.adc_include(), backend="aot")
+import pops
+compiled = m.compile("hyqmom15.so", pops.pops_include(), backend="aot")
 ```
 
 `compile` runs the code generator and a C++ compiler once and returns a `CompiledModel`. `backend="aot"`
 is the portable host path, fine for a first run; `backend="production"` is the native zero-copy path
-(preferred under MPI and AMR) and needs the headers and compiler to match the build of `_adc`. The
-default (`backend="auto"`) picks one for you. `adc.adc_include()` locates the headers; you can pass an
+(preferred under MPI and AMR) and needs the headers and compiler to match the build of `_pops`. The
+default (`backend="auto"`) picks one for you. `pops.pops_include()` locates the headers; you can pass an
 explicit path instead.
 
 ## Step 5: simulate -- one model, several methods
 
 The same compiled model now runs under different numerical methods. You choose them when you attach
-the model to an `adc.System`, not when you build it.
+the model to an `pops.System`, not when you build it.
 
 ### 5a: Rusanov plus explicit time stepping (the safe start)
 
@@ -141,18 +141,18 @@ This is the jet-crossing run:
 
 ```python
 import numpy as np
-sim = adc.System(n=64, L=1.0, periodic=True)
+sim = pops.System(n=64, L=1.0, periodic=True)
 sim.add_equation("mom", model=compiled,
-                 spatial=adc.FiniteVolume(limiter="none", riemann="rusanov"),
-                 time=adc.Explicit())
+                 spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                 time=pops.Explicit())
 sim.set_state("mom", crossing_state(64, ma=2.0))   # initial 15-moment field, shape (15, 64, 64)
 for _ in range(10):
     sim.step_cfl(0.4)
 U = np.array(sim.get_state("mom"))                 # (15, 64, 64), finite, mass conserved
 ```
 
-`adc.FiniteVolume(limiter="none", riemann="rusanov")` selects the finite-volume scheme, no slope
-limiter, and the Rusanov numerical flux; `adc.Explicit()` is the default explicit integrator
+`pops.FiniteVolume(limiter="none", riemann="rusanov")` selects the finite-volume scheme, no slope
+limiter, and the Rusanov numerical flux; `pops.Explicit()` is the default explicit integrator
 (SSP-RK2). `set_state` loads the full moment field, `step_cfl(0.4)` advances one CFL-limited step.
 `crossing_state` builds the two-jet initial condition (it lives in the case's `model.py`).
 
@@ -164,12 +164,12 @@ path:
 
 ```python
 m_exact  = gmom.build_moment_model("hyqmom15_exact", 4, hyqmom_closure, exact_speeds=True)
-compiled = m_exact.compile("hyqmom15_exact.so", adc.adc_include(), backend="aot")
+compiled = m_exact.compile("hyqmom15_exact.so", pops.pops_include(), backend="aot")
 
-sim = adc.System(n=64, L=1.0, periodic=True)
+sim = pops.System(n=64, L=1.0, periodic=True)
 sim.add_equation("mom", model=compiled,
-                 spatial=adc.FiniteVolume(limiter="none", riemann="hll"),
-                 time=adc.Explicit())
+                 spatial=pops.FiniteVolume(limiter="none", riemann="hll"),
+                 time=pops.Explicit())
 ```
 
 `exact_speeds=True` is already the generator default; it is shown here to make the intent explicit.
@@ -187,12 +187,12 @@ the maximum wave speed for the CFL step), and it needs the `aot` or `production`
 
 ```python
 m_roe   = gmom.build_moment_model("hyqmom15_roe", 4, hyqmom_closure, roe=True)
-compiled = m_roe.compile("hyqmom15_roe.so", adc.adc_include(), backend="aot")
+compiled = m_roe.compile("hyqmom15_roe.so", pops.pops_include(), backend="aot")
 
-sim = adc.System(n=64, L=1.0, periodic=True)
+sim = pops.System(n=64, L=1.0, periodic=True)
 sim.add_equation("mom", model=compiled,
-                 spatial=adc.FiniteVolume(limiter="none", riemann="roe"),
-                 time=adc.Explicit())
+                 spatial=pops.FiniteVolume(limiter="none", riemann="roe"),
+                 time=pops.Explicit())
 ```
 
 `riemann="roe"` matches the reference Matlab `space_scheme='ROE'`. The
@@ -206,7 +206,7 @@ and a Poisson right-hand side, then turn on the system Poisson solver. The sourc
 `grad_x`/`grad_y` aux channels that the solver fills in:
 
 ```python
-from adc import dsl
+from pops import dsl
 
 def lorentz(m_, M_):                      # E = -grad phi
     gx, gy = m_.aux("grad_x"), m_.aux("grad_y")
@@ -221,12 +221,12 @@ rho_bg = m_vp.param("rho_background", rho_mean)      # neutralizing background =
 M00 = dsl.Var("M00", "cons")
 m_vp.elliptic_rhs(inv_l2 * (M00 - rho_bg))           # Delta(phi) = (M00 - rho_bg) / lam^2
 m_vp.check()
-compiled = m_vp.compile("hyqmom15_vp.so", adc.adc_include(), backend="aot")
+compiled = m_vp.compile("hyqmom15_vp.so", pops.pops_include(), backend="aot")
 
-sim = adc.System(n=64, L=1.0, periodic=True)
+sim = pops.System(n=64, L=1.0, periodic=True)
 sim.add_equation("mom", model=compiled,
-                 spatial=adc.FiniteVolume(limiter="none", riemann="hll"),
-                 time=adc.Explicit())
+                 spatial=pops.FiniteVolume(limiter="none", riemann="hll"),
+                 time=pops.Explicit())
 sim.set_poisson(rhs="charge_density", solver="geometric_mg")
 ```
 
@@ -257,8 +257,8 @@ a per-cell `relaxation15` projection each step. Realizability is NOT a `build_mo
 the generator has no `projection` parameter. It is a separate pointwise hook on the model:
 `m.projection([...])` (ADC-177, the `HasPointwiseProjection` trait), one expression per conservative
 component. The system then applies `U <- project(U, aux)` to the valid cells at the end of each whole
-macro-step in C++, instead of a per-cell Python callback. It runs on the flat `adc.System`, under
-MPI, and on `adc.AmrSystem` (per level after the reflux, ADC-312). The projection must be idempotent
+macro-step in C++, instead of a per-cell Python callback. It runs on the flat `pops.System`, under
+MPI, and on `pops.AmrSystem` (per level after the reflux, ADC-312). The projection must be idempotent
 and pointwise (no neighbor reads), and the clamps are written branchlessly with `dsl.abs_` / `sign`;
 `dsl.eig_all_real` builds the realizable-cone masks (ADC-362). Without the hook the model is
 unchanged.
@@ -285,14 +285,14 @@ projection applied at every step `dt` stays stable (around `1.2e-3`) over the fu
 - The flux returns non-finite values on a degenerate state (a zero `C20`, `C02`, or `M00`): rebuild
   with `robust=True`. The default path is bare on purpose, to stay faithful to a reference that has no
   guards.
-- `RuntimeError` about headers when compiling: set `ADC_INCLUDE` to the repository `include`
+- `RuntimeError` about headers when compiling: set `POPS_INCLUDE` to the repository `include`
   directory, or pass `include=` to `compile`.
 
 ## Next
 
 - The [moments and closures concept](../concepts/moments-and-closures.md) for why the standardization
   and the closure problem look the way they do.
-- The [moment models reference](../reference/moment-models.md) for the full `adc.moments` API: the
+- The [moment models reference](../reference/moment-models.md) for the full `pops.moments` API: the
   closure contract, `gaussian_closure`, `lorentz_sources`, and the `robust` / `exact_speeds` flags.
 - The tested case at `adc_cases/hyqmom15` for the complete model, the realizable state generators,
   and the validation against the reference solution.

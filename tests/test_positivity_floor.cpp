@@ -16,23 +16,23 @@
 //      plancher), et le residu assemble_rhs reste conservatif (somme de masse nulle en periodique).
 //  (4) REJET CLAIR : un modele sans role Density (AdvectionDiffusion scalaire) + pos_floor > 0 ->
 //      runtime_error explicite (jamais un scaling muet d'une composante arbitraire).
-#include <adc/validation/physics/advection_diffusion.hpp>
-#include <adc/physics/fluids/euler.hpp>
-#include <adc/runtime/builders/block/block_builder.hpp>
+#include <pops/validation/physics/advection_diffusion.hpp>
+#include <pops/physics/fluids/euler.hpp>
+#include <pops/runtime/builders/block/block_builder.hpp>
 
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/layout/distribution_mapping.hpp>
-#include <adc/mesh/execution/for_each.hpp>
-#include <adc/mesh/storage/multifab.hpp>
-#include <adc/mesh/boundary/physical_bc.hpp>
-#include <adc/numerics/spatial_operator.hpp>
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/layout/distribution_mapping.hpp>
+#include <pops/mesh/execution/for_each.hpp>
+#include <pops/mesh/storage/multifab.hpp>
+#include <pops/mesh/boundary/physical_bc.hpp>
+#include <pops/numerics/spatial_operator.hpp>
 
 #include <cmath>
 #include <cstdio>
 #include <stdexcept>
 #include <string>
 
-using namespace adc;
+using namespace pops;
 
 // Euler SANS terme source : le modele physique Euler n'expose pas source() (make_block l'exige).
 // Forward minimal flux / vitesse d'onde + INTROSPECTION (positivity_comp lit conservative_vars,
@@ -43,11 +43,11 @@ struct EulerNoSrc {
   static constexpr int n_vars = Euler::n_vars;
   Euler e{};
   Real gamma = Real(1.4);
-  ADC_HD State flux(const State& u, const Aux& a, int dir) const { return e.flux(u, a, dir); }
-  ADC_HD Real max_wave_speed(const State& u, const Aux& a, int dir) const {
+  POPS_HD State flux(const State& u, const Aux& a, int dir) const { return e.flux(u, a, dir); }
+  POPS_HD Real max_wave_speed(const State& u, const Aux& a, int dir) const {
     return e.max_wave_speed(u, a, dir);
   }
-  ADC_HD State source(const State&, const Aux&) const { return State{}; }
+  POPS_HD State source(const State&, const Aux&) const { return State{}; }
   static VariableSet conservative_vars() { return Euler::conservative_vars(); }
   static VariableSet primitive_vars() { return Euler::primitive_vars(); }
 };
@@ -280,7 +280,7 @@ int main(int argc, char** argv) {
   // (4) REJET CLAIR : modele sans role Density + pos_floor > 0 -> runtime_error explicite.
   // ----------------------------------------------------------------------------------------------
   {
-    const adc::validation::AdvectionDiffusion scal{1.0, 0.0, 0.0};
+    const pops::validation::AdvectionDiffusion scal{1.0, 0.0, 0.0};
     MultiFab Us(ba, dm, 1, 2), Rs(ba, dm, 1, 0);
     Us.set_val(1.0);
     bool threw = false;

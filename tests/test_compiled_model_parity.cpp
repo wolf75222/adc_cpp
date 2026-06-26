@@ -4,24 +4,24 @@
 // les vrais MultiFab du System, sans marshaling) : on exige un residu eval_rhs ET un potentiel
 // BIT-IDENTIQUES au bloc natif. C'est ce qui donne au modele genere par le DSL la parite Kokkos + MPI
 // du bloc natif (les deux passent par le meme make_block / install_block / fill_boundary).
-#include <adc/physics/bricks/bricks.hpp>  // CompositeModel, GravityForce, GravityCoupling
-#include <adc/physics/fluids/euler.hpp>   // Euler (= CompressibleFlux)
-#include <adc/runtime/builders/compiled/dsl_block.hpp>
-#include <adc/runtime/config/model_spec.hpp>
-#include <adc/runtime/system.hpp>
+#include <pops/physics/bricks/bricks.hpp>  // CompositeModel, GravityForce, GravityCoupling
+#include <pops/physics/fluids/euler.hpp>   // Euler (= CompressibleFlux)
+#include <pops/runtime/builders/compiled/dsl_block.hpp>
+#include <pops/runtime/config/model_spec.hpp>
+#include <pops/runtime/system.hpp>
 
 #include <cmath>
 #include <cstdio>
 #include <vector>
 
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
 #include <Kokkos_Core.hpp>
 #endif
 
-using namespace adc;
+using namespace pops;
 
 int main(int argc, char** argv) {
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   // Sous Kokkos, l'allocateur unifie (kokkos_malloc<SharedSpace>) exige Kokkos initialise AVANT la
   // 1ere allocation (le ctor de System alloue l'aux) : ScopeGuard (RAII) avant toute construction.
   Kokkos::ScopeGuard guard(argc, argv);

@@ -7,19 +7,19 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
 #SBATCH --time=01:00:00
-#SBATCH --job-name=adc_perf_cpu
-#SBATCH --output=/home/rmdraux/adc_perf_20260608/logs/cpu_%j.out
-#SBATCH --error=/home/rmdraux/adc_perf_20260608/logs/cpu_%j.err
+#SBATCH --job-name=pops_perf_cpu
+#SBATCH --output=/home/rmdraux/pops_perf_20260608/logs/cpu_%j.out
+#SBATCH --error=/home/rmdraux/pops_perf_20260608/logs/cpu_%j.err
 
 set -u
-BASE="$HOME/adc_perf_20260608"
+BASE="$HOME/pops_perf_20260608"
 SRC="$BASE/adc_cpp"
 CASES="$BASE/adc_cases"
 RESULTS="$BASE/results"
 LOGS="$BASE/logs"
 mkdir -p "$RESULTS" "$LOGS"
 
-echo "=== ADC CPU PERF job=$SLURM_JOBID node=$(hostname) arch=$(uname -m) date=$(date) ==="
+echo "=== PoPS CPU PERF job=$SLURM_JOBID node=$(hostname) arch=$(uname -m) date=$(date) ==="
 
 romeo_load_x64cpu_env >/dev/null 2>&1
 eval "$(spack load --sh /fmrcj5j 2>/dev/null)"   # gcc 14.2.0
@@ -61,12 +61,12 @@ git -C "$SRC" fetch origin --prune
 git -C "$SRC" checkout --detach origin/master
 git -C "$CASES" fetch origin --prune
 git -C "$CASES" checkout --detach origin/master
-ADC_CPP_COMMIT="$(git -C "$SRC" rev-parse --short HEAD)"
-ADC_CASES_COMMIT="$(git -C "$CASES" rev-parse --short HEAD)"
-echo "ADC_CPP_COMMIT=$ADC_CPP_COMMIT"
-echo "ADC_CASES_COMMIT=$ADC_CASES_COMMIT"
+POPS_CPP_COMMIT="$(git -C "$SRC" rev-parse --short HEAD)"
+POPS_CASES_COMMIT="$(git -C "$CASES" rev-parse --short HEAD)"
+echo "POPS_CPP_COMMIT=$POPS_CPP_COMMIT"
+echo "POPS_CASES_COMMIT=$POPS_CASES_COMMIT"
 
-KROOT="$HOME/adc_cpu_mpiomp/kinstall_omp"
+KROOT="$HOME/pops_cpu_mpiomp/kinstall_omp"
 if [ ! -f "$KROOT/lib64/cmake/Kokkos/KokkosConfig.cmake" ] && [ ! -f "$KROOT/lib/cmake/Kokkos/KokkosConfig.cmake" ]; then
   echo "MISSING_KOKKOS_OPENMP $KROOT"
   exit 2
@@ -79,16 +79,16 @@ WARMUP=3
 LIMITER=minmod
 SOLVER=geometric_mg
 
-PHASE_CSV="$RESULTS/perf_phases_cpu_${ADC_CPP_COMMIT}_${SLURM_JOBID}.csv"
-SCALING_CSV="$RESULTS/perf_scaling_cpu_${ADC_CPP_COMMIT}_${SLURM_JOBID}.csv"
-FRONTEND_CSV="$RESULTS/perf_frontends_cpu_${ADC_CPP_COMMIT}_${SLURM_JOBID}.csv"
+PHASE_CSV="$RESULTS/perf_phases_cpu_${POPS_CPP_COMMIT}_${SLURM_JOBID}.csv"
+SCALING_CSV="$RESULTS/perf_scaling_cpu_${POPS_CPP_COMMIT}_${SLURM_JOBID}.csv"
+FRONTEND_CSV="$RESULTS/perf_frontends_cpu_${POPS_CPP_COMMIT}_${SLURM_JOBID}.csv"
 printf "commit,case,backend,np,threads,n,steps,phase,total_s,per_step_ms,pct\n" > "$PHASE_CSV"
 printf "commit,repo,case,scaling,backend,machine,np,threads,gpus,n_global,n_local,steps,warmup,wall_s,per_step_ms,speedup,efficiency,notes\n" > "$SCALING_CSV"
 printf "commit,case,frontend,backend,n,steps,dt,cache_state,setup_ms,compile_ms,advance_ms,step_loop_ms,extract_ms,total_ms,ratio_vs_cpp,notes\n" > "$FRONTEND_CSV"
 
 parse_profile_log () {
   local log="$1" case="$2" scaling="$3" backend="$4" np="$5" threads="$6" n="$7" notes="$8"
-  python3 - "$log" "$PHASE_CSV" "$SCALING_CSV" "$ADC_CPP_COMMIT" "$case" "$scaling" "$backend" "$np" "$threads" "$n" "$STEPS" "$WARMUP" "$notes" <<'PY'
+  python3 - "$log" "$PHASE_CSV" "$SCALING_CSV" "$POPS_CPP_COMMIT" "$case" "$scaling" "$backend" "$np" "$threads" "$n" "$STEPS" "$WARMUP" "$notes" <<'PY'
 import csv, re, sys
 log, phase_csv, scaling_csv, commit, case, scaling, backend, np, threads, n, steps, warmup, notes = sys.argv[1:]
 phase_re = re.compile(r"^(transport|poisson|halos|aux_derive|reduction|fence|alloc_tmp|TOTAL)\s+([-\d.eE+]+)\s+([-\d.eE+]+)\s+([-\d.eE+]+)%")
@@ -124,8 +124,8 @@ configure_bench () {
   local build="$1"; shift
   rm -rf "$build"
   cmake -S "$SRC" -B "$build" "$@" \
-    -DADC_USE_KOKKOS=ON -DKokkos_ROOT="$KROOT" \
-    -DADC_BUILD_BENCH=ON -DADC_BUILD_TESTS=OFF -DCMAKE_BUILD_TYPE=Release \
+    -DPOPS_USE_KOKKOS=ON -DKokkos_ROOT="$KROOT" \
+    -DPOPS_BUILD_BENCH=ON -DPOPS_BUILD_TESTS=OFF -DCMAKE_BUILD_TYPE=Release \
     > "$LOGS/$(basename "$build")_cfg.log" 2>&1
   local rc=$?
   echo "CONFIG $(basename "$build") rc=$rc"
@@ -151,7 +151,7 @@ if configure_bench "$BUILD_KOKKOS"; then
 fi
 
 BUILD_MPI="$BASE/build_cpu_mpi_kokkos"
-if configure_bench "$BUILD_MPI" -DADC_USE_MPI=ON -DCMAKE_CXX_COMPILER=mpicxx -DCMAKE_C_COMPILER=mpicc; then
+if configure_bench "$BUILD_MPI" -DPOPS_USE_MPI=ON -DCMAKE_CXX_COMPILER=mpicxx -DCMAKE_C_COMPILER=mpicc; then
   for np in 1 2 4 8; do
     thr=4
     export OMP_NUM_THREADS="$thr"
@@ -178,17 +178,17 @@ fi
 FRONT="$BASE/frontend_cpu"
 mkdir -p "$FRONT"
 cat > "$FRONT/frontend_bench.cpp" <<'CPP'
-#include <adc/runtime/model_spec.hpp>
-#include <adc/runtime/system.hpp>
+#include <pops/runtime/model_spec.hpp>
+#include <pops/runtime/system.hpp>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
 #include <vector>
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
 #include <Kokkos_Core.hpp>
 #endif
-using namespace adc;
+using namespace pops;
 static std::vector<double> initial_state(int n, double gamma) {
   const double pi = 3.14159265358979323846;
   std::vector<double> U(static_cast<std::size_t>(4) * n * n, 0.0);
@@ -208,7 +208,7 @@ static std::vector<double> initial_state(int n, double gamma) {
   return U;
 }
 int main(int argc, char** argv) {
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   Kokkos::initialize(argc, argv);
 #endif
   const int n = argc > 1 ? std::atoi(argv[1]) : 128;
@@ -234,12 +234,12 @@ int main(int argc, char** argv) {
     sim.set_poisson("charge_density", "fft");
     sim.set_state("gas", initial_state(n, gamma));
     for (int s = 0; s < warmup; ++s) sim.step(dt);
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
     Kokkos::fence();
 #endif
     const auto t0 = std::chrono::steady_clock::now();
     sim.advance(dt, steps);
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
     Kokkos::fence();
 #endif
     const auto t1 = std::chrono::steady_clock::now();
@@ -252,7 +252,7 @@ int main(int argc, char** argv) {
   }
   std::printf("FRONTEND_CPP n=%d steps=%d warmup=%d dt=%.17g advance_ms=%.6f extract_ms=%.6f total_ms=%.6f mass=%.17e\n",
               n, steps, warmup, dt, advance_ms, extract_ms, advance_ms + extract_ms, mass);
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   Kokkos::finalize();
 #endif
   return 0;
@@ -260,26 +260,26 @@ int main(int argc, char** argv) {
 CPP
 cat > "$FRONT/CMakeLists.txt" <<'CMAKE'
 cmake_minimum_required(VERSION 3.16)
-project(adc_frontend_cpp CXX)
+project(pops_frontend_cpp CXX)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(Kokkos REQUIRED)
-add_executable(frontend_cpp frontend_bench.cpp ${ADC_SRC}/python/system.cpp)
-target_include_directories(frontend_cpp PRIVATE ${ADC_SRC}/include)
-target_compile_definitions(frontend_cpp PRIVATE ADC_HAS_KOKKOS)
+add_executable(frontend_cpp frontend_bench.cpp ${POPS_SRC}/python/system.cpp)
+target_include_directories(frontend_cpp PRIVATE ${POPS_SRC}/include)
+target_compile_definitions(frontend_cpp PRIVATE POPS_HAS_KOKKOS)
 target_link_libraries(frontend_cpp PRIVATE Kokkos::kokkos)
 CMAKE
 
 BUILD_FRONT_CPP="$BASE/build_frontend_cpp"
 rm -rf "$BUILD_FRONT_CPP"
-if cmake -S "$FRONT" -B "$BUILD_FRONT_CPP" -DKokkos_ROOT="$KROOT" -DADC_SRC="$SRC" -DCMAKE_BUILD_TYPE=Release > "$LOGS/frontend_cpp_cfg.log" 2>&1 && \
+if cmake -S "$FRONT" -B "$BUILD_FRONT_CPP" -DKokkos_ROOT="$KROOT" -DPOPS_SRC="$SRC" -DCMAKE_BUILD_TYPE=Release > "$LOGS/frontend_cpp_cfg.log" 2>&1 && \
    cmake --build "$BUILD_FRONT_CPP" -j 16 > "$LOGS/frontend_cpp_build.log" 2>&1; then
   for thr in 1 4 8; do
     export OMP_NUM_THREADS="$thr"
     export KOKKOS_NUM_THREADS="$thr"
     log="$LOGS/frontend_cpp_thr${thr}.log"
     "$BUILD_FRONT_CPP/frontend_cpp" 128 40 5 1e-4 > "$log" 2>&1
-    python3 - "$log" "$FRONTEND_CSV" "$ADC_CPP_COMMIT" "$thr" <<'PY'
+    python3 - "$log" "$FRONTEND_CSV" "$POPS_CPP_COMMIT" "$thr" <<'PY'
 import csv, re, sys
 log, out, commit, thr = sys.argv[1:]
 text = open(log, errors="replace").read()
@@ -299,14 +299,14 @@ fi
 BUILD_PY="$BASE/build_python_kokkos"
 rm -rf "$BUILD_PY"
 if cmake -S "$SRC" -B "$BUILD_PY" \
-    -DADC_BUILD_PYTHON=ON -DADC_BUILD_TESTS=OFF -DADC_USE_KOKKOS=ON -DKokkos_ROOT="$KROOT" \
+    -DPOPS_BUILD_PYTHON=ON -DPOPS_BUILD_TESTS=OFF -DPOPS_USE_KOKKOS=ON -DKokkos_ROOT="$KROOT" \
     -DPython_EXECUTABLE="$(which python3)" -DCMAKE_BUILD_TYPE=Release > "$LOGS/python_cfg.log" 2>&1 && \
-   cmake --build "$BUILD_PY" --target _adc -j 16 > "$LOGS/python_build.log" 2>&1; then
+   cmake --build "$BUILD_PY" --target _pops -j 16 > "$LOGS/python_build.log" 2>&1; then
   cat > "$FRONT/frontend_bench.py" <<'PY'
 import csv, os, shutil, sys, tempfile, time
 import numpy as np
-import adc
-from adc import dsl
+import pops
+from pops import dsl
 
 GAMMA = 1.4
 
@@ -345,19 +345,19 @@ def dsl_model():
 
 def build_bricks(n, U):
     t0 = time.perf_counter()
-    sim = adc.System(n=n, L=1.0, periodic=True)
-    spec = adc.Model(state=adc.FluidState("compressible", gamma=GAMMA),
-                     transport=adc.CompressibleFlux(),
-                     source=adc.NoSource(),
-                     elliptic=adc.BackgroundDensity(alpha=0.0, n0=0.0))
-    sim.add_equation("gas", spec, spatial=adc.FiniteVolume(limiter="minmod", riemann="rusanov"))
+    sim = pops.System(n=n, L=1.0, periodic=True)
+    spec = pops.Model(state=pops.FluidState("compressible", gamma=GAMMA),
+                     transport=pops.CompressibleFlux(),
+                     source=pops.NoSource(),
+                     elliptic=pops.BackgroundDensity(alpha=0.0, n0=0.0))
+    sim.add_equation("gas", spec, spatial=pops.FiniteVolume(limiter="minmod", riemann="rusanov"))
     sim.set_poisson(rhs="charge_density", solver="fft")
     sim.set_state("gas", U.reshape(-1))
     return sim, (time.perf_counter() - t0) * 1000.0
 
 def build_dsl(n, U, cache_dir, cache_state):
-    old = os.environ.get("ADC_CACHE_DIR")
-    os.environ["ADC_CACHE_DIR"] = cache_dir
+    old = os.environ.get("POPS_CACHE_DIR")
+    os.environ["POPS_CACHE_DIR"] = cache_dir
     try:
         m = dsl_model()
         c0 = time.perf_counter()
@@ -366,17 +366,17 @@ def build_dsl(n, U, cache_dir, cache_state):
         if cm.backend != "production" or cm.adder != "add_native_block":
             raise RuntimeError("bad DSL backend/adderr: %s %s" % (cm.backend, cm.adder))
         t0 = time.perf_counter()
-        sim = adc.System(n=n, L=1.0, periodic=True)
-        sim.add_equation("gas", cm, spatial=adc.FiniteVolume(limiter="minmod", riemann="rusanov"))
+        sim = pops.System(n=n, L=1.0, periodic=True)
+        sim.add_equation("gas", cm, spatial=pops.FiniteVolume(limiter="minmod", riemann="rusanov"))
         sim.set_poisson(rhs="charge_density", solver="fft")
         sim.set_state("gas", U.reshape(-1))
         setup_ms = (time.perf_counter() - t0) * 1000.0
         return sim, setup_ms, compile_ms
     finally:
         if old is None:
-            os.environ.pop("ADC_CACHE_DIR", None)
+            os.environ.pop("POPS_CACHE_DIR", None)
         else:
-            os.environ["ADC_CACHE_DIR"] = old
+            os.environ["POPS_CACHE_DIR"] = old
 
 def time_sim(sim, dt, steps, warmup):
     for _ in range(warmup):
@@ -413,7 +413,7 @@ def main():
     loop_ms = time_step_loop(lambda: (*build_bricks(n, U), 0.0), dt, steps, warmup)
     write_row(out, commit, "python-bricks", "n/a", setup_ms, 0.0, adv, loop_ms, ext, "threads=%s mass=%.17e" % (thr, mass))
 
-    cache = tempfile.mkdtemp(prefix="adc_dsl_cache_")
+    cache = tempfile.mkdtemp(prefix="pops_dsl_cache_")
     try:
         shutil.rmtree(cache, ignore_errors=True)
         os.makedirs(cache, exist_ok=True)
@@ -433,12 +433,12 @@ if __name__ == "__main__":
     main()
 PY
   export PYTHONPATH="$BUILD_PY/python"
-  export ADC_INCLUDE="$SRC/include"
+  export POPS_INCLUDE="$SRC/include"
   for thr in 1 4 8; do
     export OMP_NUM_THREADS="$thr"
     export KOKKOS_NUM_THREADS="$thr"
     log="$LOGS/frontend_python_thr${thr}.log"
-    python3 "$FRONT/frontend_bench.py" "$FRONTEND_CSV" "$ADC_CPP_COMMIT" "$thr" > "$log" 2>&1
+    python3 "$FRONT/frontend_bench.py" "$FRONTEND_CSV" "$POPS_CPP_COMMIT" "$thr" > "$log" 2>&1
     echo "PY_FRONTEND thr=$thr rc=$? log=$log"
   done
 else

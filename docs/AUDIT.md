@@ -29,7 +29,7 @@ These complement, they do not replace, the automated layer (`ci.yml` gate, `qual
   conventions actually adopted are recorded in
   [CODING_STANDARDS_DECISIONS.md](CODING_STANDARDS_DECISIONS.md) (ADC-124, ratified by ADC-219).
 - Cross-cutting guardrail: the `adc_cpp` core stays model-agnostic. No correction introduces
-  model logic into `include/adc/**`, and numerical parity (device-safe / Kokkos) is preserved.
+  model logic into `include/pops/**`, and numerical parity (device-safe / Kokkos) is preserved.
 
 ## Severity
 

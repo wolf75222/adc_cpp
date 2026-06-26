@@ -11,20 +11,20 @@
 // d'union des tags est une PR ulterieure). On exerce neanmoins le grossier replique + le patch fin
 // central multi-patch + le Poisson somme co-localise distribues. Independant du backend (Kokkos
 // Serial CI, Kokkos Cuda GH200).
-#include <adc/runtime/amr_system.hpp>
-#include <adc/runtime/config/model_spec.hpp>
-#include <adc/parallel/comm.hpp>  // comm_init, my_rank, n_ranks, all_reduce_*
+#include <pops/runtime/amr_system.hpp>
+#include <pops/runtime/config/model_spec.hpp>
+#include <pops/parallel/comm.hpp>  // comm_init, my_rank, n_ranks, all_reduce_*
 
 #include <cmath>
 #include <cstdio>
 #include <string>
 #include <vector>
 
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
 #include <Kokkos_Core.hpp>
 #endif
 
-using namespace adc;
+using namespace pops;
 
 static ModelSpec exb_charge(double q, double B0) {
   ModelSpec s;
@@ -57,7 +57,7 @@ static std::vector<double> bump(int n, double amp) {
 
 int main(int argc, char** argv) {
   comm_init(&argc, &argv);
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   Kokkos::ScopeGuard guard(argc, argv);
 #else
   (void)argc;
@@ -90,7 +90,7 @@ int main(int argc, char** argv) {
   for (int s = 0; s < 16; ++s)
     sys.step(dt);
 
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   Kokkos::fence();
 #endif
   const std::vector<double> di = sys.density("ions");

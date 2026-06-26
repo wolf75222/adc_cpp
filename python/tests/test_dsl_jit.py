@@ -1,15 +1,15 @@
 """Test JIT-lite END-TO-END du DSL (le coeur de la demonstration).
 
 Chaine complete : formules Python -> .hpp genere (emit_cpp_brick) -> g++ compile un DRIVER
-volumes-finis -> tourne IDENTIQUE a la brique ecrite a la main adc::Euler. On ne se contente plus
+volumes-finis -> tourne IDENTIQUE a la brique ecrite a la main pops::Euler. On ne se contente plus
 de comparer methode par methode (cf. test_dsl_brick.py) : on FAIT TOURNER un vrai pas de schema.
 
 Le driver calcule, sur une petite grille periodique n x n, UNE passe de residu Rusanov
 res = -div(F*) (flux numerique de Rusanov en x et en y), pour DEUX modeles composites :
-  - Gen = CompositeModel<adc_generated::EulerGen, NoSource, ChargeDensity> (brique GENEREE par le DSL)
-  - Ref = CompositeModel<adc::Euler,            NoSource, ChargeDensity> (oracle ECRIT A LA MAIN)
+  - Gen = CompositeModel<pops_generated::EulerGen, NoSource, ChargeDensity> (brique GENEREE par le DSL)
+  - Ref = CompositeModel<pops::Euler,            NoSource, ChargeDensity> (oracle ECRIT A LA MAIN)
 a partir d'un MEME champ initial deterministe (rho=1, vitesse nulle, bulle de pression). Il imprime
-l'ecart max sur tout le residu, qu'on exige < 1e-10. Gate sur compilateur + en-tetes adc (SKIP propre
+l'ecart max sur tout le residu, qu'on exige < 1e-10. Gate sur compilateur + en-tetes pops (SKIP propre
 sinon). Lance avec python3.
 """
 import os
@@ -17,7 +17,7 @@ import shutil
 import subprocess
 import tempfile
 
-from adc import dsl
+from pops import dsl
 
 GAMMA = 1.4
 INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "include"))
@@ -27,7 +27,7 @@ def build_euler_brick():
     """Euler en formules + layout primitif + inverse cons<-prim, pret pour emit_cpp_brick.
 
     Identique a la construction de test_dsl_brick.py : meme modele symbolique, donc la brique
-    generee Est censee reproduire adc::Euler au bit pres (memes formules)."""
+    generee Est censee reproduire pops::Euler au bit pres (memes formules)."""
     e = dsl.HyperbolicModel("euler")
     rho, rhou, rhov, E = e.conservative_vars("rho", "rho_u", "rho_v", "E")
     u = e.primitive("u", rhou / rho)
@@ -49,21 +49,21 @@ def build_euler_brick():
 # E = p/(gamma-1) (vitesse nulle, pas de terme cinetique). Une passe de residu Rusanov pour Gen et
 # Ref ; on compare le residu cellule par cellule, composante par composante.
 DRIVER = r"""
-#include <adc/physics/fluids/euler.hpp>
-#include <adc/physics/bricks/bricks.hpp>
-#include <adc/core/model/physical_model.hpp>
+#include <pops/physics/fluids/euler.hpp>
+#include <pops/physics/bricks/bricks.hpp>
+#include <pops/core/model/physical_model.hpp>
 %s
 #include <vector>
 #include <cmath>
 #include <cstdio>
 
-using Gen = adc::CompositeModel<adc_generated::EulerGen, adc::NoSource, adc::ChargeDensity>;
-using Ref = adc::CompositeModel<adc::Euler,            adc::NoSource, adc::ChargeDensity>;
+using Gen = pops::CompositeModel<pops_generated::EulerGen, pops::NoSource, pops::ChargeDensity>;
+using Ref = pops::CompositeModel<pops::Euler,            pops::NoSource, pops::ChargeDensity>;
 
-static_assert(adc::HyperbolicModel<adc::Euler>,                "oracle Euler non conforme (setup)");
-static_assert(adc::HyperbolicModel<adc_generated::EulerGen>,   "brique generee non conforme");
-static_assert(adc::PhysicalModel<Gen>,                         "Gen compose non conforme");
-static_assert(adc::PhysicalModel<Ref>,                         "Ref compose non conforme");
+static_assert(pops::HyperbolicModel<pops::Euler>,                "oracle Euler non conforme (setup)");
+static_assert(pops::HyperbolicModel<pops_generated::EulerGen>,   "brique generee non conforme");
+static_assert(pops::PhysicalModel<Gen>,                         "Gen compose non conforme");
+static_assert(pops::PhysicalModel<Ref>,                         "Ref compose non conforme");
 
 static constexpr int n = 24;
 static constexpr double GAMMA = %r;
@@ -75,33 +75,33 @@ static inline int idx(int i, int j) { return ((j %% n + n) %% n) * n + ((i %% n 
 // Flux numerique de Rusanov sur la face entre les cellules UL (gauche/bas) et UR (droite/haut),
 // dans la direction dir : a = max(max_wave_speed des 2 cellules), face = 0.5*(FL+FR) - 0.5*a*(UR-UL).
 template <class Model>
-static adc::StateVec<4> rusanov(const Model& m, const adc::StateVec<4>& UL,
-                                const adc::StateVec<4>& UR, const adc::Aux& aux, int dir) {
+static pops::StateVec<4> rusanov(const Model& m, const pops::StateVec<4>& UL,
+                                const pops::StateVec<4>& UR, const pops::Aux& aux, int dir) {
   const auto FL = m.flux(UL, aux, dir);
   const auto FR = m.flux(UR, aux, dir);
   const double aL = m.max_wave_speed(UL, aux, dir);
   const double aR = m.max_wave_speed(UR, aux, dir);
   const double a = aL > aR ? aL : aR;
-  adc::StateVec<4> f{};
+  pops::StateVec<4> f{};
   for (int c = 0; c < 4; ++c) f[c] = 0.5 * (FL[c] + FR[c]) - 0.5 * a * (UR[c] - UL[c]);
   return f;
 }
 
 // Une passe de residu -div(F*) sur toute la grille (sortie dans res, taille n*n) pour le modele m.
 template <class Model>
-static void residual(const Model& m, const std::vector<adc::StateVec<4>>& U,
-                     std::vector<adc::StateVec<4>>& res) {
-  const adc::Aux aux{};  // Euler n'utilise pas aux
+static void residual(const Model& m, const std::vector<pops::StateVec<4>>& U,
+                     std::vector<pops::StateVec<4>>& res) {
+  const pops::Aux aux{};  // Euler n'utilise pas aux
   for (int j = 0; j < n; ++j) {
     for (int i = 0; i < n; ++i) {
-      const adc::StateVec<4>& Uc = U[idx(i, j)];
+      const pops::StateVec<4>& Uc = U[idx(i, j)];
       // faces x : i-1/2 (entre i-1 et i) et i+1/2 (entre i et i+1)
       const auto Fxm = rusanov(m, U[idx(i - 1, j)], Uc,             aux, 0);
       const auto Fxp = rusanov(m, Uc,               U[idx(i + 1, j)], aux, 0);
       // faces y : j-1/2 (entre j-1 et j) et j+1/2 (entre j et j+1)
       const auto Fym = rusanov(m, U[idx(i, j - 1)], Uc,             aux, 1);
       const auto Fyp = rusanov(m, Uc,               U[idx(i, j + 1)], aux, 1);
-      adc::StateVec<4>& r = res[idx(i, j)];
+      pops::StateVec<4>& r = res[idx(i, j)];
       for (int c = 0; c < 4; ++c)
         r[c] = -(Fxp[c] - Fxm[c]) / h - (Fyp[c] - Fym[c]) / h;
     }
@@ -110,13 +110,13 @@ static void residual(const Model& m, const std::vector<adc::StateVec<4>>& U,
 
 int main() {
   // Champ initial deterministe : rho=1, vitesse nulle, bulle de pression gaussienne centree.
-  std::vector<adc::StateVec<4>> U(n * n);
+  std::vector<pops::StateVec<4>> U(n * n);
   const double scale = double(n);  // largeur de la bulle (en cellules^2)
   for (int j = 0; j < n; ++j) {
     for (int i = 0; i < n; ++i) {
       const double dx = i - n / 2.0, dy = j - n / 2.0;
       const double p = 1.0 + 0.3 * std::exp(-(dx * dx + dy * dy) / scale);
-      adc::StateVec<4>& u = U[idx(i, j)];
+      pops::StateVec<4>& u = U[idx(i, j)];
       u[0] = 1.0;            // rho
       u[1] = 0.0;            // rho u
       u[2] = 0.0;            // rho v
@@ -124,10 +124,10 @@ int main() {
     }
   }
 
-  Gen gen; gen.hyp = adc_generated::EulerGen{};
+  Gen gen; gen.hyp = pops_generated::EulerGen{};
   Ref ref; ref.hyp.gamma = GAMMA;
 
-  std::vector<adc::StateVec<4>> rg(n * n), rr(n * n);
+  std::vector<pops::StateVec<4>> rg(n * n), rr(n * n);
   residual(gen, U, rg);
   residual(ref, U, rr);
 
@@ -153,7 +153,7 @@ def main():
 
     cxx = shutil.which("c++") or shutil.which("g++") or shutil.which("clang++")
     if not cxx or not os.path.isdir(INCLUDE):
-        print("skip  compilateur ou en-tetes adc absents -> JIT-lite saute (%s)" % INCLUDE)
+        print("skip  compilateur ou en-tetes pops absents -> JIT-lite saute (%s)" % INCLUDE)
         print("test_dsl_jit : OK (forme du struct seulement)")
         return
 
@@ -169,8 +169,8 @@ def main():
 
     maxdiff = float(out.strip())
     assert maxdiff < 1e-10, \
-        "residu Rusanov de la brique generee != adc::Euler (ecart max %.3e)" % maxdiff
-    print("OK  jit-lite : residu Rusanov -div(F*) IDENTIQUE Gen vs adc::Euler (ecart max %.3e, %dx%d)"
+        "residu Rusanov de la brique generee != pops::Euler (ecart max %.3e)" % maxdiff
+    print("OK  jit-lite : residu Rusanov -div(F*) IDENTIQUE Gen vs pops::Euler (ecart max %.3e, %dx%d)"
           % (maxdiff, 24, 24))
     print("test_dsl_jit : tout est vert")
 

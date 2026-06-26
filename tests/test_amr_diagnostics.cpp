@@ -4,17 +4,17 @@
 // des coupleurs : garde la conversion seam de amr_mass bit-identique a la boucle hote
 // en serie, et fige le contrat de amr_max_drift_speed avant sa propre conversion.
 
-#include <adc/coupling/amr/amr_diagnostics.hpp>
-#include <adc/mesh/index/box2d.hpp>
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/layout/distribution_mapping.hpp>
-#include <adc/mesh/storage/multifab.hpp>
+#include <pops/coupling/amr/amr_diagnostics.hpp>
+#include <pops/mesh/index/box2d.hpp>
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/layout/distribution_mapping.hpp>
+#include <pops/mesh/storage/multifab.hpp>
 
 #include <cmath>
 #include <cstdio>
 #include <vector>
 
-using namespace adc;
+using namespace pops;
 
 int main() {
   int fails = 0;

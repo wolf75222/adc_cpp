@@ -7,7 +7,7 @@ the public seams (without touching the hot path) and times each phase
 (`transport`, `poisson`, `halos`, `aux_derive`, `reduction`, `fence`, `alloc_tmp`)
 bracketed by `device_fence()` to capture the device execution under Kokkos.
 
-The harness is out of the default build (`ADC_BUILD_BENCH=OFF`): the CI never
+The harness is out of the default build (`POPS_BUILD_BENCH=OFF`): the CI never
 configures or compiles it. It is enabled explicitly:
 
 ```sh

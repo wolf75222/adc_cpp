@@ -26,7 +26,7 @@ Each `.hpp` / `.cpp` must start, after `#pragma once` or the required includes, 
 /// @file
 /// @brief Short role of the file.
 ///
-/// Layer: `include/adc/<folder>`.
+/// Layer: `include/pops/<folder>`.
 /// Role: ...
 /// Contract: ...
 ///
@@ -208,7 +208,7 @@ Python API classes must say whether they are:
 - compatibility/legacy;
 - simple configuration object.
 
-For `adc` in particular, each API class must say whether it keeps the GPU/MPI path or whether it
+For `pops` in particular, each API class must say whether it keeps the GPU/MPI path or whether it
 falls back through a host/prototype path. This is a user contract, not a detail.
 
 ## 9. Application process
@@ -224,10 +224,10 @@ batches:
 
 Recommended order:
 
-1. `include/adc/amr`;
-2. `include/adc/mesh`;
-3. `include/adc/core`;
-4. `include/adc/numerics/time`;
-5. `include/adc/numerics/elliptic`;
-6. `include/adc/runtime`;
+1. `include/pops/amr`;
+2. `include/pops/mesh`;
+3. `include/pops/core`;
+4. `include/pops/numerics/time`;
+5. `include/pops/numerics/elliptic`;
+6. `include/pops/runtime`;
 7. `python/bindings/system/base/system.cpp` by extraction/refactor, not only comments.

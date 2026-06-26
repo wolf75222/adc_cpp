@@ -31,12 +31,12 @@
 // AmrRuntime + build_amr_block, EXACTEMENT comme test_amr_multiblock_substeps (acces niveaux/masses).
 // La FACADE (4)(5) passe par AmrSystem (modeles ModelSpec : exb, potential).
 
-#include <adc/physics/bricks/bricks.hpp>  // CompositeModel, Euler, BackgroundDensity, ChargeDensity, PotentialForce
-#include <adc/runtime/builders/compiled/amr_dsl_block.hpp>  // detail::make_shared_amr_layout / build_amr_block / dispatch_amr_block
-#include <adc/runtime/amr/amr_runtime.hpp>    // AmrRuntime, AmrRuntimeBlock
-#include <adc/runtime/amr_system.hpp>     // facade AmrSystem
-#include <adc/runtime/builders/factory/model_factory.hpp>  // detail::dispatch_model
-#include <adc/runtime/config/model_spec.hpp>
+#include <pops/physics/bricks/bricks.hpp>  // CompositeModel, Euler, BackgroundDensity, ChargeDensity, PotentialForce
+#include <pops/runtime/builders/compiled/amr_dsl_block.hpp>  // detail::make_shared_amr_layout / build_amr_block / dispatch_amr_block
+#include <pops/runtime/amr/amr_runtime.hpp>    // AmrRuntime, AmrRuntimeBlock
+#include <pops/runtime/amr_system.hpp>     // facade AmrSystem
+#include <pops/runtime/builders/factory/model_factory.hpp>  // detail::dispatch_model
+#include <pops/runtime/config/model_spec.hpp>
 
 #include <cmath>
 #include <cstdio>
@@ -44,11 +44,11 @@
 #include <string>
 #include <vector>
 
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
 #include <Kokkos_Core.hpp>
 #endif
 
-using namespace adc;
+using namespace pops;
 
 namespace {
 
@@ -63,7 +63,7 @@ struct StiffMomentumRelax {
   Real inv_eps = Real(0);
   Real e_eq = Real(2.5);  // energie d'equilibre (rho=1, vitesse nulle, p coherent)
   template <class State>
-  ADC_HD State apply(const State& u, const Aux&) const {
+  POPS_HD State apply(const State& u, const Aux&) const {
     State s{};
     // s[0] (densite) = 0 : la source ne cree/detruit PAS de masse -> conservation a la machine.
     if (State::size() > 1)
@@ -214,7 +214,7 @@ std::vector<double> bump(int n, double base, double amp) {
 }  // namespace
 
 int main(int argc, char** argv) {
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   Kokkos::ScopeGuard guard(argc, argv);
 #else
   (void)argc;

@@ -1,16 +1,16 @@
 """Spec 3 unified scheduler: a held field solve + sub-cycled transport (authoring).
 
 The elliptic field solve is expensive, so hold it and refresh only every N steps; the cheap
-transport runs every step. This shows the schedule AUTHORING surface (adc.time.every/hold/
+transport runs every step. This shows the schedule AUTHORING surface (pops.time.every/hold/
 subcycle), the cacheable-capability validation, and the honest refusal to lower a non-always
 schedule (the cache / accumulate_dt / checkpoint RUNTIME is the C++ part of ADC-458). It builds
 the IR and inspects it; it does not run a simulation.
 
 Run: python3 examples/spec3/scheduled_fields_subcycled_transport.py
 """
-import adc.model as model
-import adc.time as adctime
-from adc import dsl
+import pops.model as model
+import pops.time as adctime
+from pops import dsl
 
 
 def plasma_module():

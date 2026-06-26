@@ -5,7 +5,7 @@
 - Scope: ADC-294, ADC-290, ADC-291, ADC-292, ADC-296
 - Verified against: `wolf75222/adc_cpp` master `288ddb9` (audit baseline `0ded184`).
   Re-confirmed at `fb11d41`: ADC-335 / ADC-342 split `system.cpp` / `amr_system.cpp` into
-  parallel translation units and ADC-337 added `ADC_COLD_FN` annotations, which shift line
+  parallel translation units and ADC-337 added `POPS_COLD_FN` annotations, which shift line
   numbers but change none of the genericity semantics below. References are anchored on stable
   symbols; the line numbers are as of `288ddb9`.
 
@@ -19,8 +19,8 @@ component-0-only AMR regrid predicate.
 Each finding was re-checked against the current master, file by file. The audit is substantially
 still valid, but real progress has landed since the baseline and must not be redone:
 
-- `adc.capabilities()` now exists as a single Python matrix (`capabilities` in `python/adc/__init__.py`).
-- Named aux phase 1 (ADC-70) is complete end to end on cartesian `System` (X-macro `ADC_AUX_FIELDS`,
+- `pops.capabilities()` now exists as a single Python matrix (`capabilities` in `python/pops/__init__.py`).
+- Named aux phase 1 (ADC-70) is complete end to end on cartesian `System` (X-macro `POPS_AUX_FIELDS`,
   `extra[kAuxMaxExtra=4]`, JIT / native marshaling); the code itself declares the remaining
   AMR / polar / halo work via a `named_followups` key.
 - Role infrastructure landed: `VariableSet.roles`, `bind_variable_roles`, CSV roles across the `.so`
@@ -64,19 +64,19 @@ only after a tag has already chosen its brick.
 Decision (Option A): replace the three physics-selecting defaults with an `unset` sentinel and add an
 explicit completeness check in `dispatch_model` that fails loudly (mirroring the existing
 `throw_registry_dispatch_mismatch` in `dispatch_tags.hpp`). Keep the numeric defaults. Keep the
-historical shortcut only at the Python edge: `adc.Model(...)` already requires all four bricks and is
+historical shortcut only at the Python edge: `pops.Model(...)` already requires all four bricks and is
 explicit-or-fail. In-tree blast radius is near zero (every C++ test sets the three tags;
-`adc.Model` always overwrites them).
+`pops.Model` always overwrites them).
 
 Boundary vs ADC-331: ADC-290 makes "no model chosen" an error; ADC-331 later makes "which models can
 be chosen" an open registry. Doing ADC-290 first gives the registry a clean explicit-or-fail
 contract. The per-capability sub-config restructure (Option B) leans into ADC-331 territory; defer.
 
-## Decision 3 (ADC-291): finish the named-aux channel incrementally; keep adc::Aux fixed
+## Decision 3 (ADC-291): finish the named-aux channel incrementally; keep pops::Aux fixed
 
 Phase 1 is fully landed; the remaining scope is exactly the code's own `named_followups`: extend
-named aux to AMR and polar, and lock the compile-time limits. `adc::Aux` is a fixed, device-clean POD
-by deliberate design; `PhysicalModel` still requires `M::Aux == adc::Aux`.
+named aux to AMR and polar, and lock the compile-time limits. `pops::Aux` is a fixed, device-clean POD
+by deliberate design; `PhysicalModel` still requires `M::Aux == pops::Aux`.
 
 Decision (Option A), two slices: (1) lock the limits - tests pinning `kAuxMaxExtra=4` /
 `AUX_NAMED_MAX` parity and the implicit 1-ghost aux halo, surfaced in capabilities + limitations;
@@ -129,7 +129,7 @@ subsumes density + phi) is disproportionate and would touch the flat ABI; defer.
 
 ## Shared mechanism: capabilities() (coordinate with ADC-297)
 
-All five declarations land in the one `adc.capabilities()` dict, which ADC-297 owns. Convention:
+All five declarations land in the one `pops.capabilities()` dict, which ADC-297 owns. Convention:
 supported variants stay lists under the existing facade keys; hard limits become explicit structured
 scalars, not prose (for example `dimension: 2`, `ref_ratio: 2`, an AMR level bound, a uniform
 `mpi` / `single_rank` flag) rather than buried in `note` strings. ADC-297 should add a snapshot test
@@ -156,7 +156,7 @@ declaration through that surface.
 
 - ADC-290: raw `ModelSpec()` default-construct behavior changes. In-tree safe; the only exposure is an
   out-of-tree consumer (adc_cases) that builds a bare `ModelSpec` and relies on compressible+charge.
-  Mitigation: keep shortcuts at `adc.Model(...)`; CHANGELOG `Changed`; pre-1.0.
+  Mitigation: keep shortcuts at `pops.Model(...)`; CHANGELOG `Changed`; pre-1.0.
 - ADC-291: Option A non-breaking (POD layout + concept unchanged). Option B breaks the concept, the
   compiled-block ABI, and `abi_key` (deferred).
 - ADC-292: tightening fallbacks breaks only roleless-but-canonical third-party dynamic blocks (shipped

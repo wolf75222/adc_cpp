@@ -8,7 +8,7 @@ intra-rank multi-thread. This is the "full" CPU mode (all cores of all ranks).
 
 ```bash
 cmake -S . -B build-mpi-omp -DCMAKE_BUILD_TYPE=Release \
-  -DADC_USE_MPI=ON -DADC_USE_KOKKOS=ON -DKokkos_ROOT="$KOKKOS_OPENMP_PREFIX"
+  -DPOPS_USE_MPI=ON -DPOPS_USE_KOKKOS=ON -DKokkos_ROOT="$KOKKOS_OPENMP_PREFIX"
 cmake --build build-mpi-omp -j
 ```
 

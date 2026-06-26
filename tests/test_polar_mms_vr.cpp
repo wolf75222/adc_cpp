@@ -36,7 +36,7 @@
 // SCHEMA, pas celle du calcul du source. S est injecte dans le solveur via une brique de transport polaire
 // LOCALE AU TEST qui expose source(u, aux) en relisant S depuis un canal aux EXTRA (index 3, reutilise
 // B_z) : aucun code de PRODUCTION n'est ajoute (la brique vit dans ce fichier ; load_aux charge deja
-// l'index 3 si n_aux>=4, cf. ADC_AUX_FIELDS).
+// l'index 3 si n_aux>=4, cf. POPS_AUX_FIELDS).
 //
 // CONDITIONS AUX LIMITES : theta PERIODIQUE ; r DIRICHLET-MMS (les ghosts radiaux sont remplis avec la
 // solution EXACTE), pratique standard du MMS : le bord n'introduit pas d'erreur propre, l'ordre mesure est
@@ -52,25 +52,25 @@
 // Host / Serial-safe (UNE box, n_ranks()==1 dans les 3 jobs CI : non enregistre MPI, comme les autres
 // tests polaires mono-box).
 
-#include <adc/core/state/state.hpp>
-#include <adc/mesh/index/box2d.hpp>
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/layout/distribution_mapping.hpp>
-#include <adc/mesh/storage/fab2d.hpp>
-#include <adc/mesh/execution/for_each.hpp>
-#include <adc/mesh/geometry/geometry.hpp>
-#include <adc/mesh/storage/multifab.hpp>
-#include <adc/mesh/boundary/physical_bc.hpp>
-#include <adc/numerics/fv/numerical_flux.hpp>
-#include <adc/numerics/fv/reconstruction.hpp>
-#include <adc/numerics/spatial/operators/polar_operator.hpp>
-#include <adc/numerics/time/integrators/time_steppers.hpp>
+#include <pops/core/state/state.hpp>
+#include <pops/mesh/index/box2d.hpp>
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/layout/distribution_mapping.hpp>
+#include <pops/mesh/storage/fab2d.hpp>
+#include <pops/mesh/execution/for_each.hpp>
+#include <pops/mesh/geometry/geometry.hpp>
+#include <pops/mesh/storage/multifab.hpp>
+#include <pops/mesh/boundary/physical_bc.hpp>
+#include <pops/numerics/fv/numerical_flux.hpp>
+#include <pops/numerics/fv/reconstruction.hpp>
+#include <pops/numerics/spatial/operators/polar_operator.hpp>
+#include <pops/numerics/time/integrators/time_steppers.hpp>
 
 #include <cmath>
 #include <cstdio>
 #include <vector>
 
-using namespace adc;
+using namespace pops;
 
 static constexpr double kPiL = 3.14159265358979323846;
 static constexpr double kRmin = 0.30;
@@ -121,7 +121,7 @@ static double mms_source(double r, double th) {
 
 // --- Brique de transport polaire LOCALE AU TEST : ExB polaire (vitesse depuis aux[1]/aux[2]) + un terme
 // source manufacture relu depuis le canal aux EXTRA d'index 3 (aux.B_z, reutilise). En declarant n_aux =
-// 4, load_aux charge a(i,j,3) dans Aux::B_z (cf. ADC_AUX_FIELDS) ; source() le renvoie tel quel. Cela
+// 4, load_aux charge a(i,j,3) dans Aux::B_z (cf. POPS_AUX_FIELDS) ; source() le renvoie tel quel. Cela
 // injecte le source manufacture S SANS ajouter de code de production : la brique vit ici, et le solveur
 // polaire (assemble_rhs_polar) appelle source() via polar_source<> (detecte par concept PolarHasSource).
 struct MmsTransportPolar {
@@ -129,20 +129,20 @@ struct MmsTransportPolar {
   static constexpr int n_aux = 4;  // lit phi, grad_r, grad_theta (0..2) + S au canal extra 3 (B_z)
   using State = StateVec<1>;
   Real B0 = 1;
-  ADC_HD Real velocity(const Aux& a, int dir) const {
+  POPS_HD Real velocity(const Aux& a, int dir) const {
     return (dir == 0) ? (-a.grad_y / B0) : (a.grad_x / B0);
   }
-  ADC_HD StateVec<1> flux(const StateVec<1>& u, const Aux& a, int dir) const {
+  POPS_HD StateVec<1> flux(const StateVec<1>& u, const Aux& a, int dir) const {
     StateVec<1> f{};
     f[0] = u[0] * velocity(a, dir);
     return f;
   }
-  ADC_HD Real max_wave_speed(const StateVec<1>&, const Aux& a, int dir) const {
+  POPS_HD Real max_wave_speed(const StateVec<1>&, const Aux& a, int dir) const {
     const Real d = velocity(a, dir);
     return d < 0 ? -d : d;
   }
   // Terme source manufacture : relu depuis le canal aux extra 3 (B_z), prepositionne par le test.
-  ADC_HD StateVec<1> source(const StateVec<1>&, const Aux& a) const {
+  POPS_HD StateVec<1> source(const StateVec<1>&, const Aux& a) const {
     StateVec<1> s{};
     s[0] = a.B_z;  // S(r, theta) prepositionne dans aux[3]
     return s;

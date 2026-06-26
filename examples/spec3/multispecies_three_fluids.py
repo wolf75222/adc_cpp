@@ -1,16 +1,16 @@
 """Spec 3 generic multi-species: three fluids over the operator-first multi-block kernel.
 
 No species is hardcoded: each is a named block of a StateSpace. This builds a 3-species
-time step with the operator-first kernel (adc.model multi-state spaces + RateBundle for a
-typed multi-output coupling + adc.time multi-block Program + commit_many). It builds the IR
+time step with the operator-first kernel (pops.model multi-state spaces + RateBundle for a
+typed multi-output coupling + pops.time multi-block Program + commit_many). It builds the IR
 and checks structure; it does not run a simulation. The blackboard sugar for this
 (m.species for N>1, m.coupled_rate) and the multi-block field-solve / coupled-rate RUNTIME
 are tracked by ADC-457.
 
 Run: python3 examples/spec3/multispecies_three_fluids.py
 """
-import adc.model as model
-import adc.time as adctime
+import pops.model as model
+import pops.time as adctime
 
 
 def species_spaces():

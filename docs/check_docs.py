@@ -14,7 +14,7 @@ Echoue (exit 1) sur :
   7. FRAICHEUR (git) : doc en mode strict dont un depends_on a ete commite apres sa relecture.
 
 Avertissements (n'affectent pas l'exit code) : fraicheur en mode warning, et bloc python >= 10 lignes
-avec `import adc` dans une page testable (ADC-155 : preferer un literalinclude).
+avec `import pops` dans une page testable (ADC-155 : preferer un literalinclude).
 
 Lancement : python3 docs/check_docs.py   (depuis la racine). 0 = OK, 1 = violations.
 Options   : --freshness-warn-only (toute la fraicheur devient avertissement), --selftest (auto-test).
@@ -49,8 +49,8 @@ NORMATIVE_ROOT = {
 
 # (motif regex, message). HIGH-CONFIDENCE : choses UNAMBIGUMENT fausses. Verifie sur une seule ligne.
 FORBIDDEN: list[tuple[str, str]] = [
-    (r"ADC_USE_EIGEN", "option CMake fantome (pas d'option(), pas de cible adc_eigen)"),
-    (r"--target\s+adc_py", "mauvaise cible : la cible pybind est `_adc` (python/CMakeLists.txt)"),
+    (r"POPS_USE_EIGEN", "option CMake fantome (pas d'option(), pas de cible pops_eigen)"),
+    (r"--target\s+pops_py", "mauvaise cible : la cible pybind est `_pops` (python/CMakeLists.txt)"),
     (r"limiter\s*=\s*['\"]mc['\"]", "limiteur 'mc' inexistant (NoSlope/Minmod/VanLeer/Weno5)"),
     (r"monotonized[- ]central", "limiteur MC / monotonized-central inexistant"),
     (r"AmrSystem[^\n]{0,40}mono-bloc", "fausse limitation : AmrSystem est mono- ET multi-bloc"),
@@ -252,9 +252,9 @@ def check_links_and_inline(p: pathlib.Path, text: str, rel: str, testable: bool,
         for m in PY_BLOCK_RE.finditer(text):
             body = m.group(1)
             nlines = len(body.splitlines())
-            if nlines >= 10 and "import adc" in body:
+            if nlines >= 10 and "import pops" in body:
                 line = text[: m.start()].count("\n") + 1
-                warnings.append(f"{rel}:{line}: bloc python de {nlines} lignes avec 'import adc' "
+                warnings.append(f"{rel}:{line}: bloc python de {nlines} lignes avec 'import pops' "
                                 f"dans une page testable -- preferer un literalinclude (ADC-155)")
 
 

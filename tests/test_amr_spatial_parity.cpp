@@ -13,26 +13,26 @@
 //      compute_face_fluxes (primitif != conservatif apres un pas), reste fini et
 //      conserve la masse sur un etat lisse periodique.
 
-#include <adc/physics/bricks/bricks.hpp>  // CompositeModel, CompressibleFlux, NoSource, ChargeDensity
-#include <adc/numerics/fv/numerical_flux.hpp>      // HLLCFlux, RoeFlux
-#include <adc/numerics/fv/reconstruction.hpp>      // Minmod
-#include <adc/numerics/spatial_operator.hpp>    // assemble_rhs, compute_face_fluxes, load_state
-#include <adc/numerics/time/amr/reflux/amr_reflux_mf.hpp>  // advance_amr, AmrLevelMP
+#include <pops/physics/bricks/bricks.hpp>  // CompositeModel, CompressibleFlux, NoSource, ChargeDensity
+#include <pops/numerics/fv/numerical_flux.hpp>      // HLLCFlux, RoeFlux
+#include <pops/numerics/fv/reconstruction.hpp>      // Minmod
+#include <pops/numerics/spatial_operator.hpp>    // assemble_rhs, compute_face_fluxes, load_state
+#include <pops/numerics/time/amr/reflux/amr_reflux_mf.hpp>  // advance_amr, AmrLevelMP
 
-#include <adc/mesh/index/box2d.hpp>
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/layout/distribution_mapping.hpp>
-#include <adc/mesh/boundary/fill_boundary.hpp>
-#include <adc/mesh/execution/for_each.hpp>
-#include <adc/mesh/geometry/geometry.hpp>
-#include <adc/mesh/storage/mf_arith.hpp>  // norm_inf
-#include <adc/mesh/storage/multifab.hpp>  // sum
-#include <adc/mesh/boundary/physical_bc.hpp>
+#include <pops/mesh/index/box2d.hpp>
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/layout/distribution_mapping.hpp>
+#include <pops/mesh/boundary/fill_boundary.hpp>
+#include <pops/mesh/execution/for_each.hpp>
+#include <pops/mesh/geometry/geometry.hpp>
+#include <pops/mesh/storage/mf_arith.hpp>  // norm_inf
+#include <pops/mesh/storage/multifab.hpp>  // sum
+#include <pops/mesh/boundary/physical_bc.hpp>
 
 #include <cmath>
 #include <cstdio>
 
-using namespace adc;
+using namespace pops;
 static constexpr double kPi = 3.14159265358979323846;
 
 int main() {
@@ -91,7 +91,7 @@ int main() {
     compute_face_fluxes<Minmod, Flux>(model, U, aux, Fx, Fy, dx, dy, prim);
     Array4 r = R.fab(0).array();
     const ConstArray4 fx = Fx.fab(0).const_array(), fy = Fy.fab(0).const_array();
-    for_each_cell(dom, [=] ADC_HD(int i, int j) {
+    for_each_cell(dom, [=] POPS_HD(int i, int j) {
       for (int c = 0; c < 4; ++c)
         r(i, j, c) = -((fx(i + 1, j, c) - fx(i, j, c)) / dx + (fy(i, j + 1, c) - fy(i, j, c)) / dy);
     });

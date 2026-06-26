@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""adc.compile_problem + sim.install_program + CompiledTime, end to end (epic ADC-399 / ADC-401).
+"""pops.compile_problem + sim.install_program + CompiledTime, end to end (epic ADC-399 / ADC-401).
 
 (A) Validation (pure Python, always runs): compile_problem rejects backend != 'production' and
     target != 'system' and a missing Program; a multi-stage Program is refused by the codegen;
@@ -7,10 +7,10 @@
 
 (B) End-to-end parity (skips cleanly unless the full toolchain is present): build a transport gas
     block + a Forward-Euler Program, compile_problem -> problem.so (compiled WITH Kokkos, so its ABI
-    key matches _adc and it loads in-process), sim.install_program, sim.step(dt), and check parity
+    key matches _pops and it loads in-process), sim.install_program, sim.step(dt), and check parity
     against the reference one-step U0 + dt * eval_rhs (after solve_fields) -- the SAME primitives the
-    Program drives, so bit/near parity. Runs in CI (gate-python rebuilds _adc with the install_program
-    binding) and locally once _adc is rebuilt; skips if _adc lacks install_program, numpy/_adc is
+    Program drives, so bit/near parity. Runs in CI (gate-python rebuilds _pops with the install_program
+    binding) and locally once _pops is rebuilt; skips if _pops lacks install_program, numpy/_pops is
     absent, no compiler/Kokkos is visible, or the .so compile fails -- never faking the engine.
 """
 import sys
@@ -24,10 +24,10 @@ def _skip(msg):
 try:
     import numpy as np
 
-    import adc
-    from adc import time as adctime
-except Exception as exc:  # noqa: BLE001  -- numpy or _adc unavailable in this interpreter
-    _skip("adc/numpy unavailable: %s" % exc)
+    import pops
+    from pops import time as adctime
+except Exception as exc:  # noqa: BLE001  -- numpy or _pops unavailable in this interpreter
+    _skip("pops/numpy unavailable: %s" % exc)
 
 fails = 0
 
@@ -61,24 +61,24 @@ def _fe_program(name="forward_euler_parity"):
 
 # ---- (A) validation: pure Python, always runs ----
 print("== (A) compile_problem / CompiledTime validation ==")
-chk(raises(ValueError, lambda: adc.compile_problem(time=_fe_program(), backend="aot")),
+chk(raises(ValueError, lambda: pops.compile_problem(time=_fe_program(), backend="aot")),
     "compile_problem backend != 'production' rejected")
-chk(raises(ValueError, lambda: adc.compile_problem(time=_fe_program(), target="amr_system")),
+chk(raises(ValueError, lambda: pops.compile_problem(time=_fe_program(), target="amr_system")),
     "compile_problem target != 'system' rejected")
-chk(raises(ValueError, lambda: adc.compile_problem(time=None)),
+chk(raises(ValueError, lambda: pops.compile_problem(time=None)),
     "compile_problem without a Program rejected")
 # substeps>1 / stride>1 are WIRED now (ADC-411): they STORE the cadence (System.set_program_cadence
 # applies it around the program closure) instead of being rejected. cf. test_time_substeps_stride.py.
-chk(adc.CompiledTime(substeps=2).substeps == 2, "CompiledTime substeps>1 accepted (wired, ADC-411)")
-chk(adc.CompiledTime(stride=2).stride == 2, "CompiledTime stride>1 accepted (wired, ADC-411)")
-chk(raises(NotImplementedError, lambda: adc.CompiledTime(cfl="program")),
+chk(pops.CompiledTime(substeps=2).substeps == 2, "CompiledTime substeps>1 accepted (wired, ADC-411)")
+chk(pops.CompiledTime(stride=2).stride == 2, "CompiledTime stride>1 accepted (wired, ADC-411)")
+chk(raises(NotImplementedError, lambda: pops.CompiledTime(cfl="program")),
     "CompiledTime cfl!='default' rejected (deferred)")
-chk(adc.CompiledTime().kind == "compiled", "CompiledTime() default ok (kind 'compiled')")
+chk(pops.CompiledTime().kind == "compiled", "CompiledTime() default ok (kind 'compiled')")
 
 # ---- (B) end-to-end parity: skips unless the full toolchain is present ----
 # install_program is forwarded by the System facade (__getattr__ -> self._s), so probe an instance.
-if not hasattr(adc.System(n=8, L=1.0, periodic=True), "install_program"):
-    print("-- (B) skipped: _adc lacks the install_program binding (rebuild _adc) --")
+if not hasattr(pops.System(n=8, L=1.0, periodic=True), "install_program"):
+    print("-- (B) skipped: _pops lacks the install_program binding (rebuild _pops) --")
     print("%s test_compile_problem (A only)" % ("FAIL" if fails else "PASS"))
     sys.exit(1 if fails else 0)
 
@@ -88,18 +88,18 @@ print("== (B) end-to-end: compiled Program vs reference one-step ==")
 def transport_model():
     # Pure transport (isothermal, NoSource); the inert elliptic + set_poisson make solve_fields
     # well-defined and identical in both the reference and the compiled-Program path.
-    return adc.Model(state=adc.FluidState("isothermal", cs2=0.5),
-                     transport=adc.IsothermalFlux(),
-                     source=adc.NoSource(),
-                     elliptic=adc.BackgroundDensity(alpha=1.0, n0=0.0))
+    return pops.Model(state=pops.FluidState("isothermal", cs2=0.5),
+                     transport=pops.IsothermalFlux(),
+                     source=pops.NoSource(),
+                     elliptic=pops.BackgroundDensity(alpha=1.0, n0=0.0))
 
 
 def make_sim():
     n = 24
-    sim = adc.System(n=n, L=1.0, periodic=True)
+    sim = pops.System(n=n, L=1.0, periodic=True)
     sim.add_block("ions", transport_model(),
-                  spatial=adc.FiniteVolume(limiter="none", riemann="rusanov"),
-                  time=adc.Explicit(method="euler"))
+                  spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                  time=pops.Explicit(method="euler"))
     sim.set_poisson("charge_density", "geometric_mg")
     x = (np.arange(n) + 0.5) / n
     X, Y = np.meshgrid(x, x, indexing="ij")
@@ -119,7 +119,7 @@ U_ref = U0 + dt * R0
 
 # Compiled-Program path: lower the FE IR -> problem.so, install it, step once.
 try:
-    compiled = adc.compile_problem(model=transport_model(), time=_fe_program())
+    compiled = pops.compile_problem(model=transport_model(), time=_fe_program())
 except RuntimeError as exc:  # no compiler / no Kokkos visible / .so compile failed
     _skip("compile_problem could not build the .so: %s" % str(exc)[:160])
 
@@ -127,7 +127,7 @@ chk(compiled.program_name == "forward_euler_parity", "handle carries the program
 chk(bool(compiled.program_hash), "handle carries the IR hash")
 
 prog = make_sim()
-prog.install_program(compiled.so_path)  # dlopen + ABI-key check + adc_install_program(this)
+prog.install_program(compiled.so_path)  # dlopen + ABI-key check + pops_install_program(this)
 step0 = prog.macro_step()
 prog.step(dt)  # SystemStepper dispatches to the installed Program
 U_prog = np.array(prog.get_state("ions"))
@@ -155,26 +155,26 @@ def _fe_scaled(name, a):
 
 
 # Cache HIT: compiling the same Program twice (no explicit so_path) returns the SAME cached .so.
-c1 = adc.compile_problem(time=_fe_program("cache_probe"))
-c2 = adc.compile_problem(time=_fe_program("cache_probe"))
+c1 = pops.compile_problem(time=_fe_program("cache_probe"))
+c2 = pops.compile_problem(time=_fe_program("cache_probe"))
 chk(c1.so_path == c2.so_path and os.path.isfile(c1.so_path),
     "cache HIT: identical Program -> same cached .so")
 
 # Cache MISS: a different dt coefficient is a different IR -> different generated source -> different
 # cache key -> different .so (spec: a changed temporal coefficient must invalidate the cache).
-c_a = adc.compile_problem(time=_fe_scaled("cache_coeff", 1.0))
-c_b = adc.compile_problem(time=_fe_scaled("cache_coeff", 2.0))
+c_a = pops.compile_problem(time=_fe_scaled("cache_coeff", 1.0))
+c_b = pops.compile_problem(time=_fe_scaled("cache_coeff", 2.0))
 chk(c_a.so_path != c_b.so_path, "cache MISS: a changed dt coefficient invalidates the cache")
 
 # debug=True writes the generated .cpp next to the .so for inspection.
 dbg_so = os.path.join(tempfile.mkdtemp(), "dbg_problem.so")
-adc.compile_problem(dbg_so, time=_fe_program("debug_probe"), debug=True)
+pops.compile_problem(dbg_so, time=_fe_program("debug_probe"), debug=True)
 dbg_cpp = os.path.splitext(dbg_so)[0] + ".cpp"
 chk(os.path.isfile(dbg_cpp), "debug=True writes the generated .cpp next to the .so")
 if os.path.isfile(dbg_cpp):
     with open(dbg_cpp) as _f:
         dumped = _f.read()
-    chk("adc_install_program" in dumped and "ProgramContext" in dumped,
+    chk("pops_install_program" in dumped and "ProgramContext" in dumped,
         "the dumped .cpp contains the ProgramContext closure")
 
 print("%s test_compile_problem" % ("FAIL (%d)" % fails if fails else "PASS"))

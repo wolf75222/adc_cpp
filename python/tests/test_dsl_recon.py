@@ -2,7 +2,7 @@
 charge a l'execution d'un schema ordre 1 (recon='none') a une reconstruction MUSCL ordre 2 limitee
 (recon='minmod' | 'vanleer') sur les variables conservatives. On verifie que le residu hote (host_residual
 via IModel) reproduit EXACTEMENT une reference MUSCL + Rusanov a a_max global ecrite en numpy depuis les
-memes formules DSL, pour les trois reconstructions ; que recon='none' reste l'ordre 1 (== adc.PythonFlux,
+memes formules DSL, pour les trois reconstructions ; que recon='none' reste l'ordre 1 (== pops.PythonFlux,
 non-regression de test_dsl_block) ; et qu'une reconstruction inconnue est refusee.
 """
 import os
@@ -11,7 +11,7 @@ import tempfile
 
 import numpy as np
 
-import adc
+import pops
 from test_dsl_brick import build_euler_brick, GAMMA
 
 INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "include"))
@@ -50,7 +50,7 @@ def muscl_residual(e, U, h, recon):
 def main():
     cxx = shutil.which("c++") or shutil.which("g++") or shutil.which("clang++")
     if not cxx or not os.path.isdir(INCLUDE):
-        print("skip  compilateur ou en-tetes adc absents")
+        print("skip  compilateur ou en-tetes pops absents")
         print("test_dsl_recon : OK (rien a compiler)")
         return
 
@@ -74,7 +74,7 @@ def main():
 
         R_none = None
         for recon in ("none", "minmod", "vanleer"):
-            sim = adc.System(n=n, L=L, periodic=True)
+            sim = pops.System(n=n, L=L, periodic=True)
             sim.add_dynamic_block("gas", so, names=["rho", "rho_u", "rho_v", "E"], recon=recon)
             sim.set_state("gas", Uflat)
             R_sys = np.array(sim.eval_rhs("gas")).reshape(4, n, n)
@@ -86,7 +86,7 @@ def main():
                 R_none = R_sys
 
         # le limiteur agit vraiment : minmod differe nettement de l'ordre 1
-        sim = adc.System(n=n, L=L, periodic=True)
+        sim = pops.System(n=n, L=L, periodic=True)
         sim.add_dynamic_block("gas", so, names=["rho", "rho_u", "rho_v", "E"], recon="minmod")
         sim.set_state("gas", Uflat)
         R_minmod = np.array(sim.eval_rhs("gas")).reshape(4, n, n)
@@ -95,7 +95,7 @@ def main():
 
         # reconstruction inconnue refusee
         try:
-            sim = adc.System(n=n, L=L, periodic=True)
+            sim = pops.System(n=n, L=L, periodic=True)
             sim.add_dynamic_block("g", so, recon="superbee")
             raise AssertionError("recon inconnue acceptee a tort")
         except Exception as ex:

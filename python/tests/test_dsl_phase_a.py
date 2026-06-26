@@ -18,8 +18,8 @@ import tempfile
 
 import numpy as np
 
-import adc
-from adc import dsl
+import pops
+from pops import dsl
 
 INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "include"))
 GAMMA = 1.6667
@@ -117,7 +117,7 @@ def pure_python_checks():
     print("OK  primitive_vars kwargs : layout ordonne, rho conservatif rejoint le layout")
 
     # FiniteVolume : riemann (PAS flux) -> Spatial.flux ; variables -> recon
-    fv = adc.FiniteVolume(limiter="minmod", riemann="hllc", variables="primitive")
+    fv = pops.FiniteVolume(limiter="minmod", riemann="hllc", variables="primitive")
     assert fv.flux == "hllc" and fv.limiter == "minmod" and fv.recon == "primitive", \
         "FiniteVolume(riemann=) -> Spatial.flux"
     print("OK  FiniteVolume(limiter=, riemann=, variables=) remappe sur Spatial")
@@ -133,7 +133,7 @@ def pure_python_checks():
 
     # add_equation : erreurs sur un CompiledModel FACTICE (pas de .so reel necessaire, les gardes
     # levent AVANT la frontiere C++).
-    sys = adc.System(n=16, periodic=True)
+    sys = pops.System(n=16, periodic=True)
     fake = dsl.CompiledModel(so_path="/inexistant.so", backend="aot", adder="add_compiled_block",
                              cons_names=["rho", "rho_u", "rho_v", "E"],
                              cons_roles=["Density", "MomentumX", "MomentumY", "Energy"],
@@ -144,7 +144,7 @@ def pure_python_checks():
     # block_n_ghost(limiter) = 3 ghosts) : un fake aot+weno5 passe le garde Python et echoue plus loin
     # au dlopen (.so inexistant) -> RuntimeError, PAS ValueError (la garde weno5-aot n'existe plus).
     expect_raises(RuntimeError, lambda: sys.add_equation("g", fake,
-                  spatial=adc.FiniteVolume(limiter="weno5")), "weno5 aot : accepte (echec au dlopen)")
+                  spatial=pops.FiniteVolume(limiter="weno5")), "weno5 aot : accepte (echec au dlopen)")
     # WENO5 reste rejete (ValueError) sur le backend 'prototype' (JIT, residu hote Rusanov ordre 1,
     # sans assemble_rhs) : ce chemin n'a pas de stencil large a alimenter.
     fake_proto = dsl.CompiledModel(so_path="/inexistant.so", backend="prototype",
@@ -154,9 +154,9 @@ def pure_python_checks():
                                    params={}, caps={}, abi_key="k", model_hash="h", cxx="c++",
                                    std="c++20")
     expect_raises(ValueError, lambda: sys.add_equation("g", fake_proto,
-                  spatial=adc.FiniteVolume(limiter="weno5")), "weno5 sur prototype (JIT)")
+                  spatial=pops.FiniteVolume(limiter="weno5")), "weno5 sur prototype (JIT)")
     expect_raises(ValueError, lambda: sys.add_equation("g", fake,
-                  spatial=adc.FiniteVolume(riemann="hllc")), "hllc sans pression")
+                  spatial=pops.FiniteVolume(riemann="hllc")), "hllc sans pression")
     expect_raises(ValueError, lambda: sys.add_equation("g", fake, names=["a", "b"]),
                   "names= mauvaise longueur")
     fake_prod = dsl.CompiledModel(so_path="/inexistant.so", backend="production",
@@ -185,8 +185,8 @@ def end_to_end_checks(cxx):
             print("OK  %s : compile -> CompiledModel(adder=%s, n_vars=%d, abi_key=%.8s...)"
                   % (backend, cm.adder, cm.n_vars, cm.abi_key))
 
-            s = adc.System(n=n, periodic=True)
-            s.add_equation("gas", cm, spatial=adc.FiniteVolume(limiter="minmod", riemann="hllc",
+            s = pops.System(n=n, periodic=True)
+            s.add_equation("gas", cm, spatial=pops.FiniteVolume(limiter="minmod", riemann="hllc",
                                                                variables="primitive"))
             s.set_poisson(rhs="charge_density", solver="geometric_mg")
             s.set_state("gas", initial_state(n))
@@ -208,8 +208,8 @@ def end_to_end_checks(cxx):
         # (sans le fix, u=u -> `Real u = u;` auto-init) et (b) donner le MEME modele que la forme expr.
         mp = build_euler_predef("euler_predef")
         cmp_ = mp.compile(os.path.join(tmp, "m_predef.so"), INCLUDE, backend="aot")
-        sp = adc.System(n=n, periodic=True)
-        sp.add_equation("gas", cmp_, spatial=adc.FiniteVolume(limiter="minmod", riemann="hllc",
+        sp = pops.System(n=n, periodic=True)
+        sp.add_equation("gas", cmp_, spatial=pops.FiniteVolume(limiter="minmod", riemann="hllc",
                                                               variables="primitive"))
         sp.set_poisson(rhs="charge_density", solver="geometric_mg")
         sp.set_state("gas", initial_state(n))
@@ -227,9 +227,9 @@ def modelspec_substeps_check():
     """substeps= doit etre forwarde pour un ModelSpec (pas seulement pour un CompiledModel) : la
     branche ModelSpec d'add_equation appelle _s.add_block DIRECTEMENT avec nsub (pas self.add_block,
     qui retomberait sur time.substeps et IGNORERAIT l'override). Verifie via un espion sur _s.add_block."""
-    s = adc.System(n=16, periodic=True)
-    spec = adc.Model(state=adc.FluidState("isothermal", cs2=1.0), transport=adc.IsothermalFlux(),
-                     source=adc.NoSource(), elliptic=adc.ChargeDensity(charge=-1.0))
+    s = pops.System(n=16, periodic=True)
+    spec = pops.Model(state=pops.FluidState("isothermal", cs2=1.0), transport=pops.IsothermalFlux(),
+                     source=pops.NoSource(), elliptic=pops.ChargeDensity(charge=-1.0))
     calls = []
 
     class _Spy:
@@ -238,11 +238,11 @@ def modelspec_substeps_check():
 
     s._s = _Spy()
     # _s.add_block positional : (name, model, limiter, flux, recon, time_kind, substeps, evolve)
-    s.add_equation("ions", spec, time=adc.Explicit(), substeps=10)
+    s.add_equation("ions", spec, time=pops.Explicit(), substeps=10)
     assert calls, "add_equation(ModelSpec) doit appeler _s.add_block"
     assert calls[0][6] == 10, "substeps= ignore pour ModelSpec : recu %r" % (calls[0][6],)
     calls.clear()
-    s.add_equation("ions2", spec, time=adc.Explicit(substeps=3))   # defaut = time.substeps
+    s.add_equation("ions2", spec, time=pops.Explicit(substeps=3))   # defaut = time.substeps
     assert calls[0][6] == 3, "defaut substeps != time.substeps : recu %r" % (calls[0][6],)
     print("OK  substeps= override forwarde pour ModelSpec (10) ; defaut = time.substeps (3)")
 
@@ -267,7 +267,7 @@ def main():
     modelspec_substeps_check()
     cxx = shutil.which("c++") or shutil.which("g++") or shutil.which("clang++")
     if not cxx or not os.path.isdir(INCLUDE):
-        print("skip  bout-en-bout (compilateur ou en-tetes adc absents)")
+        print("skip  bout-en-bout (compilateur ou en-tetes pops absents)")
     else:
         end_to_end_checks(cxx)
     print("test_dsl_phase_a : tout est vert")

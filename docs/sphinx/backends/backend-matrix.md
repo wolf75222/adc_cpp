@@ -3,12 +3,12 @@
 
 | # | Backend | CMake options (in addition to `-DCMAKE_BUILD_TYPE=Release`) | Local build? | CI? | Validated where |
 |---|---------|---------------------------------------------------------|---------------|------|-----------|
-| 1 | Kokkos Serial | `-DADC_USE_KOKKOS=ON` + Kokkos Serial | Yes | Yes (`ci-fast`, PR gate) | CI ubuntu (reference oracle) |
-| 2 | Kokkos OpenMP | `-DADC_USE_KOKKOS=ON` + Kokkos OpenMP | Yes | Yes (`ci-full`) | CI job `kokkos-openmp`, 91/91 ctest |
-| 3 | MPI + Kokkos Serial | `-DADC_USE_KOKKOS=ON -DADC_USE_MPI=ON` + Kokkos Serial | Yes | Yes (`ci-full`) | CI job `mpi`, rank-invariant np=1/2/4 |
-| 4 | MPI + Kokkos OpenMP | `-DADC_USE_MPI=ON -DADC_USE_KOKKOS=ON` + Kokkos OpenMP | Yes | No (never MPI+Kokkos in CI) | ROMEO `x64cpu` manual (52/57 rank-invariant) |
-| 5 | Kokkos CUDA | `-DADC_USE_KOKKOS=ON` + Kokkos Cuda + `nvcc_wrapper` | No (no local `nvcc`) | No (never CUDA in CI) | ROMEO GH200 manual (`python/tests/gpu/`, sbatch) |
-| 6 | MPI + Kokkos CUDA | `-DADC_USE_MPI=ON -DADC_USE_KOKKOS=ON` + Kokkos Cuda + `nvcc_wrapper` | No | No | ROMEO multi-GPU manual (`srun --gpus-per-task=1`) |
+| 1 | Kokkos Serial | `-DPOPS_USE_KOKKOS=ON` + Kokkos Serial | Yes | Yes (`ci-fast`, PR gate) | CI ubuntu (reference oracle) |
+| 2 | Kokkos OpenMP | `-DPOPS_USE_KOKKOS=ON` + Kokkos OpenMP | Yes | Yes (`ci-full`) | CI job `kokkos-openmp`, 91/91 ctest |
+| 3 | MPI + Kokkos Serial | `-DPOPS_USE_KOKKOS=ON -DPOPS_USE_MPI=ON` + Kokkos Serial | Yes | Yes (`ci-full`) | CI job `mpi`, rank-invariant np=1/2/4 |
+| 4 | MPI + Kokkos OpenMP | `-DPOPS_USE_MPI=ON -DPOPS_USE_KOKKOS=ON` + Kokkos OpenMP | Yes | No (never MPI+Kokkos in CI) | ROMEO `x64cpu` manual (52/57 rank-invariant) |
+| 5 | Kokkos CUDA | `-DPOPS_USE_KOKKOS=ON` + Kokkos Cuda + `nvcc_wrapper` | No (no local `nvcc`) | No (never CUDA in CI) | ROMEO GH200 manual (`python/tests/gpu/`, sbatch) |
+| 6 | MPI + Kokkos CUDA | `-DPOPS_USE_MPI=ON -DPOPS_USE_KOKKOS=ON` + Kokkos Cuda + `nvcc_wrapper` | No | No | ROMEO multi-GPU manual (`srun --gpus-per-task=1`) |
 
 **Quick read:**
 

@@ -23,7 +23,7 @@ harness binary you built.
 2. Configure with the Kokkos Cuda install and the `nvcc_wrapper` compiler.
 
    ```bash
-   cmake -S . -B build-cuda -DCMAKE_BUILD_TYPE=Release -DADC_USE_KOKKOS=ON -DCMAKE_CXX_COMPILER="$KOKKOS_PREFIX/bin/nvcc_wrapper" -DKokkos_ROOT="$KOKKOS_PREFIX"
+   cmake -S . -B build-cuda -DCMAKE_BUILD_TYPE=Release -DPOPS_USE_KOKKOS=ON -DCMAKE_CXX_COMPILER="$KOKKOS_PREFIX/bin/nvcc_wrapper" -DKokkos_ROOT="$KOKKOS_PREFIX"
    ```
 
 3. Build.
@@ -47,11 +47,11 @@ contraction of `nvcc_wrapper`, which is not a bug.
 
 ## Run several GPUs with MPI
 
-For the multi-GPU production mode, add `-DADC_USE_MPI=ON` and build against a
+For the multi-GPU production mode, add `-DPOPS_USE_MPI=ON` and build against a
 CUDA-aware OpenMPI.
 
 ```bash
-cmake -S . -B build-mpicuda -DCMAKE_BUILD_TYPE=Release -DADC_USE_KOKKOS=ON -DADC_USE_MPI=ON -DCMAKE_CXX_COMPILER="$KOKKOS_PREFIX/bin/nvcc_wrapper" -DKokkos_ROOT="$KOKKOS_PREFIX"
+cmake -S . -B build-mpicuda -DCMAKE_BUILD_TYPE=Release -DPOPS_USE_KOKKOS=ON -DPOPS_USE_MPI=ON -DCMAKE_CXX_COMPILER="$KOKKOS_PREFIX/bin/nvcc_wrapper" -DKokkos_ROOT="$KOKKOS_PREFIX"
 ```
 
 Build it.

@@ -13,21 +13,21 @@
 //  (4) ORDRE / PRECISION : advection lineaire d'un sinus lisse periodique sur une periode complete.
 //      WENO5+SSPRK3 a une erreur < Minmod+SSPRK2 a meme resolution, et une pente de convergence > 2
 //      (au-dela de l'ordre 2 du MUSCL). Test court (n <= 64), CI-friendly.
-#include <adc/validation/physics/advection_diffusion.hpp>  // adc::validation::AdvectionDiffusion : transport scalaire (nu=0 = advection pure)
-#include <adc/runtime/builders/block/block_builder.hpp>
+#include <pops/validation/physics/advection_diffusion.hpp>  // pops::validation::AdvectionDiffusion : transport scalaire (nu=0 = advection pure)
+#include <pops/runtime/builders/block/block_builder.hpp>
 
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/layout/distribution_mapping.hpp>
-#include <adc/mesh/execution/for_each.hpp>
-#include <adc/mesh/storage/multifab.hpp>
-#include <adc/mesh/boundary/physical_bc.hpp>
-#include <adc/numerics/spatial_operator.hpp>
-#include <adc/numerics/time/integrators/time_steppers.hpp>
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/layout/distribution_mapping.hpp>
+#include <pops/mesh/execution/for_each.hpp>
+#include <pops/mesh/storage/multifab.hpp>
+#include <pops/mesh/boundary/physical_bc.hpp>
+#include <pops/numerics/spatial_operator.hpp>
+#include <pops/numerics/time/integrators/time_steppers.hpp>
 
 #include <cmath>
 #include <cstdio>
 
-using namespace adc;
+using namespace pops;
 static constexpr double kPi = 3.14159265358979323846;
 
 // Erreur L1 (cellules valides) entre u(.,0) et la solution exacte advectee d'une periode (== u0).
@@ -41,7 +41,7 @@ static double advect_error(int n, const std::string& limiter, const std::string&
   MultiFab aux(ba, dm, 3, 1);
   aux.set_val(0.0);
 
-  adc::validation::AdvectionDiffusion model{/*ax=*/1.0, /*ay=*/0.0,
+  pops::validation::AdvectionDiffusion model{/*ax=*/1.0, /*ay=*/0.0,
                                             /*nu=*/0.0};  // advection pure selon x
   const int ng = block_n_ghost(limiter);
   MultiFab U(ba, dm, 1, ng);
@@ -92,7 +92,7 @@ int main() {
   MultiFab aux(ba, dm, 3, 1);
   aux.set_val(0.0);
 
-  adc::validation::AdvectionDiffusion model{/*ax=*/1.0, /*ay=*/0.3,
+  pops::validation::AdvectionDiffusion model{/*ax=*/1.0, /*ay=*/0.3,
                                             /*nu=*/0.0};  // advection 2D oblique, pure
   const GridContext ctx{dom, bc, geom, &aux};
 

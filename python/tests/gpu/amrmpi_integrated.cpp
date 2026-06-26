@@ -16,11 +16,11 @@
 // Lance par amrmpi_romeo_build.sh en srun -n 1/2/4 --gpus-per-task=1 (un GH200 par rang). Sous Cuda,
 // for_each_cell est async ; density()/mass() de l'AmrSystem fencent en interne avant la lecture hote,
 // et on encadre la mesure de temps par Kokkos::fence() pour ne pas sous-estimer le cout device.
-#include <adc/physics/bricks/bricks.hpp>
-#include <adc/physics/fluids/euler.hpp>
-#include <adc/runtime/builders/compiled/amr_dsl_block.hpp>
-#include <adc/runtime/amr_system.hpp>
-#include <adc/parallel/comm.hpp>
+#include <pops/physics/bricks/bricks.hpp>
+#include <pops/physics/fluids/euler.hpp>
+#include <pops/runtime/builders/compiled/amr_dsl_block.hpp>
+#include <pops/runtime/amr_system.hpp>
+#include <pops/parallel/comm.hpp>
 
 #include <Kokkos_Core.hpp>
 #include <chrono>
@@ -29,7 +29,7 @@
 #include <cstdlib>
 #include <vector>
 
-using namespace adc;
+using namespace pops;
 using Model = CompositeModel<Euler, GravityForce, GravityCoupling>;
 
 static std::vector<double> four_bubbles(int n) {

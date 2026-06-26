@@ -38,9 +38,9 @@ Legend for the "Regime" column:
 
 ## 2. Honest note: FV vs FE structure-preserving
 
-### What adc guarantees (FV)
+### What pops guarantees (FV)
 
-The spatial scheme of adc is **FINITE VOLUME** (FV), not finite element (FE) like the
+The spatial scheme of pops is **FINITE VOLUME** (FV), not finite element (FE) like the
 reference paper Hoffart et al. (arXiv:2510.11808). The consequences are as follows:
 
 **Mass conservation -- exact by construction (FV).**
@@ -90,15 +90,15 @@ These properties are **strictly stronger** than what FV offers: they hold
 INDEPENDENTLY of the symmetry of the initial condition and without requiring any
 particular domain closure.
 
-### Validity of the adc vs Hoffart paper comparison
+### Validity of the pops vs Hoffart paper comparison
 
-The comparison of the **diocotron growth rate** between adc and the paper is valid and
+The comparison of the **diocotron growth rate** between pops and the paper is valid and
 significant: the rate is an observable of the linear dynamics (slope of log|a_l(t)|),
 which depends on the dispersion of the advection-Poisson operator, not on the exact
-structure-preservation of the scheme. The measurement on adc reproduces l=3 to -0.38% of the paper at n=512 (GH200, cf.
+structure-preservation of the scheme. The measurement on pops reproduces l=3 to -0.38% of the paper at n=512 (GH200, cf.
 `docs/FULL_MODEL_VALIDATION_ROADMAP.md`).
 
-On the other hand, **attributing FE-sense structure-preservation to adc would be inaccurate**: adc conserves
+On the other hand, **attributing FE-sense structure-preservation to pops would be inaccurate**: pops conserves
 mass exactly (closed FV), preserves momentum when the balance is discrete-exact zero (symmetry),
 but does not offer exact-by-construction momentum conservation in the sense of the discrete
 weak form. This is an honest distinction, documented here and in test #207.

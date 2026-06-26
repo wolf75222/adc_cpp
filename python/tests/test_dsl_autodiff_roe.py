@@ -24,8 +24,8 @@ import tempfile
 
 import numpy as np
 
-import adc
-from adc import dsl
+import pops
+from pops import dsl
 
 fails = 0
 INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "include"))
@@ -214,7 +214,7 @@ except ValueError as ex:
 # === (c) bout en bout : roe_dissipation a la main == enable_roe (compile) =======================
 cxx = shutil.which("c++") or shutil.which("g++") or shutil.which("clang++")
 if not cxx or not os.path.isdir(INCLUDE):
-    print("skip (c) test_dsl_autodiff_roe : compilateur ou en-tetes adc absents")
+    print("skip (c) test_dsl_autodiff_roe : compilateur ou en-tetes pops absents")
     if fails:
         print(f"FAIL test_dsl_autodiff_roe : {fails} echec(s)")
         sys.exit(1)
@@ -306,18 +306,18 @@ try:
     rho0 = gaussian(n)
     z = np.zeros((n, n))
 
-    s_hand = adc.System(n=n, L=1.0, periodic=True)
+    s_hand = pops.System(n=n, L=1.0, periodic=True)
     s_hand.set_poisson()
     s_hand.add_equation("f", model=cm_hand,
-                        spatial=adc.FiniteVolume(limiter="minmod", riemann="roe"),
-                        time=adc.Explicit())
+                        spatial=pops.FiniteVolume(limiter="minmod", riemann="roe"),
+                        time=pops.Explicit())
     s_hand.set_primitive_state("f", rho=rho0, u=z + 0.1, v=z)
 
-    s_ref = adc.System(n=n, L=1.0, periodic=True)
+    s_ref = pops.System(n=n, L=1.0, periodic=True)
     s_ref.set_poisson()
     s_ref.add_equation("f", model=cm_ref,
-                       spatial=adc.FiniteVolume(limiter="minmod", riemann="roe"),
-                       time=adc.Explicit())
+                       spatial=pops.FiniteVolume(limiter="minmod", riemann="roe"),
+                       time=pops.Explicit())
     s_ref.set_primitive_state("f", rho=rho0, u=z + 0.1, v=z)
 
     for _ in range(8):

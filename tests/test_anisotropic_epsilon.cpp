@@ -20,17 +20,17 @@
 // residu (donc l'operateur) doit etre IDENTIQUE A LA PRECISION MACHINE a l'operateur
 // isotrope set_epsilon(eps_x). Composabilite avec kappa egalement verifiee.
 
-#include <adc/numerics/elliptic/mg/geometric_mg.hpp>
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/storage/fab2d.hpp>
-#include <adc/mesh/execution/for_each.hpp>
-#include <adc/mesh/geometry/geometry.hpp>
-#include <adc/mesh/storage/multifab.hpp>
+#include <pops/numerics/elliptic/mg/geometric_mg.hpp>
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/storage/fab2d.hpp>
+#include <pops/mesh/execution/for_each.hpp>
+#include <pops/mesh/geometry/geometry.hpp>
+#include <pops/mesh/storage/multifab.hpp>
 
 #include <cmath>
 #include <cstdio>
 
-using namespace adc;
+using namespace pops;
 static constexpr double kPi = 3.14159265358979323846;
 
 static double phi_exact(double x, double y) {

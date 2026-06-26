@@ -3,13 +3,13 @@
 // optimaux 1/10, 6/10, 3/10 en zone reguliere). On verifie l'ordre mesure >= 4.5 et la
 // preservation des constantes. Brique de la voie haute precision vers le taux analytique 0.911.
 
-#include <adc/numerics/fv/reconstruction.hpp>
+#include <pops/numerics/fv/reconstruction.hpp>
 
 #include <cmath>
 #include <cstdio>
 #include <initializer_list>
 
-using namespace adc;
+using namespace pops;
 static constexpr double kPi = 3.14159265358979323846;
 
 // moyenne de cellule de f(x) = sin(2 pi x) sur [a, b] (primitive exacte).

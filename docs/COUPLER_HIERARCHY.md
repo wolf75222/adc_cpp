@@ -1,6 +1,6 @@
 # Hyperbolic-elliptic coupler hierarchy
 
-This document describes each coupling class present in `include/adc/coupling/`,
+This document describes each coupling class present in `include/pops/coupling/`,
 its responsibility, what it assembles or advances, and when to choose it.
 It is a reference complement to `ARCHITECTURE.md` (sections 5 and 8) and does not
 duplicate what is already described there.
@@ -29,9 +29,9 @@ The elliptic backend `Elliptic` is parameterized everywhere via the `EllipticSol
 
 ## 2. Coupler -- single-model, single-level
 
-**File:** `include/adc/coupling/single/coupler.hpp`
+**File:** `include/pops/coupling/single/coupler.hpp`
 
-**Instantiation:** `adc::Coupler<Model, Elliptic = GeometricMG>`
+**Instantiation:** `pops::Coupler<Model, Elliptic = GeometricMG>`
 
 ### Role
 
@@ -78,12 +78,12 @@ point with subcycling) call `SSPRK2Step::take_step` /
 
 ## 3. SystemAssembler / SystemDriver (alias SystemCoupler) -- multi-species, single-level
 
-**File:** `include/adc/coupling/system/system_coupler.hpp`
+**File:** `include/pops/coupling/system/system_coupler.hpp`
 
 **Instantiations:**
-- `adc::SystemAssembler<System, RhsAssembler, Elliptic = GeometricMG>`
-- `adc::SystemDriver<System, RhsAssembler, Elliptic = GeometricMG>`
-- `adc::SystemCoupler` is an alias of `SystemDriver` (historical compatibility).
+- `pops::SystemAssembler<System, RhsAssembler, Elliptic = GeometricMG>`
+- `pops::SystemDriver<System, RhsAssembler, Elliptic = GeometricMG>`
+- `pops::SystemCoupler` is an alias of `SystemDriver` (historical compatibility).
 
 ### Separation of responsibilities
 
@@ -147,8 +147,8 @@ The header `elliptic_rhs.hpp` provides:
 
 ## 4. AmrCoupler -- REMOVED (#164)
 
-The old single-box AMR E x B coupler `adc::AmrCoupler<Model, Elliptic>`
-(`include/adc/coupling/amr_coupler.hpp`) has been **removed (#164)**. Its role is
+The old single-box AMR E x B coupler `pops::AmrCoupler<Model, Elliptic>`
+(`include/pops/coupling/amr_coupler.hpp`) has been **removed (#164)**. Its role is
 entirely taken over by `AmrCouplerMP` (section 5), whose single-box is the
 bit-identical degenerate case (validation guard `test_amr_multilevel_multipatch`).
 
@@ -156,9 +156,9 @@ bit-identical degenerate case (validation guard `test_amr_multilevel_multipatch`
 
 ## 5. AmrCouplerMP -- single-model, AMR multi-patch
 
-**File:** `include/adc/coupling/amr/amr_coupler_mp.hpp`
+**File:** `include/pops/coupling/amr/amr_coupler_mp.hpp`
 
-**Instantiation:** `adc::AmrCouplerMP<Model, Elliptic = GeometricMG>`
+**Instantiation:** `pops::AmrCouplerMP<Model, Elliptic = GeometricMG>`
 
 ### Role
 
@@ -206,9 +206,9 @@ resynchronizes `aux` after regrid.
 
 ## 6. AmrSystemCoupler (alias AmrSystemDriver) -- multi-species, AMR
 
-**File:** `include/adc/coupling/system/amr_system_coupler.hpp`
+**File:** `include/pops/coupling/system/amr_system_coupler.hpp`
 
-**Instantiation:** `adc::AmrSystemCoupler<System, RhsAssembler, Elliptic = GeometricMG>`
+**Instantiation:** `pops::AmrSystemCoupler<System, RhsAssembler, Elliptic = GeometricMG>`
 
 `AmrSystemDriver` is an alias of `AmrSystemCoupler` (design note
 `amr_system_coupler.hpp:371-375`: cosmetic split deferred, unified class
@@ -280,7 +280,7 @@ Backward-Euler (Newton) on the source, applied level by level
 
 ## 7. RhsAssemblers: `elliptic_rhs.hpp`
 
-**File:** `include/adc/coupling/base/elliptic_rhs.hpp`
+**File:** `include/pops/coupling/base/elliptic_rhs.hpp`
 
 These types are passed as `RhsAssembler` to the system couplers. They are not
 couplers themselves but composition bricks.
@@ -300,7 +300,7 @@ if a species is neutral, declaring it with `charge = 0` is required
 
 ## 8. CoupledSource: `coupled_source.hpp`
 
-**File:** `include/adc/coupling/source/coupled_source.hpp`
+**File:** `include/pops/coupling/source/coupled_source.hpp`
 
 A `CoupledSource` models an inter-species source term that depends on several
 blocks AND on the potential. The concept requires `apply(system, aux, dt)`.
@@ -314,7 +314,7 @@ blocks AND on the potential. The concept requires `apply(system, aux, dt)`.
 
 ## 9. CondensedSchurSourceStepper -- implicit Schur source stage
 
-**File:** `include/adc/coupling/schur/source/condensed_schur_source_stepper.hpp`
+**File:** `include/pops/coupling/schur/source/condensed_schur_source_stepper.hpp`
 
 Added in PR #126 (branch `feat/schur-pr4-stepper`).
 

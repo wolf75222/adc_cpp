@@ -1,18 +1,18 @@
 // ADC-291: the JIT host-residual path (native_loader.hpp host_residual, used by eval_rhs on a
 // dynamic/JIT block) must transport model-NAMED aux fields (extra[k] = aux component
-// kAuxNamedBase+k), not only the canonical extras (B_z/T_e from ADC_AUX_FIELDS). Before the fix the
-// per-cell aux marshaling looped ONLY over ADC_AUX_FIELDS, so a model reading aux.extra_field(0) on
+// kAuxNamedBase+k), not only the canonical extras (B_z/T_e from POPS_AUX_FIELDS). Before the fix the
+// per-cell aux marshaling looped ONLY over POPS_AUX_FIELDS, so a model reading aux.extra_field(0) on
 // the host path read 0 SILENTLY (#51-class gap, but for named fields). This pins the marshaling.
 
-#include <adc/core/state/state.hpp>
-#include <adc/runtime/dynamic/dynamic_model.hpp>
-#include <adc/runtime/builders/compiled/native_loader.hpp>
+#include <pops/core/state/state.hpp>
+#include <pops/runtime/dynamic/dynamic_model.hpp>
+#include <pops/runtime/builders/compiled/native_loader.hpp>
 
 #include <cmath>
 #include <cstdio>
 #include <vector>
 
-using namespace adc;
+using namespace pops;
 
 // Scalar model, flux = 0, source S = extra_field(0) * u. Reads ONE model-named aux field, so
 // n_aux = kAuxNamedBase + 1 (= 6). With flux 0, host_residual returns exactly the source.

@@ -13,19 +13,19 @@
 // cellule coupee (probleme du small-cell), ce qui rend L_inf erratique ; l'ordre 2 propre
 // est en norme L2 (supraconvergence de Shortley-Weller). On l'imprime aussi a titre indicatif.
 
-#include <adc/numerics/elliptic/mg/geometric_mg.hpp>
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/layout/distribution_mapping.hpp>
-#include <adc/mesh/geometry/geometry.hpp>
-#include <adc/mesh/storage/multifab.hpp>
-#include <adc/mesh/boundary/physical_bc.hpp>
+#include <pops/numerics/elliptic/mg/geometric_mg.hpp>
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/layout/distribution_mapping.hpp>
+#include <pops/mesh/geometry/geometry.hpp>
+#include <pops/mesh/storage/multifab.hpp>
+#include <pops/mesh/boundary/physical_bc.hpp>
 
 #include <cmath>
 #include <cstdio>
 #include <functional>
 #include <vector>
 
-using namespace adc;
+using namespace pops;
 static constexpr double kCx = 0.5, kCy = 0.5, kR = 0.4;
 
 static GeometricMG make_mg(int nc, bool cut) {

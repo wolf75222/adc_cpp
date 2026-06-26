@@ -21,8 +21,8 @@ import tempfile
 
 import numpy as np
 
-import adc
-from adc import dsl
+import pops
+from pops import dsl
 
 INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "include"))
 
@@ -59,7 +59,7 @@ def test_form():
     m.set_source([-(kappa * nn)])
     src = m.emit_cpp_source(name="GenDecaySrc")
     assert "static constexpr int n_aux = 6;" in src, "n_aux=6 absent : %s" % src
-    assert "const adc::Real kappa = a.extra_field(0);" in src, "lecture extra_field(0) absente : %s" % src
+    assert "const pops::Real kappa = a.extra_field(0);" in src, "lecture extra_field(0) absente : %s" % src
     print("OK  emit_cpp_source(aux_field) : n_aux=6 + a.extra_field(0)")
 
     # (3) retro-compat : un modele SANS aux_field n'emet PAS de n_aux (bit-identique a l'historique).
@@ -104,7 +104,7 @@ def test_form():
 def test_facade_rejects():
     """Rejets de la FACADE qui ne demandent aucun bloc compile (resolution avant la table) : B_z / T_e
     rediriges vers leur chemin dedie, nom canonique non fixable, bloc inconnu."""
-    sim = adc.System(n=8, L=1.0, periodic=True)
+    sim = pops.System(n=8, L=1.0, periodic=True)
     field = np.ones((8, 8))
     # B_z -> set_magnetic_field (message redirigeant)
     try:
@@ -141,7 +141,7 @@ def test_end_to_end():
     """Bout en bout : source lisant aux_field('kappa'), branchee via add_equation (backend AOT)."""
     cxx = shutil.which("c++") or shutil.which("g++") or shutil.which("clang++")
     if not cxx or not os.path.isdir(INCLUDE):
-        print("skip  compilateur ou en-tetes adc absents -> bout-en-bout saute (%s)" % INCLUDE)
+        print("skip  compilateur ou en-tetes pops absents -> bout-en-bout saute (%s)" % INCLUDE)
         print("test_aux_named : OK (forme seulement)")
         return
 
@@ -153,11 +153,11 @@ def test_end_to_end():
         assert compiled.aux_extra_names == ["kappa"], "aux_extra_names attendu ['kappa']"
         assert compiled.n_aux == 6, "n_aux=6 attendu (5 + 1 champ nomme)"
 
-        sim = adc.System(n=n, L=L, periodic=True)
+        sim = pops.System(n=n, L=L, periodic=True)
         sim.set_poisson(rhs="charge_density", solver="geometric_mg")
         sim.add_equation("decay", model=compiled,
-                         spatial=adc.FiniteVolume(limiter="none", riemann="rusanov"),
-                         time=adc.Explicit())
+                         spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                         time=pops.Explicit())
         sim.set_density("decay", np.ones((n, n)))
 
         # (d) lecture AVANT ecriture : le champ nomme vaut 0 partout (canal initialise a zero).
@@ -217,7 +217,7 @@ def _have_compiler():
 
 
 def test_polar_named_aux():
-    """ADC-291 phase 2 : un aux NOMME (aux_field) lu en geometrie POLAIRE via adc.System(PolarMesh).
+    """ADC-291 phase 2 : un aux NOMME (aux_field) lu en geometrie POLAIRE via pops.System(PolarMesh).
     Avant ADC-291, le chemin polaire n'elargissait pas le canal aux (System::add_block polaire sans
     ensure_aux_width) -> set_aux_field('kappa') aurait leve 'canal a 3 composantes' (ou lu hors borne).
     On verifie set + lecture + eval_rhs = source = -kappa*n exact sur l'anneau."""
@@ -229,10 +229,10 @@ def test_polar_named_aux():
         m = build_decay_model()
         compiled = m.compile(os.path.join(tmp, "kpolar.so"), include=INCLUDE, backend="aot")
         nr, nth = 16, 16
-        sim = adc.System(mesh=adc.PolarMesh(r_min=0.3, r_max=1.0, nr=nr, ntheta=nth))
+        sim = pops.System(mesh=pops.PolarMesh(r_min=0.3, r_max=1.0, nr=nr, ntheta=nth))
         sim.add_equation("decay", model=compiled,
-                         spatial=adc.FiniteVolume(limiter="none", riemann="rusanov"),
-                         time=adc.Explicit())
+                         spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                         time=pops.Explicit())
         sim.set_density("decay", np.ones((nth, nr)))
 
         # lecture avant ecriture : 0 partout (le canal s'est bien elargi : pas de rejet, pas d'OOB).
@@ -281,12 +281,12 @@ def test_amr_named_aux_single_block_regrid():
     tmp = tempfile.mkdtemp()
     try:
         n = 24
-        sp = adc.FiniteVolume(limiter="none", riemann="rusanov")
+        sp = pops.FiniteVolume(limiter="none", riemann="rusanov")
         lo, hi = n // 3, 2 * n // 3  # central bump [8, 16)^2
 
         # (a) reference : SANS set_aux_field -> kappa=0 -> masse inchangee (meme avec raffinement).
-        ref = adc.AmrSystem(n=n, L=1.0, periodic=True, regrid_every=1)
-        ref.add_equation("decay", model=_compile_amr_decay(tmp, "amr0.so"), spatial=sp, time=adc.Explicit())
+        ref = pops.AmrSystem(n=n, L=1.0, periodic=True, regrid_every=1)
+        ref.add_equation("decay", model=_compile_amr_decay(tmp, "amr0.so"), spatial=sp, time=pops.Explicit())
         ref.set_poisson(rhs="charge_density", solver="geometric_mg")
         ref.set_refinement(2.0)  # refine where density (comp 0) > 2 -> tags the bump
         ref.set_density("decay", _bump_density(n, lo, hi, 1.0, 5.0))
@@ -296,8 +296,8 @@ def test_amr_named_aux_single_block_regrid():
         assert abs(ref.mass("decay") - m0) < 1e-10, "sans kappa la masse AMR devrait etre inchangee"
 
         # (b) AVEC kappa uniforme + raffinement + regrid : decroissance persistante ET uniforme.
-        sim = adc.AmrSystem(n=n, L=1.0, periodic=True, regrid_every=1)
-        sim.add_equation("decay", model=_compile_amr_decay(tmp, "amr1.so"), spatial=sp, time=adc.Explicit())
+        sim = pops.AmrSystem(n=n, L=1.0, periodic=True, regrid_every=1)
+        sim.add_equation("decay", model=_compile_amr_decay(tmp, "amr1.so"), spatial=sp, time=pops.Explicit())
         sim.set_poisson(rhs="charge_density", solver="geometric_mg")
         sim.set_refinement(2.0)
         rho0 = _bump_density(n, lo, hi, 1.0, 5.0)
@@ -347,15 +347,15 @@ def test_amr_named_aux_multiblock_regrid():
     tmp = tempfile.mkdtemp()
     try:
         n = 24
-        sp = adc.FiniteVolume(limiter="none", riemann="rusanov")
+        sp = pops.FiniteVolume(limiter="none", riemann="rusanov")
         lo, hi = n // 3, 2 * n // 3
         decay_so = _compile_amr_decay(tmp, "amrdecay.so")
         c0 = 1.0
         plain_so = build_const_decay_model("plaindecay", c0).compile(
             os.path.join(tmp, "amrplain.so"), include=INCLUDE, backend="production", target="amr_system")
-        sim = adc.AmrSystem(n=n, L=1.0, periodic=True, regrid_every=1)
-        sim.add_equation("decay", model=decay_so, spatial=sp, time=adc.Explicit())
-        sim.add_equation("plain", model=plain_so, spatial=sp, time=adc.Explicit())
+        sim = pops.AmrSystem(n=n, L=1.0, periodic=True, regrid_every=1)
+        sim.add_equation("decay", model=decay_so, spatial=sp, time=pops.Explicit())
+        sim.add_equation("plain", model=plain_so, spatial=sp, time=pops.Explicit())
         sim.set_poisson(rhs="charge_density", solver="geometric_mg")
         sim.set_refinement(2.0)  # refine on the 'decay' bump -> a real fine level + regrid
         sim.set_density("decay", _bump_density(n, lo, hi, 1.0, 5.0))
@@ -384,7 +384,7 @@ def test_amr_named_aux_multiblock_regrid():
 def test_amr_named_aux_rejections():
     """ADC-291 : rejets de la facade AMR set_aux_field (parite avec System) : canal canonique redirige,
     bloc inconnu, champ non declare. Aucun compilateur requis (resolution AVANT le build)."""
-    sim = adc.AmrSystem(n=8, L=1.0, periodic=True)
+    sim = pops.AmrSystem(n=8, L=1.0, periodic=True)
     field = np.ones((8, 8))
     for nm, redirect in (("B_z", "set_magnetic_field"), ("phi", "CANONICAL")):
         try:

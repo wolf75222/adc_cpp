@@ -18,7 +18,7 @@ On verifie :
      Python "transport d'un pas SANS hook puis projection numpy" (np.allclose atol=1e-15, et en
      pratique bit-exact) -- 3 pas -> 3 applications, chacune APRES le pas entier ;
  (4) MEME semantique sur le backend aot (add_compiled_block, ABI .so marshalee
-     adc_compiled_has_projection / adc_compiled_project_p) ;
+     pops_compiled_has_projection / pops_compiled_project_p) ;
  (5) GARDES : backend 'prototype' (JIT) rejette m.projection (ValueError explicite) ; un loader
      production target='amr_system' avec projection est desormais ACCEPTE par add_native_block
      (AmrSystem) : la projection ponctuelle est cablee PAR NIVEAU apres le reflux (ADC-312) ;
@@ -36,8 +36,8 @@ import tempfile
 
 import numpy as np
 
-import adc
-from adc import dsl
+import pops
+from pops import dsl
 
 INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "include"))
 A_X, A_Y = 1.0, 0.5  # vitesses d'advection constantes du transport jouet
@@ -97,7 +97,7 @@ def initial_state(n):
 
 
 def make_sys(so, adder):
-    s = adc.System(n=N, L=L, periodic=True)
+    s = pops.System(n=N, L=L, periodic=True)
     if adder == "native":
         s._s.add_native_block("toy", so, limiter="minmod", riemann="rusanov",
                               recon="conservative", time="explicit", gamma=1.4, substeps=1)
@@ -182,7 +182,7 @@ def main():
 
     cxx = shutil.which("c++") or shutil.which("g++") or shutil.which("clang++")
     if not cxx or not os.path.isdir(INCLUDE):
-        print("skip  compilateur ou en-tetes adc absents")
+        print("skip  compilateur ou en-tetes pops absents")
         print("test_projection_hook : OK (rien a compiler)")
         sys.exit(1 if fails else 0)
 
@@ -237,7 +237,7 @@ def main():
         # apres reflux). add_native_block d'un loader avec projection n'est donc PLUS rejete.
         so_amr = m_clamp.compile(os.path.join(tmp, "toy_amr.so"), INCLUDE,
                                  backend="production", target="amr_system")
-        s_amr = adc.AmrSystem(n=N, L=L, periodic=True)
+        s_amr = pops.AmrSystem(n=N, L=L, periodic=True)
         amr_err = err_msg(lambda: s_amr._s.add_native_block(
             "toy", so_amr, limiter="minmod", riemann="rusanov", recon="conservative",
             time="explicit", gamma=1.4, substeps=1))

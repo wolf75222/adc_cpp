@@ -1,6 +1,6 @@
 # Add a DSL model
 
-Express a model's physics as symbolic formulas with `adc.dsl.Model`, compile it into a `.so`,
+Express a model's physics as symbolic formulas with `pops.dsl.Model`, compile it into a `.so`,
 and attach it to a `System`. Use this when you want to declare the flux, eigenvalues, source and
 elliptic right-hand side directly, instead of composing native bricks. This page assumes you can
 already build the Python module and run a case. For the syntax of every declarator, see the
@@ -9,19 +9,19 @@ already build the Python module and run a case. For the syntax of every declarat
 
 ## Before you start
 
-Set the environment variables the DSL needs to find the adc headers and cache the generated
+Set the environment variables the DSL needs to find the pops headers and cache the generated
 `.so`. Replace `REPO` with the path to your `adc_cpp` checkout.
 
 ```bash
-export ADC_INCLUDE=REPO/include
+export POPS_INCLUDE=REPO/include
 ```
 
 ```bash
-export ADC_CACHE_DIR=REPO/.adc_cache
+export POPS_CACHE_DIR=REPO/.pops_cache
 ```
 
-`ADC_INCLUDE` points at the headers the `.so` compiles against; `ADC_CACHE_DIR` caches the
-generated `.so` between runs (default `~/.cache/adc/dsl`).
+`POPS_INCLUDE` points at the headers the `.so` compiles against; `POPS_CACHE_DIR` caches the
+generated `.so` between runs (default `~/.cache/pops/dsl`).
 
 ## Steps
 
@@ -29,7 +29,7 @@ generated `.so` between runs (default `~/.cache/adc/dsl`).
    couplings by role.
 
    ```python
-   from adc import dsl
+   from pops import dsl
 
    m = dsl.Model("euler_poisson")
    rho, rhou, rhov, E = m.conservative_vars(
@@ -77,7 +77,7 @@ generated `.so` between runs (default `~/.cache/adc/dsl`).
    m.check()
    ```
 
-6. Compile the model. `production` is the native zero-copy path; it requires that `_adc` and the
+6. Compile the model. `production` is the native zero-copy path; it requires that `_pops` and the
    `.so` share the same headers, compiler and C++ standard.
 
    ```python
@@ -88,11 +88,11 @@ generated `.so` between runs (default `~/.cache/adc/dsl`).
    primitive named `p`.
 
    ```python
-   import adc
+   import pops
 
-   s = adc.System(n=32, L=1.0, periodic=True)
+   s = pops.System(n=32, L=1.0, periodic=True)
    s.add_equation("gas", compiled,
-                  spatial=adc.FiniteVolume(limiter="minmod", riemann="hllc",
+                  spatial=pops.FiniteVolume(limiter="minmod", riemann="hllc",
                                            variables="primitive"))
    s.set_poisson(rhs="charge_density", solver="geometric_mg")
    ```

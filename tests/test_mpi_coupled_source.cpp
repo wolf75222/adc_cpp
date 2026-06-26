@@ -14,31 +14,31 @@
 // Densites UNIFORMES -> transport nul -> seule la source agit ; on compare aux invariants physiques
 // (n_i+n_g conserve, n_e-n_i conserve, e/i croissent, g decroit) et a la valeur attendue, INVARIANTE en np.
 
-#include <adc/physics/composition/composite.hpp>
-#include <adc/physics/bricks/hyperbolic.hpp>  // ExBVelocity (scalaire 1 var, role Density)
-#include <adc/physics/bricks/source.hpp>      // NoSource
-#include <adc/runtime/builders/compiled/dsl_block.hpp>   // add_compiled_model
-#include <adc/runtime/system.hpp>
+#include <pops/physics/composition/composite.hpp>
+#include <pops/physics/bricks/hyperbolic.hpp>  // ExBVelocity (scalaire 1 var, role Density)
+#include <pops/physics/bricks/source.hpp>      // NoSource
+#include <pops/runtime/builders/compiled/dsl_block.hpp>   // add_compiled_model
+#include <pops/runtime/system.hpp>
 
-#include <adc/coupling/source/coupled_source_program.hpp>  // CsOp (opcodes, miroir Python)
-#include <adc/parallel/comm.hpp>
+#include <pops/coupling/source/coupled_source_program.hpp>  // CsOp (opcodes, miroir Python)
+#include <pops/parallel/comm.hpp>
 
 #include <cmath>
 #include <cstdio>
 #include <vector>
 
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
 #include <Kokkos_Core.hpp>
 #endif
-#ifdef ADC_HAS_MPI
+#ifdef POPS_HAS_MPI
 #include <mpi.h>
 #endif
 
-using namespace adc;
+using namespace pops;
 
 struct NoEll {
   template <class State>
-  ADC_HD Real rhs(const State&) const {
+  POPS_HD Real rhs(const State&) const {
     return Real(0);
   }  // pas de charge -> phi=0 -> derive nulle
 };
@@ -46,7 +46,7 @@ using Dens = CompositeModel<ExBVelocity, NoSource, NoEll>;  // densite scalaire,
 
 int main(int argc, char** argv) {
   comm_init(&argc, &argv);
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   Kokkos::ScopeGuard guard(argc, argv);
 #endif
   const int me = my_rank(), np = n_ranks();
@@ -100,7 +100,7 @@ int main(int argc, char** argv) {
   std::vector<int> lens = {5, 5, 6};
   // ADC-214 : la description bytecode est regroupee dans un POD CoupledSourceProgram (initialiseurs
   // designes -> appel auto-documente, plus de liste de vecteurs du meme type intervertibles).
-  adc::CoupledSourceProgram prog;
+  pops::CoupledSourceProgram prog;
   prog.in_blocks = in_blocks;
   prog.in_roles = in_roles;
   prog.consts = consts;
@@ -162,7 +162,7 @@ int main(int argc, char** argv) {
   chk(std::fabs((mi + mg) - (ni0 + ng0) * static_cast<double>(nn)) < 1e-7,
       "masse_lourde_conservee");
 
-#ifdef ADC_HAS_MPI
+#ifdef POPS_HAS_MPI
   if (np > 1) {
     long g = 0;
     MPI_Allreduce(&fails, &g, 1, MPI_LONG, MPI_SUM, MPI_COMM_WORLD);

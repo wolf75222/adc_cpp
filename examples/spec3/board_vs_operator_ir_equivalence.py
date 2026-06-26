@@ -7,7 +7,7 @@ This is the anti-duplication guarantee: the facade only generates the Spec 2 IR.
 
 Run: python3 examples/spec3/board_vs_operator_ir_equivalence.py
 """
-from adc.time import Program
+from pops.time import Program
 
 
 def _ir(P):

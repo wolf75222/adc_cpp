@@ -4,13 +4,13 @@ scheduled nodes due/skipped -- surfaced by sim.profile_report() and counted in t
 
 This complements test_profiling.py (which covers the timing report + the "steps" counter). Here we
 assert the named §29 counter LINES appear with sane values. It builds a real NATIVE block (no DSL
-compile, so it needs only _adc) and steps it under profiling: the native step's elliptic field solve
+compile, so it needs only _pops) and steps it under profiling: the native step's elliptic field solve
 is the kernel-dispatch chokepoint (System::Impl::solve_fields counts "kernels"), so "kernels" moves on
 the host path. The cache hit/skip + nodes due/skipped counters only move under a COMPILED .so step body
 that emits a held schedule (ProgramContext::cache_should_update); that runtime is exercised on
 Kokkos/ROMEO, so here we assert those lines simply EXIST and read 0 on the native path -- never faked.
 
-Real engine only: it builds a real adc.System and self-skips only if _adc/numpy is unavailable.
+Real engine only: it builds a real pops.System and self-skips only if _pops/numpy is unavailable.
 """
 import sys
 
@@ -23,9 +23,9 @@ def _skip(msg):
 try:
     import numpy as np
 
-    import adc
+    import pops
 except Exception as exc:  # noqa: BLE001
-    _skip("adc/numpy unavailable: %s" % exc)
+    _skip("pops/numpy unavailable: %s" % exc)
 
 fails = 0
 
@@ -40,13 +40,13 @@ def chk(cond, label):
 # ---- build a real native block and step it under profiling ----
 print("== §29 counters on a stepped native block ==")
 N = 16
-sim = adc.System(n=N, L=1.0, periodic=True)
+sim = pops.System(n=N, L=1.0, periodic=True)
 sim.add_block("gas",
-              adc.Model(state=adc.FluidState("isothermal", cs2=0.5),
-                        transport=adc.IsothermalFlux(),
-                        source=adc.NoSource(),
-                        elliptic=adc.BackgroundDensity(alpha=1.0, n0=0.0)),
-              spatial=adc.FiniteVolume(limiter="none", riemann="rusanov"), time=adc.Explicit())
+              pops.Model(state=pops.FluidState("isothermal", cs2=0.5),
+                        transport=pops.IsothermalFlux(),
+                        source=pops.NoSource(),
+                        elliptic=pops.BackgroundDensity(alpha=1.0, n0=0.0)),
+              spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"), time=pops.Explicit())
 rho = np.ones((N, N), dtype=float)
 sim.set_state("gas", np.stack([rho, 0.1 * rho, 0.0 * rho]))
 
@@ -83,14 +83,14 @@ chk("kernels=" not in sim.profile_report(), "reset clears the counters")
 
 # profiling OFF stays zero-overhead: a stepped, never-enabled System records nothing.
 print("== profiling off records no counters ==")
-sim_off = adc.System(n=N, L=1.0, periodic=True)
+sim_off = pops.System(n=N, L=1.0, periodic=True)
 sim_off.add_block("gas",
-                  adc.Model(state=adc.FluidState("isothermal", cs2=0.5),
-                            transport=adc.IsothermalFlux(),
-                            source=adc.NoSource(),
-                            elliptic=adc.BackgroundDensity(alpha=1.0, n0=0.0)),
-                  spatial=adc.FiniteVolume(limiter="none", riemann="rusanov"),
-                  time=adc.Explicit())
+                  pops.Model(state=pops.FluidState("isothermal", cs2=0.5),
+                            transport=pops.IsothermalFlux(),
+                            source=pops.NoSource(),
+                            elliptic=pops.BackgroundDensity(alpha=1.0, n0=0.0)),
+                  spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                  time=pops.Explicit())
 sim_off.set_state("gas", np.stack([rho, 0.1 * rho, 0.0 * rho]))
 sim_off.step(1e-3)
 chk(sim_off.profile_report().find("kernels=") == -1, "disabled profiler counts no kernels")

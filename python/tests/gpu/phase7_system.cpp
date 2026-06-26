@@ -2,21 +2,21 @@
 // euler_poisson : transport compressible (HLLC) + force de gravite + solve Poisson a CHAQUE pas +
 // pas de temps CFL. Exerce les phases 1 (transport/MultiFab), 2 (BCs) et 3 (Poisson) INTEGREES par le
 // System. On lie system.cpp et on compare CPU vs GPU. Portable seriel / Kokkos+CUDA.
-#include <adc/runtime/config/model_spec.hpp>
-#include <adc/runtime/system.hpp>
+#include <pops/runtime/config/model_spec.hpp>
+#include <pops/runtime/system.hpp>
 
 #include <cmath>
 #include <cstdio>
 #include <vector>
 
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
 #include <Kokkos_Core.hpp>
 #endif
 
-using namespace adc;
+using namespace pops;
 
 int main(int argc, char** argv) {
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   Kokkos::initialize(argc, argv);
 #else
   (void)argc;
@@ -61,14 +61,14 @@ int main(int argc, char** argv) {
       max_phi = std::fmax(max_phi, std::fabs(v));
     }
   }
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   const char* space = Kokkos::DefaultExecutionSpace::name();
 #else
   const char* space = "Serial(host)";
 #endif
   std::printf("exec=%s n=64 steps=20  mass=%.12f  sum(phi)=%.12f  max|phi|=%.12f\n", space, mass,
               sum_phi, max_phi);
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   Kokkos::finalize();
 #endif
   return 0;

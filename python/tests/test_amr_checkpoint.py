@@ -20,7 +20,7 @@ VERROUILLE :
   T3 (HORLOGE) : time() / macro_step() restaures (la cadence reprend exactement).
   T4 (REJETS) : composition differente (bloc), n different, regrid_every > 0 au restart, multi-blocs
        au checkpoint -- chacun leve. np>1 = garde de code (non declenchable en serie ; verifiee par
-       lecture, cf. checkpoint/restart qui levent si _adc.n_ranks() != 1).
+       lecture, cf. checkpoint/restart qui levent si _pops.n_ranks() != 1).
 
 LIMITES HONNETES (rejets explicites, jamais un checkpoint silencieusement faux) : multi-blocs (moteur
 AmrRuntime, layout + aux PARTAGES) et MPI np>1 (gather par niveau) sont une SUITE. regrid_every > 0
@@ -33,7 +33,7 @@ import tempfile
 
 import numpy as np
 
-import adc
+import pops
 
 
 def _bump(n, L=1.0, amp=1.0, w=0.10):
@@ -49,12 +49,12 @@ def _build(n=32, regrid_every=0, block="ne"):
     """AMR mono-bloc scalaire (ExB, fond neutralisant pour le Poisson periodique), refinement bas
     (patchs fins actifs des le seed), hierarchie FIGEE (regrid_every=0 -> reprise bit-identique)."""
     rho0 = _bump(n)
-    sim = adc.AmrSystem(n=n, L=1.0, periodic=True, regrid_every=regrid_every)
+    sim = pops.AmrSystem(n=n, L=1.0, periodic=True, regrid_every=regrid_every)
     sim.add_block(block,
-                  adc.Model(adc.Scalar(), adc.ExB(B0=1.0), adc.NoSource(),
-                            adc.BackgroundDensity(alpha=1.0, n0=float(rho0.mean()))),
-                  spatial=adc.Spatial(limiter="minmod", flux="rusanov"),
-                  time=adc.Explicit())
+                  pops.Model(pops.Scalar(), pops.ExB(B0=1.0), pops.NoSource(),
+                            pops.BackgroundDensity(alpha=1.0, n0=float(rho0.mean()))),
+                  spatial=pops.Spatial(limiter="minmod", flux="rusanov"),
+                  time=pops.Explicit())
     sim.set_refinement(threshold=1.5)  # rho > 1.5 -> patchs centraux (pic 2.0, plancher 1.0)
     sim.set_poisson(rhs="charge_density", solver="geometric_mg")
     sim.set_density(block, rho0)
@@ -157,12 +157,12 @@ def test_amr_checkpoint_rejects_multiblock():
     """T4 (multi-blocs) : checkpoint AMR multi-blocs leve (layout + aux PARTAGES = suite)."""
     n = 32
     rho0 = _bump(n)
-    sim = adc.AmrSystem(n=n, L=1.0, periodic=True, regrid_every=0)
+    sim = pops.AmrSystem(n=n, L=1.0, periodic=True, regrid_every=0)
     for nm, q in (("ions", +1.0), ("elec", -1.0)):
         sim.add_block(nm,
-                      adc.Model(adc.Scalar(), adc.ExB(B0=1.0), adc.NoSource(),
-                                adc.ChargeDensity(charge=q)),
-                      spatial=adc.Spatial(limiter="minmod", flux="rusanov"))
+                      pops.Model(pops.Scalar(), pops.ExB(B0=1.0), pops.NoSource(),
+                                pops.ChargeDensity(charge=q)),
+                      spatial=pops.Spatial(limiter="minmod", flux="rusanov"))
     sim.set_poisson(bc="periodic")
     sim.set_density("ions", rho0)
     sim.set_density("elec", rho0)

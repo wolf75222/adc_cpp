@@ -1,6 +1,6 @@
 # Poisson equation
 
-The elliptic side of `adc` is a Poisson-type problem solved once per time step. Its solution, the
+The elliptic side of `pops` is a Poisson-type problem solved once per time step. Its solution, the
 potential `phi`, is read back by the hyperbolic blocks through the `aux` channel, which is what closes
 the coupling between transport and field. This page explains what the equation is, what its right-hand
 side and boundary conditions mean, and where it sits in a step. It does not cover the solvers; for

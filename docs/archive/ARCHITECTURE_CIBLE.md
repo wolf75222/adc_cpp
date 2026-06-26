@@ -4,7 +4,7 @@ VISION doc (not the current state), drawn from the supervisor's description. To 
 whiteboard session. Two levels:
 - **(A)** the layered OO architecture (composable models): ALREADY largely realized in adc_cpp;
 - **(B)** the symbolic DSL where Python WRITES the formulas: CPU interpreter + C++ codegen
-  (flux / brick / source / elliptic) + CSE + JIT dlopen of the kernel done (`adc.dsl`); remaining are the
+  (flux / brick / source / elliptic) + CSE + JIT dlopen of the kernel done (`pops.dsl`); remaining are the
   dispatch in the template solver (type-erased) and Kokkos/CUDA + GPU run.
 
 ---
@@ -53,7 +53,7 @@ solver/
 
 ### State of the REAL tree (June 2026)
 
-The `include/adc/` tree was reorganized toward this target (the `<adc/...>` prefix is kept):
+The `include/pops/` tree was reorganized toward this target (the `<pops/...>` prefix is kept):
 `core/`, `physics/` (euler + hyperbolic / source / elliptic / composite, cf. the split of `bricks.hpp`),
 `numerics/` (flux + spatial_operator + `time/` + `elliptic/`), `mesh/`, `amr/`, `runtime/`,
 `coupling/`, `parallel/`. The brick categories are now separate files
@@ -88,27 +88,27 @@ Summary: **layers 1-12 of the OO design are ~80% in place** (different organizat
 
 ## 3. The symbolic DSL (the endgame, NEW)
 
-Goal: Python WRITES the formulas (not a function called per cell), ADC turns them into a solver.
+Goal: Python WRITES the formulas (not a function called per cell), PoPS turns them into a solver.
 
 ```python
-e = adc.dsl.HyperbolicModel("electrons")
+e = pops.dsl.HyperbolicModel("electrons")
 rho, rhou, rhov, E = e.conservative_vars("rho", "rho_u", "rho_v", "E")
 u = e.primitive("u", rhou / rho)
 p = e.primitive("p", (gamma - 1) * (E - 0.5 * rho * (u*u + v*v)))
-c = adc.dsl.sqrt(gamma * p / rho)
+c = pops.dsl.sqrt(gamma * p / rho)
 e.set_flux(x=[rhou, rhou*u + p, rhou*v, rho*H*u], y=[...])
 e.set_eigenvalues(x=[u - c, u, u + c], y=[...])
 e.set_source([...]); e.set_elliptic_rhs(-qe * rho / me)
 ```
 
 `rho`, `u`, `p`... are not floats: they are SYMBOLIC EXPRESSIONS. Python builds a
-GRAPH of formulas; ADC can then: (1) interpret it on CPU (proto), (2) generate C++,
+GRAPH of formulas; PoPS can then: (1) interpret it on CPU (proto), (2) generate C++,
 (3) generate Kokkos/CUDA, (4) JIT, (5) verify the dependencies between variables. `Euler`,
 `diocotron`, `two-fluid` become simple Python files of formulas.
 
 Additional tree:
 ```
-adc/symbolic/  expression (Var/Const/Add/Mul/Sqrt...), vector_expr, formula_graph, simplifier, codegen
+pops/symbolic/  expression (Var/Const/Add/Mul/Sqrt...), vector_expr, formula_graph, simplifier, codegen
 ```
 
 ### Honest assessment (engineering)
@@ -121,23 +121,23 @@ adc/symbolic/  expression (Var/Const/Add/Mul/Sqrt...), vector_expr, formula_grap
   hyperbolic finite-volume case (flux + eigenvalues + reconstruction), less off-the-shelf, but
   the foundations exist; do not rebuild a symbolic engine from scratch (reuse SymPy).
 - **Tradeoff vs the current state**: today we have two paths, COMPILED bricks (template, GPU/MPI,
-  production) + `adc.PythonFlux` (CPU numpy proto). The double-coding (a formula written in C++ AND
+  production) + `pops.PythonFlux` (CPU numpy proto). The double-coding (a formula written in C++ AND
   in numpy) is the cost the DSL would remove: ONE source of formulas -> CPU interpreter + generated
   GPU kernel. The gain grows with the number of models (multi-species plasma: many variants).
 - **Recommendation**: keep the current compiled solver (it works, GPU-ready) as the production
-  target; start the DSL as a **separate prototype** (`adc/dsl.py`), first a CPU interpreter
+  target; start the DSL as a **separate prototype** (`pops/dsl.py`), first a CPU interpreter
   of a formula graph (validate the concept on Euler), THEN a C++ codegen. Do NOT rewrite the
   solver while waiting for the DSL to mature.
 
-### State: CPU interpreter PROTOTYPE done (`adc.dsl`)
+### State: CPU interpreter PROTOTYPE done (`pops.dsl`)
 
-The `python/adc/dsl.py` module realizes step (1) (interpret on CPU) and (5) (verify the
+The `python/pops/dsl.py` module realizes step (1) (interpret on CPU) and (5) (verify the
 dependencies):
 - expression tree (`Expr`: `Const`, `Var`, `Add/Sub/Mul/Div/Pow/Neg`, `Sqrt`) built by
   operator overloading; `eval(env)` applies it to numpy arrays (the whole domain at once);
 - declarative `HyperbolicModel`: `conservative_vars` / `primitive` (formulas) / `aux` / `set_flux` /
   `set_eigenvalues` / `set_source` / `set_elliptic_rhs` / `check()` (dependencies);
-- `to_python_flux()` wires the tree onto the host backend `adc.PythonFlux` -> **the model RUNS**.
+- `to_python_flux()` wires the tree onto the host backend `pops.PythonFlux` -> **the model RUNS**.
 
 Verified: `python/tests/test_dsl.py` (symbolic Euler flux == reference numpy flux,
 `max_wave_speed` consistent, `check()` detects an undefined variable, mass conserved at runtime)
@@ -146,52 +146,52 @@ and the `adc_cases/dsl_euler/` case (Euler written as formulas, acoustic expansi
 Step (2) DONE for Euler (host codegen + wrapping as a brick):
 - `emit_cpp()` generates the flux function `template <class Real> void <name>_flux(const Real*, Real*, int)`
   from the tree (each `Expr` node knows how to write itself via `to_cpp()`);
-- `emit_cpp_brick()` generates a complete BRICK: a struct (`StateVec` / `Aux` / `ADC_HD`) with flux,
+- `emit_cpp_brick()` generates a complete BRICK: a struct (`StateVec` / `Aux` / `POPS_HD`) with flux,
   max_wave_speed, to_primitive, to_conservative, conservative_vars / primitive_vars, which SATISFIES the
-  `adc::HyperbolicModel` concept (so usable in a CompositeModel / the solver). The
+  `pops::HyperbolicModel` concept (so usable in a CompositeModel / the solver). The
   non-invertible conversions (to_conservative) are provided by the user (`set_conservative_from`), the DSL
   not knowing how to invert symbolically.
 
 - `emit_cpp_source()` generates a composable SOURCE BRICK (`apply(U, a)`), with aux locals read
-  as `a.<field>` (convention: aux names = fields of `adc::Aux`, e.g. grad_x / grad_y).
+  as `a.<field>` (convention: aux names = fields of `pops::Aux`, e.g. grad_x / grad_y).
 
 Verified (all in CI):
 - `test_dsl_codegen.py`: generated flux == numpy interpreter;
-- `test_dsl_brick.py`: the brick COMPILES against the adc headers, `static_assert(adc::HyperbolicModel<...>)`,
-  and == `adc::Euler` (4 vars, no aux) AND `adc::ExBVelocity` (1 var, aux-dependent flux), zero deviation;
-- `test_dsl_source.py`: the generated source == `adc::PotentialForce`;
-- `test_dsl_compose.py`: `CompositeModel<EulerGen, NoSource, ChargeDensity>` satisfies `adc::PhysicalModel`
+- `test_dsl_brick.py`: the brick COMPILES against the pops headers, `static_assert(pops::HyperbolicModel<...>)`,
+  and == `pops::Euler` (4 vars, no aux) AND `pops::ExBVelocity` (1 var, aux-dependent flux), zero deviation;
+- `test_dsl_source.py`: the generated source == `pops::PotentialForce`;
+- `test_dsl_compose.py`: `CompositeModel<EulerGen, NoSource, ChargeDensity>` satisfies `pops::PhysicalModel`
   and equals the hand-written version;
 - `test_dsl_jit.py`: JIT-lite end-to-end (Python formulas -> generated `.hpp` -> g++ compiles a finite-volume
-  driver -> Rusanov residual identical to `adc::Euler`).
+  driver -> Rusanov residual identical to `pops::Euler`).
 Also verified on ROMEO (g++ 11, C++20): compilation and bit-exact equality.
 
-DONE since: elliptic codegen (`emit_cpp_elliptic`, == `adc::ChargeDensity`); CSE (`cse=True` by
-default: H / c factored into locals `cseK_`, verified identical to the version without CSE and to `adc::Euler`);
+DONE since: elliptic codegen (`emit_cpp_elliptic`, == `pops::ChargeDensity`); CSE (`cse=True` by
+default: H / c factored into locals `cseK_`, verified identical to the version without CSE and to `pops::Euler`);
 REAL JIT of the kernel (`test_dsl_jitlib`: generated flux -> `.so` compiled on the fly -> loaded into the
 Python process via ctypes -> == numpy interpreter).
 
 GPU RUN DONE: the generated brick compiles with nvcc (`-arch=sm_90`) and runs on NVIDIA GH200
-(ROMEO, aarch64 node), result BIT-IDENTICAL to `adc::Euler` (cf. docs/GPU_ROMEO.md). It is
-device-ready by construction (`ADC_HD` -> `__host__ __device__`, device-safe ops, `std::sqrt`).
+(ROMEO, aarch64 node), result BIT-IDENTICAL to `pops::Euler` (cf. docs/GPU_ROMEO.md). It is
+device-ready by construction (`POPS_HD` -> `__host__ __device__`, device-safe ops, `std::sqrt`).
 
 KOKKOS DONE (brick verification): the generated brick runs via `Kokkos::parallel_for` on
-the `Cuda` execution space (GH200; Kokkos 4.4 + CUDA 12.6, `HOPPER90`), == `adc::Euler` to one ULP
+the `Cuda` execution space (GH200; Kokkos 4.4 + CUDA 12.6, `HOPPER90`), == `pops::Euler` to one ULP
 (5.6e-17, FMA contraction), cf. docs/GPU_ROMEO.md. It is the same dispatch primitive as
-`adc/mesh/for_each.hpp`.
+`pops/mesh/for_each.hpp`.
 
-(a) DONE: TYPE-ERASED interface `adc::IModel<NV>` + `ModelAdapter` (include/adc/runtime/dynamic/dynamic_model.hpp)
+(a) DONE: TYPE-ERASED interface `pops::IModel<NV>` + `ModelAdapter` (include/pops/runtime/dynamic/dynamic_model.hpp)
 AND wiring into the runtime. `System::add_dynamic_block(name, so)` loads at runtime (dlopen) a generated
 brick compiled into a `.so` and creates a block driven by the IModel (host Rusanov order 1), advanced via
 eval_rhs / step / step_cfl like any block; `dsl.HyperbolicModel.compile_so` does the JIT.
-End-to-end verified: `test_dsl_block` (DSL -> .so -> add_dynamic_block; eval_rhs == adc.PythonFlux to
+End-to-end verified: `test_dsl_block` (DSL -> .so -> add_dynamic_block; eval_rhs == pops.PythonFlux to
 9e-16; 25 steps in the System, mass conserved); `test_dynamic_model` (C++) and `test_dsl_dynamic`
 (dlopen from a main ignorant of the type) lock down the mechanism. HOST path (vtable, off GPU;
 during COMPILE of PythonFlux). The GPU hot path remains the TEMPLATE path.
 
 (b) DONE: a COMPLETE 2D Euler CASE (80 steps, CFL, Rusanov, periodic) advances on GH200 through the
-Kokkos seam of adc (`for_each_cell` / `for_each_cell_reduce_*`), mass exactly conserved, generated
-brick == `adc::Euler` to 9e-16 over 80 steps (cf. docs/GPU_ROMEO.md). Remaining: the ENTIRE runtime
+Kokkos seam of pops (`for_each_cell` / `for_each_cell_reduce_*`), mass exactly conserved, generated
+brick == `pops::Euler` to 9e-16 over 80 steps (cf. docs/GPU_ROMEO.md). Remaining: the ENTIRE runtime
 stack (System / AMR / MPI) on GPU, and `sim.add_dynamic_block` on the Python side (item (a)).
 
 The host codegen and the type-erased dispatch do NOT replace the production compiled bricks (template

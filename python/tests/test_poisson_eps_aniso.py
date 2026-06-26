@@ -8,7 +8,7 @@ coherence (l'anisotropie modifie REELLEMENT phi vs l'isotrope), et le refus avec
 """
 import numpy as np
 
-import adc
+import pops
 
 PI = np.pi
 
@@ -16,8 +16,8 @@ PI = np.pi
 def _charge_scalar():
     """Bloc scalaire (1 var) de densite de charge unite : f = q n = n. set_density n'ecrit que la
     densite (comp 0), ce qui isole le second membre du Poisson pour une solution manufacturee."""
-    return adc.Model(state=adc.Scalar(), transport=adc.ExB(B0=1.0),
-                     source=adc.NoSource(), elliptic=adc.ChargeDensity(charge=1.0))
+    return pops.Model(state=pops.Scalar(), transport=pops.ExB(B0=1.0),
+                     source=pops.NoSource(), elliptic=pops.ChargeDensity(charge=1.0))
 
 
 def anisotropic_epsilon_tests():
@@ -39,8 +39,8 @@ def anisotropic_epsilon_tests():
          - (2.0 + 0.5 * X + 0.3 * Y) * PI ** 2 * sx * sy)
 
     def solve(eps_xy, solver="geometric_mg"):
-        s = adc.System(n=n, L=1.0, periodic=False)
-        s.add_block("q", model=_charge_scalar(), spatial=adc.Spatial(none=True))
+        s = pops.System(n=n, L=1.0, periodic=False)
+        s.add_block("q", model=_charge_scalar(), spatial=pops.Spatial(none=True))
         s.set_poisson(rhs="charge_density", solver=solver, bc="dirichlet")
         s.set_density("q", f)
         if eps_xy is not None:
@@ -57,8 +57,8 @@ def anisotropic_epsilon_tests():
     # Coherence : l'anisotropie modifie REELLEMENT l'operateur. On compare a l'operateur ISOTROPE
     # eps = eps_x (set_epsilon_field) : meme rhs f, mais les faces y voient eps_x au lieu de eps_y,
     # donc phi doit differer franchement (eps_x et eps_y sont distincts).
-    s_iso = adc.System(n=n, L=1.0, periodic=False)
-    s_iso.add_block("q", model=_charge_scalar(), spatial=adc.Spatial(none=True))
+    s_iso = pops.System(n=n, L=1.0, periodic=False)
+    s_iso.add_block("q", model=_charge_scalar(), spatial=pops.Spatial(none=True))
     s_iso.set_poisson(rhs="charge_density", solver="geometric_mg", bc="dirichlet")
     s_iso.set_density("q", f)
     s_iso.set_epsilon_field(eps_x)
@@ -75,8 +75,8 @@ def anisotropic_epsilon_tests():
     print("OK  non-regression : eps_x == eps_y == isotrope eps_x (gap %.1e)" % gap)
 
     # eps anisotrope + solveur 'fft' (coefficient constant) : refus explicite au solve.
-    sp = adc.System(n=n, L=1.0, periodic=True)
-    sp.add_block("q", model=_charge_scalar(), spatial=adc.Spatial(none=True))
+    sp = pops.System(n=n, L=1.0, periodic=True)
+    sp.add_block("q", model=_charge_scalar(), spatial=pops.Spatial(none=True))
     sp.set_poisson(rhs="charge_density", solver="fft")
     sp.set_density("q", f)
     sp.set_epsilon_anisotropic_field(eps_x, eps_y)

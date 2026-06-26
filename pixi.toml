@@ -48,10 +48,10 @@ cxx-compiler = "*"
 # Module Python serie, installe dans l'env pixi (sans PYTHONPATH).
 build-py = "pip install ."
 # Module parallele : Kokkos OpenMP requis (tache kokkos-openmp d'abord si le kokkos conda est Serial).
-build-py-kokkos = { cmd = "pip install . -v", env = { ADC_USE_KOKKOS = "ON", Kokkos_ROOT = "$CONDA_PREFIX" } }
+build-py-kokkos = { cmd = "pip install . -v", env = { POPS_USE_KOKKOS = "ON", Kokkos_ROOT = "$CONDA_PREFIX" } }
 # Kokkos Serial+OpenMP compile dans l'env (~2 min) -- comble le kokkos conda Serial-only.
 kokkos-openmp = "bash scripts/kokkos_openmp_conda.sh"
 # Coeur + tests C++ (presets ; l'env pixi expose CONDA_PREFIX comme conda).
 test = "cmake --preset serial && cmake --build --preset serial && ctest --preset serial"
 docs = "bash scripts/build_docs.sh"
-doctor = "python -c 'import adc; adc.doctor()'"
+doctor = "python -c 'import pops; pops.doctor()'"

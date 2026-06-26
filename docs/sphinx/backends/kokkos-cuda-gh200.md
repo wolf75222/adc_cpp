@@ -17,7 +17,7 @@ CUDA: all the "Kokkos Cuda" cells of the matrix are either ROMEO-manual, or `?`.
 ```bash
 module load cuda/12.6
 cmake -S . -B build-cuda -DCMAKE_BUILD_TYPE=Release \
-  -DADC_USE_KOKKOS=ON \
+  -DPOPS_USE_KOKKOS=ON \
   -DCMAKE_CXX_COMPILER="$KOKKOS_PREFIX/bin/nvcc_wrapper" \
   -DKokkos_ROOT="$KOKKOS_PREFIX"
 cmake --build build-cuda -j

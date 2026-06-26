@@ -9,22 +9,22 @@
 """
 import numpy as np
 
-import adc
+import pops
 
 PI = np.pi
 
 
 def _charge_model():
-    return adc.Model(state=adc.FluidState(kind="compressible", gamma=1.4),
-                     transport=adc.CompressibleFlux(), source=adc.NoSource(),
-                     elliptic=adc.ChargeDensity(charge=1.0))
+    return pops.Model(state=pops.FluidState(kind="compressible", gamma=1.4),
+                     transport=pops.CompressibleFlux(), source=pops.NoSource(),
+                     elliptic=pops.ChargeDensity(charge=1.0))
 
 
 def _charge_scalar():
     """Bloc scalaire (1 var) de densite de charge unite : f = q n = n. set_density n'ecrit que la
     densite (comp 0), ce qui isole le second membre du Poisson pour une solution manufacturee."""
-    return adc.Model(state=adc.Scalar(), transport=adc.ExB(B0=1.0),
-                     source=adc.NoSource(), elliptic=adc.ChargeDensity(charge=1.0))
+    return pops.Model(state=pops.Scalar(), transport=pops.ExB(B0=1.0),
+                     source=pops.NoSource(), elliptic=pops.ChargeDensity(charge=1.0))
 
 
 def _density(n):
@@ -34,9 +34,9 @@ def _density(n):
 
 
 def phi_set_poisson(eps, n=64):
-    sim = adc.System(n=n, L=1.0, periodic=True)
+    sim = pops.System(n=n, L=1.0, periodic=True)
     sim.add_block("gas", model=_charge_model(),
-                  spatial=adc.Spatial(flux="rusanov"), time=adc.Explicit())
+                  spatial=pops.Spatial(flux="rusanov"), time=pops.Explicit())
     sim.set_density("gas", _density(n).reshape(-1).tolist())
     sim.set_poisson(rhs="charge_density", solver="fft", epsilon=eps)
     sim.solve_fields()
@@ -54,14 +54,14 @@ def main():
     print("OK  set_poisson(epsilon) : phi(eps=2) == phi(eps=1)/2 (err %.1e)" % err)
 
     # meme resultat via l'EPM compose (div_eps_grad(2.0))
-    sim = adc.System(n=n, L=1.0, periodic=True)
+    sim = pops.System(n=n, L=1.0, periodic=True)
     sim.add_block("gas", model=_charge_model(),
-                  spatial=adc.Spatial(flux="rusanov"), time=adc.Explicit())
+                  spatial=pops.Spatial(flux="rusanov"), time=pops.Explicit())
     sim.set_density("gas", _density(n).reshape(-1).tolist())
     sim.add_elliptic_model("poisson",
-                           adc.elliptic(operator=adc.div_eps_grad(2.0), rhs=adc.charge_density(),
-                                        output=adc.electric_field_from_potential()),
-                           solver=adc.EllipticSolver("fft"))
+                           pops.elliptic(operator=pops.div_eps_grad(2.0), rhs=pops.charge_density(),
+                                        output=pops.electric_field_from_potential()),
+                           solver=pops.EllipticSolver("fft"))
     sim.solve_fields()
     phi_epm = np.array(sim.potential()).reshape(n, n)
     err2 = float(np.max(np.abs(phi_epm - phi2))) / scale
@@ -86,8 +86,8 @@ def variable_epsilon_tests():
     f = -(1.0 + 0.5 * X) * 2.0 * PI ** 2 * s_xy + 0.5 * PI * np.cos(PI * X) * np.sin(PI * Y)
 
     def solve(eps_field, solver="geometric_mg"):
-        s = adc.System(n=n, L=1.0, periodic=False)
-        s.add_block("q", model=_charge_scalar(), spatial=adc.Spatial(none=True))
+        s = pops.System(n=n, L=1.0, periodic=False)
+        s.add_block("q", model=_charge_scalar(), spatial=pops.Spatial(none=True))
         s.set_poisson(rhs="charge_density", solver=solver, bc="dirichlet")
         s.set_density("q", f)
         if eps_field is not None:
@@ -114,8 +114,8 @@ def variable_epsilon_tests():
     print("OK  non-regression : champ eps uniforme=1 == operateur sans eps (gap %.1e)" % gap)
 
     # eps(x) variable + solveur 'fft' (coefficient constant) : refus explicite au solve.
-    sp = adc.System(n=n, L=1.0, periodic=True)
-    sp.add_block("q", model=_charge_scalar(), spatial=adc.Spatial(none=True))
+    sp = pops.System(n=n, L=1.0, periodic=True)
+    sp.add_block("q", model=_charge_scalar(), spatial=pops.Spatial(none=True))
     sp.set_poisson(rhs="charge_density", solver="fft")
     sp.set_density("q", f)
     sp.set_epsilon_field(eps)

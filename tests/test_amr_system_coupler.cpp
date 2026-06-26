@@ -9,59 +9,59 @@
 //   Le defaut AmrImplicitSourceStepper resout backward-Euler sur CHAQUE niveau :
 //   grossier ET fin relaxent, bornes, stables a grand dt.
 
-#include <adc/core/model/coupled_system.hpp>
-#include <adc/core/state/state.hpp>
-#include <adc/coupling/system/amr_system_coupler.hpp>
-#include <adc/numerics/time/amr/reflux/amr_reflux_mf.hpp>  // AmrLevelMP
-#include <adc/mesh/index/box2d.hpp>
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/layout/distribution_mapping.hpp>
-#include <adc/mesh/execution/for_each.hpp>
-#include <adc/mesh/geometry/geometry.hpp>
-#include <adc/mesh/storage/mf_arith.hpp>
-#include <adc/mesh/storage/multifab.hpp>
-#include <adc/mesh/layout/refinement.hpp>  // coarsen_index
+#include <pops/core/model/coupled_system.hpp>
+#include <pops/core/state/state.hpp>
+#include <pops/coupling/system/amr_system_coupler.hpp>
+#include <pops/numerics/time/amr/reflux/amr_reflux_mf.hpp>  // AmrLevelMP
+#include <pops/mesh/index/box2d.hpp>
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/layout/distribution_mapping.hpp>
+#include <pops/mesh/execution/for_each.hpp>
+#include <pops/mesh/geometry/geometry.hpp>
+#include <pops/mesh/storage/mf_arith.hpp>
+#include <pops/mesh/storage/multifab.hpp>
+#include <pops/mesh/layout/refinement.hpp>  // coarsen_index
 
 #include <cmath>
 #include <cstdio>
 #include <type_traits>
 #include <vector>
 
-using namespace adc;
+using namespace pops;
 
 struct AdvectX {
   using State = StateVec<1>;
-  using Aux = adc::Aux;
+  using Aux = pops::Aux;
   static constexpr int n_vars = 1;
   Real a = Real(1);
-  ADC_HD State flux(const State& u, const Aux&, int dir) const {
+  POPS_HD State flux(const State& u, const Aux&, int dir) const {
     return State{dir == 0 ? a * u[0] : Real(0)};
   }
-  ADC_HD Real max_wave_speed(const State&, const Aux&, int) const { return a < 0 ? -a : a; }
-  ADC_HD State source(const State&, const Aux&) const { return State{Real(0)}; }
-  ADC_HD Real elliptic_rhs(const State& u) const { return u[0]; }
+  POPS_HD Real max_wave_speed(const State&, const Aux&, int) const { return a < 0 ? -a : a; }
+  POPS_HD State source(const State&, const Aux&) const { return State{Real(0)}; }
+  POPS_HD Real elliptic_rhs(const State& u) const { return u[0]; }
 };
 
 struct ElectronRelax {
   using State = StateVec<1>;
-  using Aux = adc::Aux;
+  using Aux = pops::Aux;
   static constexpr int n_vars = 1;
   Real k = Real(1000), neq = Real(1);
-  ADC_HD State flux(const State&, const Aux&, int) const { return State{Real(0)}; }
-  ADC_HD Real max_wave_speed(const State&, const Aux&, int) const { return Real(0); }
-  ADC_HD State source(const State& u, const Aux&) const { return State{-k * (u[0] - neq)}; }
-  ADC_HD Real elliptic_rhs(const State& u) const { return -u[0]; }
+  POPS_HD State flux(const State&, const Aux&, int) const { return State{Real(0)}; }
+  POPS_HD Real max_wave_speed(const State&, const Aux&, int) const { return Real(0); }
+  POPS_HD State source(const State& u, const Aux&) const { return State{-k * (u[0] - neq)}; }
+  POPS_HD Real elliptic_rhs(const State& u) const { return -u[0]; }
 };
 
 struct IonProd {
   using State = StateVec<1>;
-  using Aux = adc::Aux;
+  using Aux = pops::Aux;
   static constexpr int n_vars = 1;
   Real rate = Real(3);
-  ADC_HD State flux(const State&, const Aux&, int) const { return State{Real(0)}; }
-  ADC_HD Real max_wave_speed(const State&, const Aux&, int) const { return Real(0); }
-  ADC_HD State source(const State&, const Aux&) const { return State{rate}; }
-  ADC_HD Real elliptic_rhs(const State& u) const { return u[0]; }
+  POPS_HD State flux(const State&, const Aux&, int) const { return State{Real(0)}; }
+  POPS_HD Real max_wave_speed(const State&, const Aux&, int) const { return Real(0); }
+  POPS_HD State source(const State&, const Aux&) const { return State{rate}; }
+  POPS_HD Real elliptic_rhs(const State& u) const { return u[0]; }
 };
 
 struct ZeroSystemRhs {
@@ -85,7 +85,7 @@ struct LinearExchange {
       Array4 a1 = U1.fab(li).array();
       const Box2D b = U0.box(li);
       const Real c = coef;
-      for_each_cell(b, [=] ADC_HD(int i, int j) {
+      for_each_cell(b, [=] POPS_HD(int i, int j) {
         const Real flux = c * (a1(i, j, 0) - a0(i, j, 0));
         a0(i, j, 0) += flux;
         a1(i, j, 0) -= flux;

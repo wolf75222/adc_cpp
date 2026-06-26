@@ -6,22 +6,22 @@
 // l'ACCEPTATION de time='imex' (seul un time hors {explicit, imex} est refuse). Il compile
 // python/amr_system.cpp avec le test, la classe AmrSystem etant la facade des bindings.
 
-#include <adc/runtime/amr_system.hpp>
-#include <adc/runtime/config/model_spec.hpp>
+#include <pops/runtime/amr_system.hpp>
+#include <pops/runtime/config/model_spec.hpp>
 
-#include "test_harness.hpp"  // adc::test::Checker (style verbose) + raises partages
+#include "test_harness.hpp"  // pops::test::Checker (style verbose) + raises partages
 
 #include <cstdio>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
 #include <Kokkos_Core.hpp>
 #endif
 
-using namespace adc;
-using adc::test::raises;  // true si l'appelable leve std::runtime_error (le refus attendu)
+using namespace pops;
+using pops::test::raises;  // true si l'appelable leve std::runtime_error (le refus attendu)
 
 // Bloc ExB scalaire minimal valide (diocotron-like), pour exercer les chemins de refus.
 static ModelSpec exb_spec() {
@@ -33,13 +33,13 @@ static ModelSpec exb_spec() {
 }
 
 int main(int argc, char** argv) {
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   Kokkos::ScopeGuard guard(argc, argv);
 #else
   (void)argc;
   (void)argv;
 #endif
-  adc::test::Checker checker{adc::test::Checker::Style::Verbose};  // imprime [OK ]/[XX ] par ligne
+  pops::test::Checker checker{pops::test::Checker::Style::Verbose};  // imprime [OK ]/[XX ] par ligne
   auto chk = [&](bool c, const char* w) { checker(c, w); };
 
   AmrSystemConfig cfg;

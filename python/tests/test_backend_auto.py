@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Backend par DEFAUT 'auto' (ADC-63) : production quand la parite toolchain avec le module _adc
+"""Backend par DEFAUT 'auto' (ADC-63) : production quand la parite toolchain avec le module _pops
 est etablie, aot sinon -- et JAMAIS un choix muet (CompiledModel.backend dit ce qui a ete
 construit, backend_auto_reason dit pourquoi).
 
@@ -18,8 +18,8 @@ import tempfile
 
 import numpy as np
 
-import adc
-from adc import dsl
+import pops
+from pops import dsl
 
 fails = 0
 INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "include"))
@@ -49,7 +49,7 @@ def iso3(name):
 
 cxx = shutil.which("c++") or shutil.which("g++") or shutil.which("clang++")
 if not cxx or not os.path.isdir(INCLUDE):
-    print("skip test_backend_auto : compilateur ou en-tetes adc absents")
+    print("skip test_backend_auto : compilateur ou en-tetes pops absents")
     sys.exit(0)
 
 tmp = tempfile.mkdtemp()
@@ -62,10 +62,10 @@ try:
     chk(cm.backend_auto_reason is not None and "toolchain" in cm.backend_auto_reason,
         f"raison posee : {str(cm.backend_auto_reason)[:60]}")
     n = 16
-    sim = adc.System(n=n, L=1.0, periodic=True)
+    sim = pops.System(n=n, L=1.0, periodic=True)
     sim.set_poisson()
-    sim.add_equation("f", model=cm, spatial=adc.FiniteVolume(limiter="minmod"),
-                     time=adc.Explicit())
+    sim.add_equation("f", model=cm, spatial=pops.FiniteVolume(limiter="minmod"),
+                     time=pops.Explicit())
     x = (np.arange(n) + 0.5) / n
     X, Y = np.meshgrid(x, x, indexing="xy")
     z = np.zeros((n, n))
@@ -77,7 +77,7 @@ try:
     print("== (2) parite cassee -> repli aot EXPLIQUE et fonctionnel ==")
     stale = os.path.join(tmp, "include_stale")
     shutil.copytree(INCLUDE, stale)
-    with open(os.path.join(stale, "adc", "core", "types.hpp"), "a") as f:
+    with open(os.path.join(stale, "pops", "core", "types.hpp"), "a") as f:
         f.write("\n// drift de signature pour test_backend_auto (copie jetable)\n")
     bk2, reason2 = dsl.resolve_auto_backend(stale)
     chk(bk2 == "aot" and "module" in reason2 or "en-tetes" in reason2,

@@ -10,15 +10,15 @@
 //
 // Attendu : Strang 2e ordre (erreur /4 quand dt /2), Lie 1er ordre (/2).
 
-#include <adc/numerics/time/schemes/splitting.hpp>
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/layout/distribution_mapping.hpp>
-#include <adc/mesh/storage/multifab.hpp>
+#include <pops/numerics/time/schemes/splitting.hpp>
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/layout/distribution_mapping.hpp>
+#include <pops/mesh/storage/multifab.hpp>
 
 #include <cmath>
 #include <cstdio>
 
-using namespace adc;
+using namespace pops;
 
 static void fill_ic(MultiFab& U, double x0, double y0) {
   for (int li = 0; li < U.local_size(); ++li) {

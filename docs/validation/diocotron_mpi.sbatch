@@ -15,7 +15,7 @@
 # Diocotron hyqmom15 multi-GPU + MPI (ferme la branche 3 de GH200_HYQMOM15.md via une
 # decomposition MPI de System, mono-boite round-robin -- meme topologie que le run_mpi.py
 # valide CPU). Le MEME driver diocotron_gpu.cpp (briques Hyqmom15Hyp/Src/Ell + Poisson
-# geometric_mg), lie a OpenMPI CUDA-aware (-DADC_VALIDATION_MPI=ON), tourne sous
+# geometric_mg), lie a OpenMPI CUDA-aware (-DPOPS_VALIDATION_MPI=ON), tourne sous
 # srun -n {1,2,4} --gpus-per-task=1 (un GH200 par rang). np=1 = oracle ; np=2/4 DOIVENT
 # coincider au niveau ulp sur la masse globale (la somme du V-cycle Poisson se reassocie
 # entre nombres de rangs : PAS bit-exact, cf. section 2/3 de GH200_HYQMOM15.md).
@@ -25,8 +25,8 @@
 #   2. SRC = docs/validation versionne (diocotron_gpu.cpp, CMakeLists.txt).
 #   3. brique DSL hyqmom15_brick.hpp + etat initial ic_128.raw sont GENERES (artefacts
 #      derives, bit-reproductibles, NON versionnes) par make_brick_and_ic.py sur une machine
-#      disposant du module python adc, puis deposes dans WORK :
-#        ADC_CASES=/chemin/adc_cases PYTHONPATH=/chemin/adc_cpp/python \
+#      disposant du module python pops, puis deposes dans WORK :
+#        POPS_CASES=/chemin/adc_cases PYTHONPATH=/chemin/adc_cpp/python \
 #          python docs/validation/make_brick_and_ic.py --ns 128 --out WORK
 #      (md5 ic_128.raw = da245ba8934546986508976a64156d2e, stable d'un run a l'autre.)
 #   4. sbatch docs/validation/diocotron_mpi.sbatch
@@ -47,7 +47,7 @@ nvidia-smi --query-gpu=name --format=csv,noheader | head -4
 SRC="${ADCDIO_SRC:-$HOME/adc_cpp/docs/validation}"
 WORK="${ADCDIO_WORK:-$HOME/adcdio_work}"
 SCR="/scratch_p/$USER/adcdio"
-KGPU="$HOME/adc_gpu_p1/kinstall"
+KGPU="$HOME/pops_gpu_p1/kinstall"
 NVCC="$KGPU/bin/nvcc_wrapper"
 ADCINC="$HOME/adc_cpp/include"
 mkdir -p "$SCR" "$WORK"
@@ -67,7 +67,7 @@ echo "[stage] sources versionnees + brique/IC generes en place dans $WORK"
 test -x "$NVCC" || { echo "nvcc_wrapper introuvable: $NVCC"; exit 2; }
 rm -rf "$SCR/build"
 cmake -S "$WORK" -B "$SCR/build" -DCMAKE_CXX_COMPILER="$NVCC" -DKokkos_ROOT="$KGPU" \
-  -DADC_INCLUDE="$ADCINC" -DADC_VALIDATION_MPI=ON -DCMAKE_BUILD_TYPE=Release \
+  -DPOPS_INCLUDE="$ADCINC" -DPOPS_VALIDATION_MPI=ON -DCMAKE_BUILD_TYPE=Release \
   > "$SCR/cfg.log" 2>&1 || { echo CFG_FAIL; tail -50 "$SCR/cfg.log"; exit 1; }
 cmake --build "$SCR/build" -j "${SLURM_CPUS_PER_TASK:-8}" > "$SCR/build.log" 2>&1 \
   || { echo BUILD_FAIL; grep -iE "error" "$SCR/build.log" | head -40; exit 1; }

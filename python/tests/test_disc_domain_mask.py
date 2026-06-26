@@ -19,7 +19,7 @@ cartesien plein. La conservation FV du sous-domaine actif est validee cote C++
 (tests/test_disc_domain_mask.cpp, qui exerce assemble_rhs_masked).
 
 Lance comme un simple script python3 (pas pytest : la CI lance ces tests directement). Se saute
-proprement si le module _adc n'est pas importable (build absent).
+proprement si le module _pops n'est pas importable (build absent).
 """
 
 import sys
@@ -27,9 +27,9 @@ import sys
 import numpy as np
 
 try:
-    import adc
+    import pops
 except ImportError as e:  # pragma: no cover - environnement sans build
-    print("skip  module adc absent (PYTHONPATH ? build ?) : %s" % e)
+    print("skip  module pops absent (PYTHONPATH ? build ?) : %s" % e)
     sys.exit(0)
 
 
@@ -46,11 +46,11 @@ def chk(cond, label):
 def iso_model(cs2=1.0, alpha=3.0, n0=1.0):
     """Fluide isotherme NATIF (briques natives, aucun compilateur C++ : CI-safe, meme chemin que
     test_schur_conservation.py). Roles Density / MomentumX / MomentumY (3 var)."""
-    return adc.Model(
-        state=adc.FluidState(kind="isothermal", cs2=cs2),
-        transport=adc.IsothermalFlux(),
-        source=adc.NoSource(),
-        elliptic=adc.BackgroundDensity(alpha=alpha, n0=n0),
+    return pops.Model(
+        state=pops.FluidState(kind="isothermal", cs2=cs2),
+        transport=pops.IsothermalFlux(),
+        source=pops.NoSource(),
+        elliptic=pops.BackgroundDensity(alpha=alpha, n0=n0),
     )
 
 
@@ -65,13 +65,13 @@ def ring(n, L, cx=0.5, cy=0.5):
 # ---------------------------------------------------------------------------
 
 def _build(n, L):
-    sim = adc.System(n=n, L=L, periodic=True)
+    sim = pops.System(n=n, L=L, periodic=True)
     sim.set_poisson(bc="periodic")
     rho0 = ring(n, L)
     sim.add_equation("s", model=iso_model(n0=float(rho0.mean())),
-                     spatial=adc.FiniteVolume(limiter="minmod", riemann="rusanov",
+                     spatial=pops.FiniteVolume(limiter="minmod", riemann="rusanov",
                                               variables="conservative"),
-                     time=adc.Explicit())
+                     time=pops.Explicit())
     # Vitesse initiale CONSTANTE non nulle : le transport advecte la bosse (test non trivial).
     sim.set_primitive_state("s", rho=rho0, u=0.7 + 0.0 * rho0, v=-0.4 + 0.0 * rho0)
     return sim
@@ -159,7 +159,7 @@ def test_guards():
     # Polaire : l'anneau est deja borne par ses parois radiales -> set_disc_domain doit lever.
     raised_polar = False
     try:
-        simp = adc.System(mesh=adc.PolarMesh(nr=16, ntheta=16, r_min=0.2, r_max=1.0))
+        simp = pops.System(mesh=pops.PolarMesh(nr=16, ntheta=16, r_min=0.2, r_max=1.0))
         simp.set_disc_domain(0.0, 0.0, 0.5)
     except Exception:
         raised_polar = True

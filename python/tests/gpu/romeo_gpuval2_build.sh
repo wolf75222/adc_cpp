@@ -15,7 +15,7 @@
 set -u
 module load cuda/12.6
 romeo_load_armgpu_env
-cd "$HOME/adc_gpu_p1" || exit 3
+cd "$HOME/pops_gpu_p1" || exit 3
 echo "noeud=$(hostname) arch=$(uname -m)"
 NW="$PWD/kinstall/bin/nvcc_wrapper"
 INC="$PWD/gpuval2_include"          # en-tetes A JOUR (rsync depuis master)
@@ -26,13 +26,13 @@ mkdir -p "$RES"
 # --- build device (Kokkos Cuda) ------------------------------------------------------------------
 rm -rf gpuval2_build
 cmake -S "$SRC" -B gpuval2_build -DCMAKE_CXX_COMPILER="$NW" -DKokkos_ROOT="$PWD/kinstall" \
-  -DADC_INCLUDE="$INC" -DCMAKE_BUILD_TYPE=Release \
+  -DPOPS_INCLUDE="$INC" -DCMAKE_BUILD_TYPE=Release \
   > "$RES/cfg.log" 2>&1 || { echo CFG_FAIL; tail -50 "$RES/cfg.log"; exit 1; }
 cmake --build gpuval2_build -j 16 > "$RES/build.log" 2>&1 \
   || { echo BUILD_FAIL; grep -iE "error" "$RES/build.log" | head -40; exit 1; }
 echo GPUVAL2_BUILD_OK
 
-# --- build oracle Serial (g++, ADC_HAS_KOKKOS off => Serial(host)) -------------------------------
+# --- build oracle Serial (g++, POPS_HAS_KOKKOS off => Serial(host)) -------------------------------
 echo "=== build Serial oracle (g++) ==="
 g++ -std=c++20 -O2 -I "$INC" "$SRC/gpu_epm_validate.cpp" -o "$RES/epm_serial" \
   > "$RES/serial_epm.log" 2>&1 || { echo SERIAL_EPM_FAIL; tail -30 "$RES/serial_epm.log"; }

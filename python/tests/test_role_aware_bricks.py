@@ -30,7 +30,7 @@ import sys
 
 import numpy as np
 
-import adc
+import pops
 
 fails = 0
 
@@ -48,13 +48,13 @@ ones = np.ones((n, n))
 
 # --- 1. NO-DEFAULT-CHANGE quantitatif : magnetique sur ISOTHERME 3-var (rho=0, m_x=1, m_y=2) --------
 print("== 1. isotherme 3-var : residu magnetique == force exacte (roles canoniques resolus) ==")
-sim = adc.System(n=n, L=1.0, periodic=True)
+sim = pops.System(n=n, L=1.0, periodic=True)
 sim.add_block("e",
-              adc.Model(state=adc.FluidState("isothermal", cs2=0.5),
-                        transport=adc.IsothermalFlux(),
-                        source=adc.MagneticLorentzForce(charge=q),
-                        elliptic=adc.ChargeDensity(charge=0.0)),  # pas de couplage Poisson
-              spatial=adc.FiniteVolume(limiter="minmod"), time=adc.Explicit())
+              pops.Model(state=pops.FluidState("isothermal", cs2=0.5),
+                        transport=pops.IsothermalFlux(),
+                        source=pops.MagneticLorentzForce(charge=q),
+                        elliptic=pops.ChargeDensity(charge=0.0)),  # pas de couplage Poisson
+              spatial=pops.FiniteVolume(limiter="minmod"), time=pops.Explicit())
 sim.set_poisson(rhs="charge_density", solver="geometric_mg", bc="periodic")
 sim.set_magnetic_field(B0 * np.ones(n * n))
 # etat uniforme rho=1, m=(0, rho*v0) -> div F = 0 -> R == source magnetique.
@@ -68,13 +68,13 @@ chk(np.allclose(R[2], 0.0, atol=1e-12), "R[m_y] = -q*B*m_x = 0 (c_my resolu a la
 
 # --- 2. NO-DEFAULT-CHANGE quantitatif : magnetique sur EULER 4-var (energie c_E=3 intouchee) --------
 print("== 2. compressible 4-var : energie (composante 3) intouchee par la force magnetique ==")
-sE = adc.System(n=n, L=1.0, periodic=True)
+sE = pops.System(n=n, L=1.0, periodic=True)
 sE.add_block("g",
-             adc.Model(state=adc.FluidState("compressible", gamma=1.4),
-                       transport=adc.CompressibleFlux(),
-                       source=adc.MagneticLorentzForce(charge=q),
-                       elliptic=adc.ChargeDensity(charge=0.0)),
-             spatial=adc.FiniteVolume(limiter="minmod"), time=adc.Explicit())
+             pops.Model(state=pops.FluidState("compressible", gamma=1.4),
+                       transport=pops.CompressibleFlux(),
+                       source=pops.MagneticLorentzForce(charge=q),
+                       elliptic=pops.ChargeDensity(charge=0.0)),
+             spatial=pops.FiniteVolume(limiter="minmod"), time=pops.Explicit())
 sE.set_poisson(rhs="charge_density", solver="geometric_mg", bc="periodic")
 sE.set_magnetic_field(B0 * np.ones(n * n))
 sE.set_primitive_state("g", rho=rho0 * ones, u=0.0 * ones, v=v0 * ones, p=1.0 * ones)
@@ -94,13 +94,13 @@ rho_bump = (1.0 + 0.3 * np.exp(-60.0 * ((X - 0.5) ** 2 + (Y - 0.5) ** 2))).ravel
 
 
 def run_potential():
-    s = adc.System(n=n, L=1.0, periodic=True)
+    s = pops.System(n=n, L=1.0, periodic=True)
     s.add_block("e",
-                adc.Model(state=adc.FluidState("isothermal", cs2=0.5),
-                          transport=adc.IsothermalFlux(),
-                          source=adc.PotentialForce(charge=-1.0),   # lit c_rho, ecrit c_mx/c_my
-                          elliptic=adc.ChargeDensity(charge=-1.0)),  # second membre Poisson = q*u[c_rho]
-                spatial=adc.FiniteVolume(limiter="minmod"), time=adc.Explicit())
+                pops.Model(state=pops.FluidState("isothermal", cs2=0.5),
+                          transport=pops.IsothermalFlux(),
+                          source=pops.PotentialForce(charge=-1.0),   # lit c_rho, ecrit c_mx/c_my
+                          elliptic=pops.ChargeDensity(charge=-1.0)),  # second membre Poisson = q*u[c_rho]
+                spatial=pops.FiniteVolume(limiter="minmod"), time=pops.Explicit())
     s.set_poisson(rhs="charge_density", solver="geometric_mg", bc="periodic")
     s.set_density("e", rho_bump.copy())
     for _ in range(8):

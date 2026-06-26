@@ -35,17 +35,17 @@ other jobs switch to blocking according to the criteria in the dedicated section
 | Job | Tool | Config | Preset / option |
 | --- | --- | --- | --- |
 | `format` | clang-format + ruff | `.clang-format`, `[tool.ruff]` | -- (no build) |
-| `warnings` | gcc `-Wall -Wextra ...` | `cmake/AdcDevTooling.cmake` | preset `ci-warnings` (`ADC_ENABLE_WARNINGS`) |
+| `warnings` | gcc `-Wall -Wextra ...` | `cmake/PopsDevTooling.cmake` | preset `ci-warnings` (`POPS_ENABLE_WARNINGS`) |
 | `tidy` | clang-tidy | `.clang-tidy` | preset `ci-kokkos` (compile DB) |
-| `sanitizers` | ASan + UBSan | `cmake/AdcDevTooling.cmake` | preset `ci-asan` (`ADC_ENABLE_SANITIZERS`) |
-| `tsan` | ThreadSanitizer (races) | `cmake/AdcDevTooling.cmake`, `tsan-suppressions.txt` | preset `ci-tsan` (`ADC_ENABLE_TSAN`, clang + Kokkos OpenMP) |
-| `fuzz` | libFuzzer (90 s/target) | `fuzz/` (invariant harnesses) | preset `ci-fuzz` (`ADC_BUILD_FUZZING`, clang) |
-| `coverage` | gcov + gcovr | `cmake/AdcDevTooling.cmake` | preset `ci-coverage` (`ADC_ENABLE_COVERAGE`) |
+| `sanitizers` | ASan + UBSan | `cmake/PopsDevTooling.cmake` | preset `ci-asan` (`POPS_ENABLE_SANITIZERS`) |
+| `tsan` | ThreadSanitizer (races) | `cmake/PopsDevTooling.cmake`, `tsan-suppressions.txt` | preset `ci-tsan` (`POPS_ENABLE_TSAN`, clang + Kokkos OpenMP) |
+| `fuzz` | libFuzzer (90 s/target) | `fuzz/` (invariant harnesses) | preset `ci-fuzz` (`POPS_BUILD_FUZZING`, clang) |
+| `coverage` | gcov + gcovr | `cmake/PopsDevTooling.cmake` | preset `ci-coverage` (`POPS_ENABLE_COVERAGE`) |
 | `codeql` | CodeQL C++ | suite `security-and-quality` | preset `ci-kokkos` (traced build) |
 
-Warnings, sanitizers, TSan and coverage are carried by an **`INTERFACE adc_dev_options`** target that
-**only** the internal targets link in `PRIVATE` (the ~140 tests via `adc_add_test`, the `_adc`
-module). The public core `adc::adc` is never touched -> no flag leaks to consumers.
+Warnings, sanitizers, TSan and coverage are carried by an **`INTERFACE pops_dev_options`** target that
+**only** the internal targets link in `PRIVATE` (the ~140 tests via `pops_add_test`, the `_pops`
+module). The public core `pops::pops` is never touched -> no flag leaks to consumers.
 
 CodeQL is free here because the repository is **public** ; the results show up in
 **Security > Code scanning**.
@@ -78,12 +78,12 @@ mandatory choices come from how the runtimes behave under TSan :
   `compiler: clang`) installs `libomp-dev` and a Kokkos OpenMP install (separate cache key).
 - **`tsan-suppressions.txt` (repo root) is seeded, not final.** Kokkos and libomp are linked but
   uninstrumented, so their internals report benign races ; each suppression is justified there, and a
-  race inside `include/adc/` must never be suppressed. The first weekly run triages signal vs noise
+  race inside `include/pops/` must never be suppressed. The first weekly run triages signal vs noise
   (`OMP_NUM_THREADS=2`, `TSAN_OPTIONS` points at the file) ; a confirmed race becomes a dedicated
   High-priority issue.
 
 ASan and TSan are **mutually exclusive** (one memory/thread runtime per binary) : enabling both
-`ADC_ENABLE_SANITIZERS` and `ADC_ENABLE_TSAN` is a hard CMake error -- use `ci-tsan` **or** `ci-asan`.
+`POPS_ENABLE_SANITIZERS` and `POPS_ENABLE_TSAN` is a hard CMake error -- use `ci-tsan` **or** `ci-asan`.
 
 ## pre-commit (auto-format at commit, opt-in, local)
 
@@ -103,14 +103,14 @@ Node 20 deprecation of `actions/cache@v4` / `upload-artifact@v4` seen on the fir
 
 ```bash
 # Style
-clang-format --dry-run --Werror include/adc/**/*.hpp     # reports; -i to apply
+clang-format --dry-run --Werror include/pops/**/*.hpp     # reports; -i to apply
 
-# Strict warnings (Kokkos required: conda env 'adc' active, or KOKKOS_PREFIX pointing at an install)
-cmake --preset parallel -DADC_ENABLE_WARNINGS=ON
+# Strict warnings (Kokkos required: conda env 'pops' active, or KOKKOS_PREFIX pointing at an install)
+cmake --preset parallel -DPOPS_ENABLE_WARNINGS=ON
 cmake --build --preset parallel
 
 # ASan+UBSan sanitizers
-cmake --preset parallel -DADC_ENABLE_SANITIZERS=ON -DCMAKE_BUILD_TYPE=RelWithDebInfo
+cmake --preset parallel -DPOPS_ENABLE_SANITIZERS=ON -DCMAKE_BUILD_TYPE=RelWithDebInfo
 cmake --build --preset parallel
 ASAN_OPTIONS=detect_leaks=0:detect_container_overflow=0 ctest --preset parallel --output-on-failure
 
@@ -125,17 +125,17 @@ OMP_NUM_THREADS=2 TSAN_OPTIONS=suppressions=$PWD/tsan-suppressions.txt ctest --p
 run-clang-tidy -p build-kokkos 'tests/.*\.cpp'   # build-kokkos = binaryDir of the parallel/ci-kokkos preset
 
 # Fuzzing (LLVM clang required; on macOS, the Homebrew one -- AppleClang has no libFuzzer).
-# macOS: -DADC_FUZZ_SANITIZERS=undefined is MANDATORY -- the Homebrew LLVM ASan deadlocks BEFORE
+# macOS: -DPOPS_FUZZ_SANITIZERS=undefined is MANDATORY -- the Homebrew LLVM ASan deadlocks BEFORE
 # main on recent macOS (re-entrant init via dyld, confirmed with `sample`: 95% CPU, zero output,
 # MallocNanoZone=0 is not enough). The Linux CI keeps the full address,undefined default.
 KOKKOS_PREFIX=$CONDA_PREFIX cmake --preset ci-fuzz \
-  -DCMAKE_CXX_COMPILER=/opt/homebrew/opt/llvm/bin/clang++ -DADC_FUZZ_SANITIZERS=undefined
+  -DCMAKE_CXX_COMPILER=/opt/homebrew/opt/llvm/bin/clang++ -DPOPS_FUZZ_SANITIZERS=undefined
 cmake --build --preset ci-fuzz
 ./build-fuzz/bin/fuzz_cluster -max_total_time=60
 
 # Coverage (GCC required -> in practice: the CI job)
 cmake --preset ci-coverage && cmake --build --preset ci-coverage && ctest --preset ci-coverage
-gcovr --root . build-kokkos-coverage --filter 'include/adc/' --print-summary
+gcovr --root . build-kokkos-coverage --filter 'include/pops/' --print-summary
 
 # Python lint
 ruff check python          # see [tool.ruff] in pyproject.toml; --fix to apply

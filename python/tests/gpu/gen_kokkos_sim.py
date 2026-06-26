@@ -1,6 +1,6 @@
 """Genere un CAS COMPLET Euler 2D (time-stepping CFL, Rusanov, periodique) qui tourne sur GPU a
-travers le seam Kokkos d'adc (for_each_cell / for_each_cell_reduce_*). On simule avec la brique
-GENEREE EulerGen ET avec adc::Euler, et on compare les champs finaux (+ conservation de la masse).
+travers le seam Kokkos d'pops (for_each_cell / for_each_cell_reduce_*). On simule avec la brique
+GENEREE EulerGen ET avec pops::Euler, et on compare les champs finaux (+ conservation de la masse).
 Placeholder __BRICK__."""
 import sys
 sys.path.insert(0, "python/tests")
@@ -8,32 +8,32 @@ from test_dsl_brick import build_euler_brick
 
 brick = build_euler_brick().emit_cpp_brick(name="EulerGen")
 
-HARNESS = r"""// CAS COMPLET Euler 2D sur GPU via le seam Kokkos d'adc (for_each_cell).
-#define ADC_HAS_KOKKOS 1
+HARNESS = r"""// CAS COMPLET Euler 2D sur GPU via le seam Kokkos d'pops (for_each_cell).
+#define POPS_HAS_KOKKOS 1
 #include <Kokkos_Core.hpp>
-#include <adc/mesh/execution/for_each.hpp>
-#include <adc/physics/fluids/euler.hpp>
+#include <pops/mesh/execution/for_each.hpp>
+#include <pops/physics/fluids/euler.hpp>
 __BRICK__
 #include <cstdio>
 #include <cmath>
 
-using State = adc::StateVec<4>;
+using State = pops::StateVec<4>;
 static constexpr double GAMMA = 1.4;
 
 // Avance @p U de @p steps pas (Rusanov ordre 1, periodique, CFL) via for_each_cell (Kokkos -> GPU).
 template <class Model>
 void run(Model model, int n, int steps, double h, double cfl, Kokkos::View<State**> U) {
-  adc::Box2D box{{0, 0}, {n - 1, n - 1}};
+  pops::Box2D box{{0, 0}, {n - 1, n - 1}};
   Kokkos::View<State**> R("R", n, n);
   for (int s = 0; s < steps; ++s) {
-    double amax = adc::for_each_cell_reduce_max(box, KOKKOS_LAMBDA(int i, int j) {
-      adc::Aux a{}; State u = U(i, j);
+    double amax = pops::for_each_cell_reduce_max(box, KOKKOS_LAMBDA(int i, int j) {
+      pops::Aux a{}; State u = U(i, j);
       double sx = model.max_wave_speed(u, a, 0), sy = model.max_wave_speed(u, a, 1);
       return sx > sy ? sx : sy;
     });
     double dt = cfl * h / amax;
-    adc::for_each_cell(box, KOKKOS_LAMBDA(int i, int j) {
-      adc::Aux a{};
+    pops::for_each_cell(box, KOKKOS_LAMBDA(int i, int j) {
+      pops::Aux a{};
       State Uc = U(i, j);
       State Uxp = U((i + 1) % n, j), Uxm = U((i + n - 1) % n, j);
       State Uyp = U(i, (j + 1) % n), Uym = U(i, (j + n - 1) % n);
@@ -54,13 +54,13 @@ void run(Model model, int n, int steps, double h, double cfl, Kokkos::View<State
       for (int k = 0; k < 4; ++k) r[k] = -((Fxr[k] - Fxl[k]) + (Fyr[k] - Fyl[k])) / h;
       R(i, j) = r;
     });
-    adc::for_each_cell(box, KOKKOS_LAMBDA(int i, int j) {
+    pops::for_each_cell(box, KOKKOS_LAMBDA(int i, int j) {
       State u = U(i, j), r = R(i, j);
       for (int k = 0; k < 4; ++k) u[k] += dt * r[k];
       U(i, j) = u;
     });
   }
-  adc::device_fence();
+  pops::device_fence();
 }
 
 int main(int argc, char** argv) {
@@ -69,7 +69,7 @@ int main(int argc, char** argv) {
   {
     const int n = 64, steps = 80;
     const double L = 1.0, h = L / n, cfl = 0.4;
-    adc::Box2D box{{0, 0}, {n - 1, n - 1}};
+    pops::Box2D box{{0, 0}, {n - 1, n - 1}};
     Kokkos::View<State**> Ug("Ug", n, n), Ur("Ur", n, n);
     auto hg = Kokkos::create_mirror_view(Ug);
     for (int j = 0; j < n; ++j)
@@ -82,11 +82,11 @@ int main(int argc, char** argv) {
     Kokkos::deep_copy(Ug, hg);
     Kokkos::deep_copy(Ur, hg);
 
-    double mass0 = adc::for_each_cell_reduce_sum(box, KOKKOS_LAMBDA(int i, int j) { return Ug(i, j)[0]; });
-    run(adc_generated::EulerGen{}, n, steps, h, cfl, Ug);  // brique GENEREE, sur GPU
-    adc::Euler ref; ref.gamma = GAMMA;
+    double mass0 = pops::for_each_cell_reduce_sum(box, KOKKOS_LAMBDA(int i, int j) { return Ug(i, j)[0]; });
+    run(pops_generated::EulerGen{}, n, steps, h, cfl, Ug);  // brique GENEREE, sur GPU
+    pops::Euler ref; ref.gamma = GAMMA;
     run(ref, n, steps, h, cfl, Ur);                         // oracle, meme boucle, sur GPU
-    double mass1 = adc::for_each_cell_reduce_sum(box, KOKKOS_LAMBDA(int i, int j) { return Ug(i, j)[0]; });
+    double mass1 = pops::for_each_cell_reduce_sum(box, KOKKOS_LAMBDA(int i, int j) { return Ug(i, j)[0]; });
 
     auto hgg = Kokkos::create_mirror_view(Ug), hrr = Kokkos::create_mirror_view(Ur);
     Kokkos::deep_copy(hgg, Ug); Kokkos::deep_copy(hrr, Ur);
@@ -98,7 +98,7 @@ int main(int argc, char** argv) {
       }
     double drel = fabs(mass1 - mass0) / mass0;
     std::printf("exec=%s  n=%d steps=%d  mass_drel=%.3e  rho[min,max]=[%.4f,%.4f]"
-                "  maxdiff(EulerGen vs adc::Euler, GPU)=%.3e\n",
+                "  maxdiff(EulerGen vs pops::Euler, GPU)=%.3e\n",
                 Kokkos::DefaultExecutionSpace::name(), n, steps, drel, rmin, rmax, maxdiff);
     bool moved = (rmax - rmin) > 1e-3;   // dynamique non triviale
     rc = (drel < 1e-9 && maxdiff < 1e-12 && rmin > 0.0 && moved) ? 0 : 1;

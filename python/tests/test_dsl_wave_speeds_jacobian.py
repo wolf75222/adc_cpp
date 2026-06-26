@@ -3,7 +3,7 @@
 m.wave_speeds_from_jacobian(eig='numeric'|'fd', blocks=...).
 
 Le modele fournit (ou laisse l'autodiff deriver via flux_jacobian) A = dF/dU ; le codegen emet
-le remplissage des sous-blocs + adc::real_eig_minmax (QR de Francis sur pile, dense_eig.hpp,
+le remplissage des sous-blocs + pops::real_eig_minmax (QR de Francis sur pile, dense_eig.hpp,
 repli Gershgorin = borne externe sure) ; smin/smax = extremes des spectres des blocs. Sans
 set_eigenvalues, max_wave_speed = max(|smin|, |smax|) sur les memes blocs (Rusanov et HLL
 partagent la meme verite). Aucun changement du coeur au-dela de dense_eig.hpp (ADC-86).
@@ -30,8 +30,8 @@ import tempfile
 
 import numpy as np
 
-import adc
-from adc import dsl
+import pops
+from pops import dsl
 
 fails = 0
 INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "include"))
@@ -141,11 +141,11 @@ if not cxx:
     print("pas de compilateur C++ : tests (4)-(6)/(8) sautes")
     sys.exit(1 if fails else 0)
 
-tmp = tempfile.mkdtemp(prefix="adc_ws_jac_")
+tmp = tempfile.mkdtemp(prefix="pops_ws_jac_")
 
 print("== (4) compile + marqueurs d'emission ==")
 src = burgers_toy()._m.emit_cpp_brick()
-chk("dense_eig.hpp" in src and "adc::real_eig_minmax" in src and "EigBounds" in src,
+chk("dense_eig.hpp" in src and "pops::real_eig_minmax" in src and "EigBounds" in src,
     "source generee (numeric) : include dense_eig + real_eig_minmax + EigBounds")
 src_fd = burgers_toy(eig="fd")._m.emit_cpp_brick()
 chk("flux(U, a, dir)" in src_fd and "flux(Up_, a, dir)" in src_fd,
@@ -211,10 +211,10 @@ def expected_rhs_hll(U, n):
 
 
 print("== (5) riemann='hll' via System : vitesses exactes par cellule ==")
-sim = adc.System(n=n, L=1.0, periodic=True)
+sim = pops.System(n=n, L=1.0, periodic=True)
 sim.add_equation("burg", model=c_burg,
-                 spatial=adc.FiniteVolume(limiter="none", riemann="hll"),
-                 time=adc.Explicit())
+                 spatial=pops.FiniteVolume(limiter="none", riemann="hll"),
+                 time=pops.Explicit())
 U = toy_state(n)
 sim.set_state("burg", U)
 rhs = np.array(sim.eval_rhs("burg"))
@@ -224,10 +224,10 @@ chk(d < 1e-12, f"eval_rhs hll == reference numpy a vitesses exactes (dmax = {d:.
 
 print("== (6) eig='fd' == eig='numeric' ==")
 c_fd = burgers_toy(eig="fd").compile(os.path.join(tmp, "jacburg_fd.so"), INCLUDE, backend="aot")
-sim_fd = adc.System(n=n, L=1.0, periodic=True)
+sim_fd = pops.System(n=n, L=1.0, periodic=True)
 sim_fd.add_equation("burg", model=c_fd,
-                    spatial=adc.FiniteVolume(limiter="none", riemann="hll"),
-                    time=adc.Explicit())
+                    spatial=pops.FiniteVolume(limiter="none", riemann="hll"),
+                    time=pops.Explicit())
 sim_fd.set_state("burg", U)
 rhs_fd = np.array(sim_fd.eval_rhs("burg"))
 rel = float(np.max(np.abs(rhs_fd - rhs)) / max(1.0, np.max(np.abs(rhs))))

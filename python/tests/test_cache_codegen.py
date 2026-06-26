@@ -8,9 +8,9 @@ tests/test_cache_manager.cpp). Other ops/policies still refuse to lower (not yet
 """
 import pytest
 
-from adc import dsl, model
+from pops import dsl, model
 
-adctime = pytest.importorskip("adc.time")
+adctime = pytest.importorskip("pops.time")
 
 
 def _module():

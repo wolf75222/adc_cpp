@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""adc.time GMRES Krylov solver for the compiled time program (epic ADC-399 / ADC-420).
+"""pops.time GMRES Krylov solver for the compiled time program (epic ADC-399 / ADC-420).
 
-ADC-420 adds restarted GMRES(m) to the matrix-free Krylov core (adc::gmres_solve in
+ADC-420 adds restarted GMRES(m) to the matrix-free Krylov core (pops::gmres_solve in
 generic_krylov.hpp) and exposes it as ``P.solve_linear(method="gmres", restart=m)``. GMRES is the
 robust choice for a NON-symmetric operator: where CG needs an SPD A and stagnates on a non-self-adjoint
 one, GMRES minimises the residual over the Krylov subspace and converges.
 
 (A) Codegen + validation (pure Python, always runs): a Helmholtz operator ``A(in) = in - alpha*Lap(in)``
-    solved by gmres lowers to the apply lambda + ``ctx.laplacian`` + ``adc::gmres_solve`` with the
+    solved by gmres lowers to the apply lambda + ``ctx.laplacian`` + ``pops::gmres_solve`` with the
     restart length; the restart default (30) and an override both appear in the generated C++; the
     validation errors fire (max_iter absent/<=0; restart<=0 or non-int for gmres; restart passed to a
     non-gmres method).
@@ -20,7 +20,7 @@ one, GMRES minimises the residual over the Krylov subspace and converges.
           centered first-derivative (advection) term, so A is non-self-adjoint and CG stagnates. gmres
           converges; the compiled solution matches an OFFLINE GMRES reference on the SAME discrete
           operator (~1e-6). Reports iters + residual.
-    Self-skips (exit 0) without numpy / _adc / install_program / a compiler / a visible Kokkos -- never
+    Self-skips (exit 0) without numpy / _pops / install_program / a compiler / a visible Kokkos -- never
     fakes the engine.
 
 The non-symmetric C++ guard (CG stagnates while gmres recovers phi_exact) is also pinned directly in
@@ -29,11 +29,11 @@ tests/test_generic_krylov.cpp, which is fully validatable on every backend witho
 import sys
 
 
-def _adc_time():
+def _pops_time():
     try:
-        import adc.time as t
-    except Exception as exc:  # adc not importable here -> skip, never fake
-        print("skip test_time_gmres (adc.time unavailable: %s)" % exc)
+        import pops.time as t
+    except Exception as exc:  # pops not importable here -> skip, never fake
+        print("skip test_time_gmres (pops.time unavailable: %s)" % exc)
         sys.exit(0)
     return t
 
@@ -103,20 +103,20 @@ def _helmholtz(P, x):
 # ---- (A) codegen + validation: pure Python, always runs ----
 def test_gmres_codegen(t):
     src = _spd_program(t, method="gmres").emit_cpp_program()
-    for frag in ("adc::ApplyFn apply_A", "ctx.laplacian", "adc::gmres_solve",
-                 "adc::ApplyFn{}"):  # identity (empty) preconditioner
+    for frag in ("pops::ApplyFn apply_A", "ctx.laplacian", "pops::gmres_solve",
+                 "pops::ApplyFn{}"):  # identity (empty) preconditioner
         assert frag in src, "the generated gmres solve must contain %r\n%s" % (frag, src)
 
 
 def test_gmres_restart_default_in_codegen(t):
     src = _spd_program(t, restart=30).emit_cpp_program()
     # The trailing gmres_solve argument is the restart length (default 30).
-    assert ", 30);" in src and "adc::gmres_solve" in src, "the default restart 30 must lower\n%s" % src
+    assert ", 30);" in src and "pops::gmres_solve" in src, "the default restart 30 must lower\n%s" % src
 
 
 def test_gmres_restart_override_in_codegen(t):
     src = _spd_program(t, restart=12).emit_cpp_program()
-    assert ", 12);" in src and "adc::gmres_solve" in src, "an overridden restart must lower\n%s" % src
+    assert ", 12);" in src and "pops::gmres_solve" in src, "an overridden restart must lower\n%s" % src
 
 
 def test_gmres_now_valid_method(t):
@@ -201,7 +201,7 @@ def _np_cg(apply, b, *, tol=1e-9, max_iter=4000):
 
 def _discrete_helmholtz(n, alpha):
     """Discrete periodic 5-point Helmholtz matvec A x = x - alpha*Lap(x) on an n x n unit-square grid
-    (dx = dy = 1/n), matching adc::apply_laplacian's bare path with periodic ghosts."""
+    (dx = dy = 1/n), matching pops::apply_laplacian's bare path with periodic ghosts."""
     import numpy as np
 
     h2 = (1.0 / n) ** 2
@@ -216,7 +216,7 @@ def _discrete_helmholtz(n, alpha):
 
 def _discrete_nonsym(n, alpha, beta):
     """Discrete periodic NON-symmetric matvec A x = x - alpha*Lap(x) + beta*d(x)/dx, the centered x
-    derivative d x/dx = (x(i+1) - x(i-1)) / (2 dx) matching adc::apply_divergence (cx=0, fy=0) on the
+    derivative d x/dx = (x(i+1) - x(i-1)) / (2 dx) matching pops::apply_divergence (cx=0, fy=0) on the
     DSL apply x - alpha*Lap(x) + beta*div(x, 0)."""
     import numpy as np
 
@@ -245,27 +245,27 @@ def _passive_model(dsl, name):
     return m
 
 
-def _run_one(t, adc, np, program, name):
+def _run_one(t, pops, np, program, name):
     """Compile + install + step @p program on a 1-variable block, return the stepped state and rho0,
     or None if the toolchain is unavailable."""
     n = 16
-    sim = adc.System(n=n, L=1.0, periodic=True)
+    sim = pops.System(n=n, L=1.0, periodic=True)
     if not hasattr(sim, "install_program"):
-        print("-- (B) skipped: _adc lacks the install_program binding (rebuild _adc) --")
+        print("-- (B) skipped: _pops lacks the install_program binding (rebuild _pops) --")
         return None
 
-    from adc import dsl
+    from pops import dsl
 
     try:
-        compiled = adc.compile_problem(model=_passive_model(dsl, name + "_prog"), time=program)
+        compiled = pops.compile_problem(model=_passive_model(dsl, name + "_prog"), time=program)
         compiled_model = _passive_model(dsl, name + "_block").compile(backend="production")
     except RuntimeError as exc:  # no compiler / no Kokkos visible / .so compile failed
         print("-- (B) skipped: could not build the .so: %s --" % str(exc)[:200])
         return None
 
     sim.add_equation("blk", compiled_model,
-                     spatial=adc.FiniteVolume(limiter="none", riemann="rusanov"),
-                     time=adc.Explicit(method="euler"))
+                     spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                     time=pops.Explicit(method="euler"))
 
     x = (np.arange(n) + 0.5) / n
     X, Y = np.meshgrid(x, x, indexing="ij")
@@ -281,14 +281,14 @@ def _run_section_b(t):
     try:
         import numpy as np
 
-        import adc
-    except Exception as exc:  # noqa: BLE001  -- numpy / _adc unavailable in this interpreter
-        print("-- (B) skipped: adc/numpy unavailable: %s --" % exc)
+        import pops
+    except Exception as exc:  # noqa: BLE001  -- numpy / _pops unavailable in this interpreter
+        print("-- (B) skipped: pops/numpy unavailable: %s --" % exc)
         return None
 
     tol = 1e-9
     # (a) SPD: gmres matches the offline CG on the same discrete Helmholtz system.
-    res = _run_one(t, adc, np, _spd_program(t, name="gmres_spd_step", tol=tol, max_iter=300, restart=30),
+    res = _run_one(t, pops, np, _spd_program(t, name="gmres_spd_step", tol=tol, max_iter=300, restart=30),
                    "spd")
     if res is None:
         return None
@@ -305,9 +305,9 @@ def _run_section_b(t):
     # offline operator-stencil match (expressing a pure d/dx in the IR is approximate). An offline CG on
     # a proxy of the same operator stagnates, confirming the operator is genuinely non-self-adjoint
     # (CG-hostile, the regime where gmres/bicgstab are needed and cg is not).
-    res_g = _run_one(t, adc, np, _nonsym_program(t, name="gmres_nsy_g", tol=tol, max_iter=400,
+    res_g = _run_one(t, pops, np, _nonsym_program(t, name="gmres_nsy_g", tol=tol, max_iter=400,
                                                  restart=40, method="gmres"), "nsy_g")
-    res_b = _run_one(t, adc, np, _nonsym_program(t, name="gmres_nsy_b", tol=tol, max_iter=400,
+    res_b = _run_one(t, pops, np, _nonsym_program(t, name="gmres_nsy_b", tol=tol, max_iter=400,
                                                  method="bicgstab"), "nsy_b")
     if res_g is None or res_b is None:
         return None
@@ -326,7 +326,7 @@ def _run_section_b(t):
 
 
 def _run():
-    t = _adc_time()
+    t = _pops_time()
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:
         fn(t)

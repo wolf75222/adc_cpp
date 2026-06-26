@@ -45,11 +45,11 @@ def _skip(msg):
 try:
     import numpy as np
 
-    import adc
-    from adc import dsl
-    from adc import time as adctime
-except Exception as exc:  # noqa: BLE001  -- numpy or _adc unavailable in this interpreter
-    _skip("adc/numpy unavailable: %s" % exc)
+    import pops
+    from pops import dsl
+    from pops import time as adctime
+except Exception as exc:  # noqa: BLE001  -- numpy or _pops unavailable in this interpreter
+    _skip("pops/numpy unavailable: %s" % exc)
 
 fails = 0
 
@@ -146,7 +146,7 @@ src = _electric_fe_program().emit_cpp_program(model=m_named)
 # ctx.rhs_into (which would fold the default source); the named electric source is axpy'd on top.
 chk("ctx.neg_div_flux_default_into(0, " in src and "ctx.rhs_into(" not in src,
     "rhs(sources=['electric']) lowers the flux via ctx.neg_div_flux_default_into (no default source)")
-chk("adc::for_each_cell(" in src, "the named electric source is a per-cell kernel")
+chk("pops::for_each_cell(" in src, "the named electric source is a per-cell kernel")
 chk("((-rho) * grad_x)" in src and "((-rho) * grad_y)" in src,
     "the electric source kernel reads -rho*grad_x / -rho*grad_y")
 chk("auxA(i, j, 1)" in src and "auxA(i, j, 2)" in src,
@@ -216,8 +216,8 @@ chk(bool(predictor_corrector_program().emit_cpp_program(model=named_source_model
     "the full predictor-corrector Program emits C++ (named sources + Lorentz local solves)")
 
 # ---- (B)/(C) end-to-end: skip unless the install_program binding is present ----
-if not hasattr(adc.System(n=8, L=1.0, periodic=True), "install_program"):
-    print("-- (B)/(C) skipped: _adc lacks the install_program binding (rebuild _adc) --")
+if not hasattr(pops.System(n=8, L=1.0, periodic=True), "install_program"):
+    print("-- (B)/(C) skipped: _pops lacks the install_program binding (rebuild _pops) --")
     print("%s test_predictor_corrector (A only)" % ("FAIL" if fails else "PASS"))
     sys.exit(1 if fails else 0)
 
@@ -230,14 +230,14 @@ def make_sim(model):
     """A System carrying ONE block (the given DSL model, production backend) + shared Poisson + B_z.
     The block is added as a normal equation; a compiled Program (or the offline primitives) drives the
     step. Returns (sim, U0) with U0 the initial conservative state (n_vars, N, N)."""
-    sim = adc.System(n=N, L=1.0, periodic=True)
+    sim = pops.System(n=N, L=1.0, periodic=True)
     try:
         compiled = model.compile(backend="production")
     except RuntimeError as exc:  # no compiler / no Kokkos visible
         _skip("model compile could not build the .so: %s" % str(exc)[:160])
     sim.add_equation("plasma", compiled,
-                     spatial=adc.FiniteVolume(limiter="none", riemann="rusanov"),
-                     time=adc.Explicit(method="euler"))
+                     spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                     time=pops.Explicit(method="euler"))
     sim.set_poisson("charge_density", "geometric_mg")
     sim.set_magnetic_field(BZ * np.ones(N * N))  # constant B_z over the grid
     x = (np.arange(N) + 0.5) / N
@@ -276,7 +276,7 @@ def analytic_lorentz_apply(U):
 # ---- (B) focused: one FE step, named-source rhs == default-source eval_rhs ----
 print("== (B) focused: rhs(sources=['electric']) == -div F + electric (one FE step) ==")
 try:
-    compiled_fe = adc.compile_problem(model=named_source_model("electric_fe_prog"),
+    compiled_fe = pops.compile_problem(model=named_source_model("electric_fe_prog"),
                                       time=_electric_fe_program())
 except RuntimeError as exc:  # no compiler / no Kokkos visible / .so compile failed
     _skip("compile_problem could not build the .so: %s" % str(exc)[:160])
@@ -298,7 +298,7 @@ chk(float(np.abs(U_fe - U0).max()) > 1e-6, "the electric source actually moved t
 # ---- (C) full predictor-corrector parity ----
 print("== (C) full predictor-corrector parity ==")
 try:
-    compiled_pc = adc.compile_problem(model=named_source_model("pc_prog"),
+    compiled_pc = pops.compile_problem(model=named_source_model("pc_prog"),
                                       time=predictor_corrector_program())
 except RuntimeError as exc:
     _skip("compile_problem could not build the .so: %s" % str(exc)[:160])

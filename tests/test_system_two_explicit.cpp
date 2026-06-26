@@ -7,47 +7,47 @@
 //   divergent apres un pas -> le coeur remplit les halos avec block.bc, pas une BC
 //   globale unique.
 
-#include <adc/core/model/coupled_system.hpp>
-#include <adc/core/state/state.hpp>
-#include <adc/coupling/system/system_coupler.hpp>
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/layout/distribution_mapping.hpp>
-#include <adc/mesh/execution/for_each.hpp>
-#include <adc/mesh/geometry/geometry.hpp>
-#include <adc/mesh/storage/mf_arith.hpp>
-#include <adc/mesh/storage/multifab.hpp>
+#include <pops/core/model/coupled_system.hpp>
+#include <pops/core/state/state.hpp>
+#include <pops/coupling/system/system_coupler.hpp>
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/layout/distribution_mapping.hpp>
+#include <pops/mesh/execution/for_each.hpp>
+#include <pops/mesh/geometry/geometry.hpp>
+#include <pops/mesh/storage/mf_arith.hpp>
+#include <pops/mesh/storage/multifab.hpp>
 
 #include <cmath>
 #include <cstdio>
 #include <type_traits>
 
-using namespace adc;
+using namespace pops;
 
 // Production constante, sans flux : n -> dt*rate quel que soit le schema/sous-pas.
 struct Production {
   using State = StateVec<1>;
-  using Aux = adc::Aux;
+  using Aux = pops::Aux;
   static constexpr int n_vars = 1;
   Real rate = Real(1);
-  ADC_HD State flux(const State&, const Aux&, int) const { return State{Real(0)}; }
-  ADC_HD Real max_wave_speed(const State&, const Aux&, int) const { return Real(0); }
-  ADC_HD State source(const State&, const Aux&) const { return State{rate}; }
-  ADC_HD Real elliptic_rhs(const State& u) const { return u[0]; }
+  POPS_HD State flux(const State&, const Aux&, int) const { return State{Real(0)}; }
+  POPS_HD Real max_wave_speed(const State&, const Aux&, int) const { return Real(0); }
+  POPS_HD State source(const State&, const Aux&) const { return State{rate}; }
+  POPS_HD Real elliptic_rhs(const State& u) const { return u[0]; }
 };
 
 // Advection horizontale a vitesse constante a : F_x = a u, F_y = 0. Le seul terme
 // sensible a la BC (le flux au bord depend du ghost rempli selon block.bc).
 struct AdvectX {
   using State = StateVec<1>;
-  using Aux = adc::Aux;
+  using Aux = pops::Aux;
   static constexpr int n_vars = 1;
   Real a = Real(1);
-  ADC_HD State flux(const State& u, const Aux&, int dir) const {
+  POPS_HD State flux(const State& u, const Aux&, int dir) const {
     return State{dir == 0 ? a * u[0] : Real(0)};
   }
-  ADC_HD Real max_wave_speed(const State&, const Aux&, int) const { return a < 0 ? -a : a; }
-  ADC_HD State source(const State&, const Aux&) const { return State{Real(0)}; }
-  ADC_HD Real elliptic_rhs(const State& u) const { return u[0]; }
+  POPS_HD Real max_wave_speed(const State&, const Aux&, int) const { return a < 0 ? -a : a; }
+  POPS_HD State source(const State&, const Aux&) const { return State{Real(0)}; }
+  POPS_HD Real elliptic_rhs(const State& u) const { return u[0]; }
 };
 
 struct ZeroSystemRhs {
@@ -61,7 +61,7 @@ static void fill_ramp_x(MultiFab& mf) {
   for (int li = 0; li < mf.local_size(); ++li) {
     Array4 a = mf.fab(li).array();
     const Box2D b = mf.box(li);
-    for_each_cell(b, [=] ADC_HD(int i, int j) { a(i, j, 0) = Real(i); });
+    for_each_cell(b, [=] POPS_HD(int i, int j) { a(i, j, 0) = Real(i); });
   }
 }
 

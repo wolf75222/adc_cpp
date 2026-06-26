@@ -28,23 +28,23 @@
     {
       "name": "python",
       "inherits": "conda",
-      "displayName": "Module Python _adc (SERIE, CPU 1 thread)",
-      "description": "Build du seul module _adc, sans tests. Exige l'env conda ACTIF (conda activate adc) : l'interpreteur est pinne sur celui de l'env.",
+      "displayName": "Module Python _pops (SERIE, CPU 1 thread)",
+      "description": "Build du seul module _pops, sans tests. Exige l'env conda ACTIF (conda activate pops) : l'interpreteur est pinne sur celui de l'env.",
       "binaryDir": "${sourceDir}/build-py",
       "cacheVariables": {
-        "ADC_BUILD_PYTHON": "ON",
-        "ADC_BUILD_TESTS": "OFF",
+        "POPS_BUILD_PYTHON": "ON",
+        "POPS_BUILD_TESTS": "OFF",
         "Python_ROOT_DIR": "$env{CONDA_PREFIX}"
       }
     },
     {
       "name": "python-parallel",
       "inherits": "python",
-      "displayName": "Module Python _adc (PARALLELE, dispatch Kokkos)",
-      "description": "Comme 'python' mais via Kokkos ($CONDA_PREFIX). ATTENTION : le kokkos conda-forge est souvent Serial-only -> verifier 'Kokkos found ... = (OPENMP...)' au configure ; sinon `bash scripts/kokkos_openmp_conda.sh` installe un Kokkos OpenMP dans l'env (~2 min). Threads au runtime : adc.set_threads().",
+      "displayName": "Module Python _pops (PARALLELE, dispatch Kokkos)",
+      "description": "Comme 'python' mais via Kokkos ($CONDA_PREFIX). ATTENTION : le kokkos conda-forge est souvent Serial-only -> verifier 'Kokkos found ... = (OPENMP...)' au configure ; sinon `bash scripts/kokkos_openmp_conda.sh` installe un Kokkos OpenMP dans l'env (~2 min). Threads au runtime : pops.set_threads().",
       "binaryDir": "${sourceDir}/build-py-kokkos",
       "cacheVariables": {
-        "ADC_USE_KOKKOS": "ON",
+        "POPS_USE_KOKKOS": "ON",
         "Kokkos_ROOT": "$env{CONDA_PREFIX}"
       }
     },
@@ -54,7 +54,7 @@
       "displayName": "Coeur + tests C++ (SERIE)",
       "binaryDir": "${sourceDir}/build",
       "cacheVariables": {
-        "ADC_BUILD_TESTS": "ON"
+        "POPS_BUILD_TESTS": "ON"
       }
     },
     {
@@ -64,8 +64,8 @@
       "description": "Kokkos pris dans l'env conda actif ; cf. preset python-parallel pour la note kokkos conda Serial-only.",
       "binaryDir": "${sourceDir}/build-kokkos",
       "cacheVariables": {
-        "ADC_BUILD_TESTS": "ON",
-        "ADC_USE_KOKKOS": "ON",
+        "POPS_BUILD_TESTS": "ON",
+        "POPS_USE_KOKKOS": "ON",
         "Kokkos_ROOT": "$env{CONDA_PREFIX}"
       }
     },
@@ -73,11 +73,11 @@
       "name": "mpi",
       "inherits": "conda",
       "displayName": "Coeur + tests C++ (MPI distribue)",
-      "description": "OpenMPI pris dans l'env conda actif (conda activate adc).",
+      "description": "OpenMPI pris dans l'env conda actif (conda activate pops).",
       "binaryDir": "${sourceDir}/build-mpi",
       "cacheVariables": {
-        "ADC_BUILD_TESTS": "ON",
-        "ADC_USE_MPI": "ON",
+        "POPS_BUILD_TESTS": "ON",
+        "POPS_USE_MPI": "ON",
         "CMAKE_PREFIX_PATH": "$env{CONDA_PREFIX}"
       }
     },
@@ -88,18 +88,18 @@
       "description": "adc_cpp est Kokkos-only : sans Kokkos_ROOT, le CMakeLists racine recupere et construit Kokkos (Serial) par FetchContent. Plus utilise par ci.yml (le gate emploie ci-kokkos).",
       "binaryDir": "${sourceDir}/build",
       "cacheVariables": {
-        "ADC_BUILD_TESTS": "ON"
+        "POPS_BUILD_TESTS": "ON"
       }
     },
     {
       "name": "ci-python",
       "inherits": "base",
-      "displayName": "CI : module Python _adc (serie)",
-      "description": "Module _adc seul (tests C++ coupes). Kokkos-only : FetchContent si aucun Kokkos installe. Plus utilise par ci.yml (le gate emploie ci-kokkos-python).",
+      "displayName": "CI : module Python _pops (serie)",
+      "description": "Module _pops seul (tests C++ coupes). Kokkos-only : FetchContent si aucun Kokkos installe. Plus utilise par ci.yml (le gate emploie ci-kokkos-python).",
       "binaryDir": "${sourceDir}/build-py",
       "cacheVariables": {
-        "ADC_BUILD_PYTHON": "ON",
-        "ADC_BUILD_TESTS": "OFF"
+        "POPS_BUILD_PYTHON": "ON",
+        "POPS_BUILD_TESTS": "OFF"
       }
     },
     {
@@ -108,11 +108,11 @@
       "displayName": "CI : Release + tests, MPI + Kokkos Serial",
       "binaryDir": "${sourceDir}/build-mpi",
       "cacheVariables": {
-        "ADC_BUILD_TESTS": "ON",
-        "ADC_USE_MPI": "ON",
-        "ADC_USE_KOKKOS": "ON",
+        "POPS_BUILD_TESTS": "ON",
+        "POPS_USE_MPI": "ON",
+        "POPS_USE_KOKKOS": "ON",
         "Kokkos_ROOT": "$env{KOKKOS_PREFIX}",
-        "ADC_TESTS_FAST_O0": "ON"
+        "POPS_TESTS_FAST_O0": "ON"
       },
       "description": "MPI distribue + Kokkos Serial on-node (adc_cpp est Kokkos-only). Kokkos pointe par $KOKKOS_PREFIX, comme ci-kokkos.",
       "condition": {
@@ -125,7 +125,7 @@
       "name": "ci-kokkos",
       "inherits": "base",
       "displayName": "CI : Release + tests, backend Kokkos",
-      "description": "Kokkos pointe par la variable d'environnement KOKKOS_PREFIX (posee par le job : install mise en cache). Sert au gate (Serial) ET au job OpenMP (seule l'install Kokkos differe). ADC_TESTS_FAST_O0 : tests a -O0 (controles de correction ; build rapide, RAM bornee).",
+      "description": "Kokkos pointe par la variable d'environnement KOKKOS_PREFIX (posee par le job : install mise en cache). Sert au gate (Serial) ET au job OpenMP (seule l'install Kokkos differe). POPS_TESTS_FAST_O0 : tests a -O0 (controles de correction ; build rapide, RAM bornee).",
       "binaryDir": "${sourceDir}/build-kokkos",
       "condition": {
         "type": "notEquals",
@@ -133,21 +133,21 @@
         "rhs": ""
       },
       "cacheVariables": {
-        "ADC_BUILD_TESTS": "ON",
-        "ADC_USE_KOKKOS": "ON",
+        "POPS_BUILD_TESTS": "ON",
+        "POPS_USE_KOKKOS": "ON",
         "Kokkos_ROOT": "$env{KOKKOS_PREFIX}",
-        "ADC_TESTS_FAST_O0": "ON"
+        "POPS_TESTS_FAST_O0": "ON"
       }
     },
     {
       "name": "ci-kokkos-python",
       "inherits": "ci-kokkos",
-      "displayName": "CI : module Python _adc, backend Kokkos",
+      "displayName": "CI : module Python _pops, backend Kokkos",
       "description": "Garde-fou ABI std du DSL production sous Kokkos (loader c++20), cf. ci.yml job kokkos-openmp.",
       "binaryDir": "${sourceDir}/build-kokkos-py",
       "cacheVariables": {
-        "ADC_BUILD_PYTHON": "ON",
-        "ADC_BUILD_TESTS": "OFF"
+        "POPS_BUILD_PYTHON": "ON",
+        "POPS_BUILD_TESTS": "OFF"
       }
     },
     {
@@ -157,41 +157,41 @@
       "description": "bench/ n'est jamais configure par defaut : sans ce job, une signature qui change dans le coeur peut le casser sans detection (pourriture silencieuse).",
       "binaryDir": "${sourceDir}/build-bench",
       "cacheVariables": {
-        "ADC_BUILD_BENCH": "ON",
-        "ADC_BUILD_TESTS": "OFF"
+        "POPS_BUILD_BENCH": "ON",
+        "POPS_BUILD_TESTS": "OFF"
       }
     },
     {
       "name": "ci-warnings",
       "inherits": "ci-kokkos",
-      "displayName": "CI qualite : build avec warnings stricts (ADC_ENABLE_WARNINGS)",
-      "description": "Herite de ci-kokkos (Kokkos pointe par $KOKKOS_PREFIX). Active les warnings stricts sur les cibles internes via adc_dev_options. Informatif : pas de -Werror. Job 'warnings' de quality.yml.",
+      "displayName": "CI qualite : build avec warnings stricts (POPS_ENABLE_WARNINGS)",
+      "description": "Herite de ci-kokkos (Kokkos pointe par $KOKKOS_PREFIX). Active les warnings stricts sur les cibles internes via pops_dev_options. Informatif : pas de -Werror. Job 'warnings' de quality.yml.",
       "binaryDir": "${sourceDir}/build-kokkos-warnings",
       "cacheVariables": {
-        "ADC_ENABLE_WARNINGS": "ON"
+        "POPS_ENABLE_WARNINGS": "ON"
       }
     },
     {
       "name": "ci-asan",
       "inherits": "ci-kokkos",
-      "displayName": "CI qualite : ASan + UBSan (ADC_ENABLE_SANITIZERS)",
-      "description": "Herite de ci-kokkos. RelWithDebInfo (-g, traces symbolisees) + ASan/UBSan sur les cibles internes (adc_dev_options) ; tests a -O0 (ADC_TESTS_FAST_O0 herite). Job 'sanitizers' de quality.yml.",
+      "displayName": "CI qualite : ASan + UBSan (POPS_ENABLE_SANITIZERS)",
+      "description": "Herite de ci-kokkos. RelWithDebInfo (-g, traces symbolisees) + ASan/UBSan sur les cibles internes (pops_dev_options) ; tests a -O0 (POPS_TESTS_FAST_O0 herite). Job 'sanitizers' de quality.yml.",
       "binaryDir": "${sourceDir}/build-kokkos-asan",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "RelWithDebInfo",
-        "ADC_ENABLE_SANITIZERS": "ON"
+        "POPS_ENABLE_SANITIZERS": "ON"
       }
     },
     {
       "name": "ci-tsan",
       "inherits": "ci-kokkos",
-      "displayName": "CI qualite : ThreadSanitizer (ADC_ENABLE_TSAN, clang + Kokkos OpenMP)",
-      "description": "Job 'tsan' de quality.yml. Clang LLVM + Kokkos OpenMP (cf. setup-kokkos compiler=clang exec-space=openmp) : sans threads TSan ne teste rien, et libgomp (gcc) n'est pas TSan-aware -> clang + libomp obligatoire. RelWithDebInfo (-g, traces) + TSan sur les cibles internes (adc_dev_options) ; tests a -O0 (ADC_TESTS_FAST_O0 herite). Mutuellement exclusif d'ASan (ci-asan).",
+      "displayName": "CI qualite : ThreadSanitizer (POPS_ENABLE_TSAN, clang + Kokkos OpenMP)",
+      "description": "Job 'tsan' de quality.yml. Clang LLVM + Kokkos OpenMP (cf. setup-kokkos compiler=clang exec-space=openmp) : sans threads TSan ne teste rien, et libgomp (gcc) n'est pas TSan-aware -> clang + libomp obligatoire. RelWithDebInfo (-g, traces) + TSan sur les cibles internes (pops_dev_options) ; tests a -O0 (POPS_TESTS_FAST_O0 herite). Mutuellement exclusif d'ASan (ci-asan).",
       "binaryDir": "${sourceDir}/build-kokkos-tsan",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "RelWithDebInfo",
         "CMAKE_CXX_COMPILER": "clang++",
-        "ADC_ENABLE_TSAN": "ON"
+        "POPS_ENABLE_TSAN": "ON"
       }
     },
     {
@@ -208,20 +208,20 @@
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "RelWithDebInfo",
         "CMAKE_CXX_COMPILER": "clang++",
-        "ADC_BUILD_TESTS": "OFF",
-        "ADC_BUILD_FUZZING": "ON",
-        "ADC_USE_KOKKOS": "ON",
+        "POPS_BUILD_TESTS": "OFF",
+        "POPS_BUILD_FUZZING": "ON",
+        "POPS_USE_KOKKOS": "ON",
         "Kokkos_ROOT": "$env{KOKKOS_PREFIX}"
       }
     },
     {
       "name": "ci-coverage",
       "inherits": "ci-kokkos",
-      "displayName": "CI qualite : couverture gcov (ADC_ENABLE_COVERAGE)",
-      "description": "Herite de ci-kokkos (tests -O0 : compteurs de lignes nets). --coverage sur les cibles internes via adc_dev_options (GCC requis). Job 'coverage' de quality.yml ; rapport gcovr filtre sur include/adc/.",
+      "displayName": "CI qualite : couverture gcov (POPS_ENABLE_COVERAGE)",
+      "description": "Herite de ci-kokkos (tests -O0 : compteurs de lignes nets). --coverage sur les cibles internes via pops_dev_options (GCC requis). Job 'coverage' de quality.yml ; rapport gcovr filtre sur include/pops/.",
       "binaryDir": "${sourceDir}/build-kokkos-coverage",
       "cacheVariables": {
-        "ADC_ENABLE_COVERAGE": "ON"
+        "POPS_ENABLE_COVERAGE": "ON"
       }
     }
   ],
@@ -230,14 +230,14 @@
       "name": "python",
       "configurePreset": "python",
       "targets": [
-        "_adc"
+        "_pops"
       ]
     },
     {
       "name": "python-parallel",
       "configurePreset": "python-parallel",
       "targets": [
-        "_adc"
+        "_pops"
       ]
     },
     {
@@ -262,7 +262,7 @@
       "configurePreset": "ci-python",
       "jobs": 4,
       "targets": [
-        "_adc"
+        "_pops"
       ]
     },
     {
@@ -280,7 +280,7 @@
       "configurePreset": "ci-kokkos-python",
       "jobs": 4,
       "targets": [
-        "_adc"
+        "_pops"
       ]
     },
     {

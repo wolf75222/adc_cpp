@@ -30,7 +30,7 @@ and a NO-GO / decision-gate criterion. To be picked up by the owner when relevan
 
 ## SAMRAI integration -- EXTERNAL-BIG, DEFERRED
 
-- Status: adc has a COMPLETE IN-HOUSE AMR stack (Phase 1 frozen hierarchy: substeps #175, coupled sources #179,
+- Status: pops has a COMPLETE IN-HOUSE AMR stack (Phase 1 frozen hierarchy: substeps #175, coupled sources #179,
   local IMEX #184; Phase 2 union-tags regrid #199; reflux/FluxRegister, multi-bloc, validated CPU Serial/
   OpenMP/MPI np=1/2/4 + GPU Cuda GH200). SAMRAI (LLNL) = external AMR framework.
 - VERDICT: DEFER as long as the in-house AMR covers the science path (polar diocotron convergent in

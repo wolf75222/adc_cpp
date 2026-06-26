@@ -1,6 +1,6 @@
 #include "../bindings_detail.hpp"
 
-#include <adc/core/state/aux_names.hpp>  // ADC-291: canonical aux name<->component table + bounds
+#include <pops/core/state/aux_names.hpp>  // ADC-291: canonical aux name<->component table + bounds
 
 // ADC-365: module attributes/globals + SystemConfig + ModelSpec (registered first so System/
 // AmrSystem signatures resolve them).
@@ -9,49 +9,49 @@ void init_core(py::module_& m) {
       "adc_cpp (lib): runtime multi-species composition. System composes a "
       "system block by block; the compute stays compiled C++.";
 
-  // Module ABI key (compiler + C++ standard + signature of the adc headers). The DSL reads it
+  // Module ABI key (compiler + C++ standard + signature of the pops headers). The DSL reads it
   // (diagnostic); add_native_block compares it to the key baked into a native loader.
-  m.def("abi_key", &adc::abi_key,
-        "Module ABI key (compiler, C++ standard, signature of the adc headers).");
+  m.def("abi_key", &pops::abi_key,
+        "Module ABI key (compiler, C++ standard, signature of the pops headers).");
 
   // MPI rank / rank count of the communicator (0 / 1 in serial or when MPI is not initialized, cf.
-  // adc/parallel/comm.hpp). Exposed so the IO facade (sim.write / sim.checkpoint) writes the file
+  // pops/parallel/comm.hpp). Exposed so the IO facade (sim.write / sim.checkpoint) writes the file
   // only on rank 0 after a collective gather (state_global / potential_global).
-  m.def("my_rank", &adc::my_rank, "MPI rank of the process (0 in serial).");
-  m.def("n_ranks", &adc::n_ranks, "Number of MPI ranks (1 in serial).");
+  m.def("my_rank", &pops::my_rank, "MPI rank of the process (0 in serial).");
+  m.def("n_ranks", &pops::n_ranks, "Number of MPI ranks (1 in serial).");
 
-  // C++ standard of the LOADER (ADC_CXX_STD injected by the build: 20 under Kokkos, 23 otherwise). The
+  // C++ standard of the LOADER (POPS_CXX_STD injected by the build: 20 under Kokkos, 23 otherwise). The
   // DSL backend="production" MUST compile the native model with this SAME standard, otherwise __cplusplus
   // diverges -> different ABI key -> add_native_block raises "incompatible ABI". We expose it as an
   // integer (20/23); dsl.compile derives the -std=c++NN flag from it instead of hardcoding c++23.
-#ifdef ADC_CXX_STD
-  m.attr("__cxx_std__") = static_cast<int>(ADC_CXX_STD);
+#ifdef POPS_CXX_STD
+  m.attr("__cxx_std__") = static_cast<int>(POPS_CXX_STD);
 #else
-  // Manual build without -DADC_CXX_STD: we fall back on __cplusplus to stay consistent with the ABI
+  // Manual build without -DPOPS_CXX_STD: we fall back on __cplusplus to stay consistent with the ABI
   // key (which itself always encodes __cplusplus). 202002L -> 20, beyond -> 23.
   m.attr("__cxx_std__") = static_cast<int>(__cplusplus > 202002L ? 23 : 20);
 #endif
 
-  // Compute backend COMPILED into the module: True if _adc was built with Kokkos
-  // (-DADC_USE_KOKKOS=ON -> ADC_HAS_KOKKOS), hence capable of multi-thread (OpenMP device) / GPU.
-  // adc.set_threads / adc.parallel_info use it to warn that a SERIAL module ignores the thread
+  // Compute backend COMPILED into the module: True if _pops was built with Kokkos
+  // (-DPOPS_USE_KOKKOS=ON -> POPS_HAS_KOKKOS), hence capable of multi-thread (OpenMP device) / GPU.
+  // pops.set_threads / pops.parallel_info use it to warn that a SERIAL module ignores the thread
   // setting. A serial build exposes False; no false negative.
-#ifdef ADC_HAS_KOKKOS
+#ifdef POPS_HAS_KOKKOS
   m.attr("__has_kokkos__") = true;
 #else
   m.attr("__has_kokkos__") = false;
 #endif
 
-  // MPI seam COMPILED into the module (ADC_HAS_MPI via the adc INTERFACE under -DADC_USE_MPI=ON) plus
-  // the MPI include dir(s) used by the build (ADC_MPI_INCLUDE, baked by CMake; '|'-joined). The DSL
+  // MPI seam COMPILED into the module (POPS_HAS_MPI via the pops INTERFACE under -DPOPS_USE_MPI=ON) plus
+  // the MPI include dir(s) used by the build (POPS_MPI_INCLUDE, baked by CMake; '|'-joined). The DSL
   // "production"/"aot" loaders are compiled OUTSIDE CMake and inherit none of this: dsl.py reads these
-  // attributes (_native_mpi_flags) to re-bake -DADC_HAS_MPI + -I<inc> so the loader uses comm.hpp's
+  // attributes (_native_mpi_flags) to re-bake -DPOPS_HAS_MPI + -I<inc> so the loader uses comm.hpp's
   // REAL MPI rather than its serial stubs (n_ranks()=1). Without it a distributed layout built inside
   // the loader replicates on every rank (ADC-319). A serial module exposes False / empty.
-#if defined(ADC_HAS_MPI)
+#if defined(POPS_HAS_MPI)
   m.attr("__has_mpi__") = true;
-#if defined(ADC_MPI_INCLUDE)
-  m.attr("__mpi_include__") = ADC_MPI_INCLUDE;
+#if defined(POPS_MPI_INCLUDE)
+  m.attr("__mpi_include__") = POPS_MPI_INCLUDE;
 #else
   m.attr("__mpi_include__") = "";
 #endif
@@ -60,49 +60,49 @@ void init_core(py::module_& m) {
   m.attr("__mpi_include__") = "";
 #endif
 
-  // Path of the COMPILER that built this module (ADC_CXX_COMPILER, injected by CMake). Since the ABI
+  // Path of the COMPILER that built this module (POPS_CXX_COMPILER, injected by CMake). Since the ABI
   // key encodes __VERSION__, the "production" DSL MUST recompile its loaders with THIS compiler:
   // dsl.py prefers it to the PATH's `which c++` (which, in a conda env, often designates another
   // compiler -> "-std=c++23 invalid" or ABI rejection). Manual build without -D: empty string, dsl.py
   // then falls back on its historical detection.
-#ifdef ADC_CXX_COMPILER
-  m.attr("__cxx_compiler__") = ADC_CXX_COMPILER;
+#ifdef POPS_CXX_COMPILER
+  m.attr("__cxx_compiler__") = POPS_CXX_COMPILER;
 #else
   m.attr("__cxx_compiler__") = "";
 #endif
 
-  // Project version (ADC_VERSION = CMake PROJECT_VERSION, single source). Re-exposed as
-  // adc.__version__ by the package; "unknown" on a manual build without -D.
-#ifdef ADC_VERSION
-  m.attr("__version__") = ADC_VERSION;
+  // Project version (POPS_VERSION = CMake PROJECT_VERSION, single source). Re-exposed as
+  // pops.__version__ by the package; "unknown" on a manual build without -D.
+#ifdef POPS_VERSION
+  m.attr("__version__") = POPS_VERSION;
 #else
   m.attr("__version__") = "unknown";
 #endif
 
   // AUX channel limits + canonical name table (ADC-291), exposed from the SINGLE C++ source
-  // (adc/core/state.hpp + aux_names.hpp). The DSL/capabilities() read these so the Python mirrors
+  // (pops/core/state.hpp + aux_names.hpp). The DSL/capabilities() read these so the Python mirrors
   // (AUX_NAMED_MAX / AUX_NAMED_BASE / AUX_CANONICAL in dsl.py) cannot SILENTLY drift from C++:
   // test_capabilities.py asserts they match. kAuxMaxExtra is the only remaining compile-time aux
   // limit and is now declarative + introspectable here.
-  m.attr("__aux_base_comps__") = static_cast<int>(adc::kAuxBaseComps);
-  m.attr("__aux_named_base__") = static_cast<int>(adc::kAuxNamedBase);
-  m.attr("__aux_max_extra__") = static_cast<int>(adc::kAuxMaxExtra);
-  m.attr("__aux_max_comps__") = static_cast<int>(adc::kAuxMaxComps);
+  m.attr("__aux_base_comps__") = static_cast<int>(pops::kAuxBaseComps);
+  m.attr("__aux_named_base__") = static_cast<int>(pops::kAuxNamedBase);
+  m.attr("__aux_max_extra__") = static_cast<int>(pops::kAuxMaxExtra);
+  m.attr("__aux_max_comps__") = static_cast<int>(pops::kAuxMaxComps);
   {
     py::dict canon;
-    for (const auto& [name, comp] : adc::kAuxCanonicalNames)
+    for (const auto& [name, comp] : pops::kAuxCanonicalNames)
       canon[py::str(std::string(name))] = static_cast<int>(comp);
     m.attr("__aux_canonical__") = canon;
   }
 
   // REAL state of the Kokkos init (lazy: first Fab allocation, through ANY path --
-  // System, AmrSystem, DSL .so...). adc.set_threads relies on this rather than on a Python
+  // System, AmrSystem, DSL .so...). pops.set_threads relies on this rather than on a Python
   // flag that only saw System/AmrSystem: the "too late" warning becomes reliable.
   // Serial build: always False (nothing to initialize, the thread setting is moot).
   m.def(
       "kokkos_is_initialized",
       []() {
-#ifdef ADC_HAS_KOKKOS
+#ifdef POPS_HAS_KOKKOS
         return Kokkos::is_initialized();
 #else
         return false;
@@ -117,7 +117,7 @@ void init_core(py::module_& m) {
       .def_readwrite("L", &SystemConfig::L)
       .def_readwrite("periodic", &SystemConfig::periodic)
       // Opt-in geometry ("polar grid" work, Phase 1). "cartesian" (default) = bit-identical;
-      // "polar" = global ring carried by adc.PolarMesh. Polar fields ignored if geometry=="cartesian".
+      // "polar" = global ring carried by pops.PolarMesh. Polar fields ignored if geometry=="cartesian".
       .def_readwrite("geometry", &SystemConfig::geometry)
       .def_readwrite("nr", &SystemConfig::nr)
       .def_readwrite("ntheta", &SystemConfig::ntheta)
@@ -126,7 +126,7 @@ void init_core(py::module_& m) {
       .def_readwrite("theta_boxes", &SystemConfig::theta_boxes);
 
   // ModelSpec: composition of generic bricks (transport/source/elliptic + parameters).
-  // No named scenario; the adc.Model(...) sugar on the Python side fills these fields.
+  // No named scenario; the pops.Model(...) sugar on the Python side fills these fields.
   py::class_<ModelSpec>(m, "ModelSpec")
       .def(py::init<>())
       .def_readwrite("transport", &ModelSpec::transport)

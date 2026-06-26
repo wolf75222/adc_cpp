@@ -7,19 +7,19 @@ shows per-node times (e.g. "node:rhs2", "node:solve_fields1") next to the coarse
 
 The wrapping is UNCONDITIONAL but cheap when profiling is off (Profiler::record early-returns; the
 only cost is one extra clock read per node), so a Program with no profiling intent still emits valid
-C++. This test pins the generated source only (pure Python, no compile / no _adc); the actual
-per-node timing in a run is exercised on a built .so (ROMEO). It uses the REAL engine (adc.time);
-it self-skips only if adc.time is unavailable, never faking it.
+C++. This test pins the generated source only (pure Python, no compile / no _pops); the actual
+per-node timing in a run is exercised on a built .so (ROMEO). It uses the REAL engine (pops.time);
+it self-skips only if pops.time is unavailable, never faking it.
 """
 import re
 
 import pytest
 
-t = pytest.importorskip("adc.time")
+t = pytest.importorskip("pops.time")
 
 
 def _forward_euler():
-    """A small real Program: forward Euler over one block via adc.time.std."""
+    """A small real Program: forward Euler over one block via pops.time.std."""
     P = t.Program("pernode_fe")
     t.std.forward_euler(P, "gas")
     return P
@@ -72,8 +72,8 @@ def test_no_profiling_intent_still_valid_cpp():
     """A Program with NO profiling intent still emits valid, complete C++ (the scope is unconditional
     and cheap-when-disabled). The chrono header and the stable ABI surface are present."""
     src = _forward_euler().emit_cpp_program()
-    for tok in ("#include <chrono>", "adc::runtime::program::ProgramContext ctx(sys)",
-                "adc_install_program", "ctx.install(", "std::chrono::steady_clock::now()"):
+    for tok in ("#include <chrono>", "pops::runtime::program::ProgramContext ctx(sys)",
+                "pops_install_program", "ctx.install(", "std::chrono::steady_clock::now()"):
         assert tok in src, "generated source missing %r" % tok
     # The body is balanced and the per-node opens precede their closes (a close after each node block).
     assert src.count("ctx.profile_record(") >= 3, "expected at least 3 per-node records"

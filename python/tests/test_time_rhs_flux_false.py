@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""adc.time RHS flux toggle -- P.rhs(flux=False) is source-only (epic ADC-399 / ADC-430).
+"""pops.time RHS flux toggle -- P.rhs(flux=False) is source-only (epic ADC-399 / ADC-430).
 
 Sibling of ADC-425 (which fixed sources=[] on flux=True). The rhs codegen routed on ``sources`` but
 IGNORED ``flux``: a source-only stage (flux=False) still emitted the ``-div F`` base. Masked because
@@ -23,10 +23,10 @@ flux=False stage WRONGLY re-added -div F. ADC-430 adds the source-only runtime p
     source-only step), with the -div F NOT leaked -- before ADC-430 it also subtracted dt*div(a*rho).
     flux=True still includes -div F (a non-trivial transport, distinct from the source-only step). A Lie
     split H(flux=True,sources=[]) ; S(flux=False,sources=["default"]) on the non-zero-flux model matches
-    the offline split (was double-flux). Self-skips if _adc lacks install_program, numpy/_adc is absent,
+    the offline split (was double-flux). Self-skips if _pops lacks install_program, numpy/_pops is absent,
     or no compiler/Kokkos is visible -- never faking the engine.
 
-Run with python3 (PYTHONPATH = built adc package).
+Run with python3 (PYTHONPATH = built pops package).
 """
 import sys
 
@@ -39,11 +39,11 @@ def _skip(msg):
 try:
     import numpy as np
 
-    import adc
-    from adc import dsl
-    from adc import time as adctime
-except Exception as exc:  # noqa: BLE001  -- numpy or _adc unavailable in this interpreter
-    _skip("adc/numpy unavailable: %s" % exc)
+    import pops
+    from pops import dsl
+    from pops import time as adctime
+except Exception as exc:  # noqa: BLE001  -- numpy or _pops unavailable in this interpreter
+    _skip("pops/numpy unavailable: %s" % exc)
 
 fails = 0
 
@@ -177,8 +177,8 @@ chk(rejected, "flux=False with named fluxes is rejected (no flux base to divide)
 
 
 # ---- (B) end-to-end probe: skips unless the full toolchain is present ----
-if not hasattr(adc.System(n=8, L=1.0, periodic=True), "install_program"):
-    print("-- (B) skipped: _adc lacks the install_program binding (rebuild _adc) --")
+if not hasattr(pops.System(n=8, L=1.0, periodic=True), "install_program"):
+    print("-- (B) skipped: _pops lacks the install_program binding (rebuild _pops) --")
     print("%s test_time_rhs_flux_false (A only)" % ("FAIL" if fails else "PASS"))
     sys.exit(1 if fails else 0)
 
@@ -191,14 +191,14 @@ N = 16
 
 
 def make_sim(name):
-    sim = adc.System(n=N, L=1.0, periodic=True)
+    sim = pops.System(n=N, L=1.0, periodic=True)
     try:
         compiled_model = advect_model("adv_block_%s" % name, A, C).compile(backend="production")
     except RuntimeError as exc:  # no compiler / no Kokkos visible
         _skip("model compile could not build the .so: %s" % str(exc)[:160])
     sim.add_equation("plasma", compiled_model,
-                     spatial=adc.FiniteVolume(limiter="none", riemann="rusanov"),
-                     time=adc.Explicit(method="euler"))
+                     spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                     time=pops.Explicit(method="euler"))
     x = (np.arange(N) + 0.5) / N
     X, Y = np.meshgrid(x, x, indexing="ij")
     rho = 1.0 + 0.3 * np.sin(2 * np.pi * X) * np.cos(2 * np.pi * Y)
@@ -210,7 +210,7 @@ def run_one_step(sources, flux):
     """Compile + install a one-step program, step once, return (out, rho0)."""
     tag = "%s_%s" % ("flux" if flux else "noflux", "_".join(sources) or "empty")
     try:
-        compiled = adc.compile_problem(model=advect_model("adv_%s" % tag, A, C),
+        compiled = pops.compile_problem(model=advect_model("adv_%s" % tag, A, C),
                                        time=one_step_program("p_%s" % tag, sources, flux=flux))
     except RuntimeError as exc:  # no compiler / no Kokkos / .so compile failed
         _skip("compile_problem could not build the .so: %s" % str(exc)[:160])
@@ -253,7 +253,7 @@ def lie_split_program(name):
 
 
 try:
-    compiled_lie = adc.compile_problem(model=advect_model("adv_lie", A, C), time=lie_split_program("lie"))
+    compiled_lie = pops.compile_problem(model=advect_model("adv_lie", A, C), time=lie_split_program("lie"))
 except RuntimeError as exc:
     _skip("compile_problem (lie) could not build the .so: %s" % str(exc)[:160])
 sim_lie, rho0l = make_sim("lie")

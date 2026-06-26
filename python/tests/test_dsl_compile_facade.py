@@ -8,7 +8,7 @@ Deux niveaux :
 (1) GARDE-FOUS pur-Python (aucun compilateur requis) : backend inconnu, mapping backend -> adder,
     et erreurs EXPLICITES quand require_metadata est demande sur un modele sans roles/gamma ou sur le
     backend prototype (JIT, dispatch virtuel hote, non device-clean).
-(2) BOUT EN BOUT (saute si aucun compilateur C++ / en-tetes adc) : compile(backend=...) produit une
+(2) BOUT EN BOUT (saute si aucun compilateur C++ / en-tetes pops) : compile(backend=...) produit une
     .so qui, branchee sur l'adder correspondant, expose les BONS noms/roles/gamma (pas le fallback) et
     lit bien le canal aux etendu (B_z). On prouve aussi que compile() == compile_or_jit() pour le
     backend equivalent (la facade ne fait qu'aiguiller, elle ne regresse pas la numerique).
@@ -21,8 +21,8 @@ import tempfile
 
 import numpy as np
 
-import adc
-from adc import dsl
+import pops
+from pops import dsl
 
 INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "include"))
 GAMMA = 1.6667  # gamma NON STANDARD (5/3), distinct du defaut historique 1.4
@@ -43,7 +43,7 @@ def build_meta_euler():
     e.set_eigenvalues(x=[u - c, u, u + c], y=[v - c, v, v + c])
     e.set_primitive_state(rho, u, v, p)
     e.set_conservative_from([rho, rho * u, rho * v, p / (GAMMA - 1.0) + 0.5 * rho * (u * u + v * v)])
-    e.set_gamma(GAMMA)  # gamma explicite -> transporte via adc_compiled_gamma
+    e.set_gamma(GAMMA)  # gamma explicite -> transporte via pops_compiled_gamma
     return e
 
 
@@ -134,7 +134,7 @@ def test_end_to_end():
     """(2) Bout en bout : compile(backend=...) -> .so -> adder -> metadonnees + B_z preserves."""
     cxx = shutil.which("c++") or shutil.which("g++") or shutil.which("clang++")
     if not cxx or not os.path.isdir(INCLUDE):
-        print("skip  compilateur ou en-tetes adc absents -> bout-en-bout saute")
+        print("skip  compilateur ou en-tetes pops absents -> bout-en-bout saute")
         return
 
     e = build_meta_euler()
@@ -144,12 +144,12 @@ def test_end_to_end():
         # --- aot (compile_aot, add_compiled_block) ET production (compile_native, add_native_block) :
         # require_metadata=True passe (roles+gamma). Les noms/roles propagent dans les deux cas (AOT :
         # lus de l'ABI du .so ; natif : portes par ProdModel::conservative_vars()). Le GAMMA differe de
-        # SOURCE : l'AOT le lit du symbole adc_compiled_gamma du .so ; le natif le recoit en ARGUMENT
+        # SOURCE : l'AOT le lit du symbole pops_compiled_gamma du .so ; le natif le recoit en ARGUMENT
         # d'add_native_block (comme add_block / add_compiled_model). On le passe donc pour le natif. ---
         for backend in ("aot", "production"):
             so = e.compile(os.path.join(tmp, "facade_%s.so" % backend), INCLUDE,
                            backend=backend, require_metadata=True)
-            s = adc.System(n=n, L=L, periodic=True)
+            s = pops.System(n=n, L=L, periodic=True)
             adder = getattr(s, dsl.HyperbolicModel.adder_for(backend))
             kw = dict(gamma=GAMMA) if backend == "production" else {}
             adder("gas", so, limiter="minmod", riemann="hllc", recon="primitive", **kw)
@@ -172,9 +172,9 @@ def test_end_to_end():
         b = e.compile_or_jit(os.path.join(tmp, "via_legacy.so"), INCLUDE, mode="compile")
         # la SOURCE generee est identique (le binaire peut differer par des chemins temporaires)
         assert e.emit_cpp_aot_source() == e.emit_cpp_aot_source(), "source non deterministe"
-        s1 = adc.System(n=n, L=L, periodic=True)
+        s1 = pops.System(n=n, L=L, periodic=True)
         s1.add_compiled_block("g", a, limiter="minmod", riemann="hllc", recon="primitive")
-        s2 = adc.System(n=n, L=L, periodic=True)
+        s2 = pops.System(n=n, L=L, periodic=True)
         s2.add_compiled_block("g", b, limiter="minmod", riemann="hllc", recon="primitive")
         assert s1.variable_names("g") == s2.variable_names("g")
         assert s1.variable_roles("g") == s2.variable_roles("g")
@@ -183,7 +183,7 @@ def test_end_to_end():
 
         # --- prototype : JIT (add_dynamic_block), roles/gamma transportes aussi (sans require_metadata) ---
         sop = e.compile(os.path.join(tmp, "facade_proto.so"), INCLUDE, backend="prototype")
-        sp = adc.System(n=n, L=L, periodic=True)
+        sp = pops.System(n=n, L=L, periodic=True)
         getattr(sp, dsl.HyperbolicModel.adder_for("prototype"))("gas", sop, recon="minmod")
         assert sp.variable_names("gas") == ["rho", "rho_u", "rho_v", "E"], \
             "prototype : noms != metadonnees : %r" % sp.variable_names("gas")
@@ -197,7 +197,7 @@ def test_end_to_end():
         m = build_bz_scalar()
         c = 0.7
         so_bz = m.compile(os.path.join(tmp, "facade_bz.so"), INCLUDE, backend="aot")
-        sb = adc.System(n=n, L=L, periodic=True)
+        sb = pops.System(n=n, L=L, periodic=True)
         sb.add_compiled_block("bz", so_bz, limiter="none", riemann="rusanov",
                               recon="conservative", names=["n"])
         sb.set_poisson(rhs="charge_density", solver="geometric_mg")

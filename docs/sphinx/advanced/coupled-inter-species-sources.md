@@ -3,7 +3,7 @@
 
 Beyond transport and a block's local source, one can describe an inter-species
 coupling (ionization, collisions, thermal exchange) in formulas, without writing any
-C++ and without a per-cell Python callback. The DSL `adc.dsl.CoupledSource` carries the
+C++ and without a per-cell Python callback. The DSL `pops.dsl.CoupledSource` carries the
 formula as stack-machine bytecode, interpreted on the C++ side in a device `for_each_cell`
 (so MPI-safe and GPU-clean). The stage is applied by explicit splitting, after the
 transport.
@@ -12,8 +12,8 @@ The canonical example is a three-species ionization
 (`d_t n_e = +k n_e n_g`, `d_t n_i = +k n_e n_g`, `d_t n_g = -k n_e n_g`):
 
 ```python
-import adc
-from adc import dsl
+import pops
+from pops import dsl
 
 src = dsl.CoupledSource("ionization")
 ne = src.block("electrons").role("density")
@@ -28,8 +28,8 @@ compiled = src.compile(backend="production")
 sim.add_coupling(compiled)   # branche l'etage sur System.add_coupled_source
 ```
 
-`sim.add_coupling(...)` also accepts the named couplings `adc.Ionization` /
-`adc.Collision` / `adc.ThermalExchange` (fixed formula). Without a call to `add_coupling`, the
+`sim.add_coupling(...)` also accepts the named couplings `pops.Ionization` /
+`pops.Collision` / `pops.ThermalExchange` (fixed formula). Without a call to `add_coupling`, the
 `System` stays bit-identical (the stage is inert by default).
 
 The compilation produces a flat ABI (`in_blocks`, `in_roles`, `consts`, `out_blocks`,

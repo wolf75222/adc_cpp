@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""adc.time structured for-loops + if + norm_inf codegen (epic ADC-399 / ADC-404b).
+"""pops.time structured for-loops + if + norm_inf codegen (epic ADC-399 / ADC-404b).
 
 Builds on ADC-404a (Scalar/Bool IR, P.norm2/P.dot, P.while_). This slice adds:
-  - ``P.norm_inf(state)`` -> a Scalar (``adc::norm_inf``);
+  - ``P.norm_inf(state)`` -> a Scalar (``pops::norm_inf``);
   - ``P.static_range(state, count, body)`` -- a COMPILE-TIME unrolled loop (count copies of the body
     inline, NO C++ loop);
   - ``P.range(state, count, body)`` -- a C++ ``for`` over a fixed count (body emitted ONCE, re-run each
@@ -10,22 +10,22 @@ Builds on ADC-404a (Scalar/Bool IR, P.norm2/P.dot, P.while_). This slice adds:
   - ``P.if_(state, cond, body)`` -- a C++ ``if`` branch on a runtime Bool.
 
 (A) Codegen (pure Python, always runs): static_range unrolls (body N times, no ``for``), range emits a
-    C++ ``for (int``, if_ emits ``if (``, norm_inf is a Scalar emitting ``adc::norm_inf``; the IR hash
+    C++ ``for (int``, if_ emits ``if (``, norm_inf is a Scalar emitting ``pops::norm_inf``; the IR hash
     distinguishes loop counts and unrolled bodies; runtime-count guards fire.
 
 (B) End-to-end parity (skips unless the full toolchain is present): a dt-free contraction
     x <- 0.5*x + 0.5*target (target = 2*U0); range(3) and static_range(3) both compile, install, step,
     and match the offline x_N = target + 0.5^N (x0 - target); if_ applies the body iff the runtime
-    condition holds. Self-skips without numpy / _adc / a compiler / Kokkos (never faking the engine).
+    condition holds. Self-skips without numpy / _pops / a compiler / Kokkos (never faking the engine).
 """
 import sys
 
 
-def _adc_time():
+def _pops_time():
     try:
-        import adc.time as t
-    except Exception as exc:  # adc not importable here -> skip, never fake
-        print("skip test_time_control_flow_b (adc.time unavailable: %s)" % exc)
+        import pops.time as t
+    except Exception as exc:  # pops not importable here -> skip, never fake
+        print("skip test_time_control_flow_b (pops.time unavailable: %s)" % exc)
         sys.exit(0)
     return t
 
@@ -81,7 +81,7 @@ def test_if_emits_branch(t):
     Uf = P.if_(U, cond, _fe_body())
     P.commit("blk", Uf)
     src = P.emit_cpp_program()
-    assert "adc::norm_inf" in src, "norm_inf must lower to adc::norm_inf\n%s" % src
+    assert "pops::norm_inf" in src, "norm_inf must lower to pops::norm_inf\n%s" % src
     assert "if (" in src, "if_ must emit a C++ if branch\n%s" % src
     assert "for (" not in src, "if_ alone emits no loop\n%s" % src
 
@@ -168,42 +168,42 @@ def _run_section_b(t):
     try:
         import numpy as np
 
-        import adc
-    except Exception as exc:  # noqa: BLE001  -- numpy / _adc unavailable in this interpreter
-        print("-- (B) skipped: adc/numpy unavailable: %s --" % exc)
+        import pops
+    except Exception as exc:  # noqa: BLE001  -- numpy / _pops unavailable in this interpreter
+        print("-- (B) skipped: pops/numpy unavailable: %s --" % exc)
         return None
 
     n = 8
-    sim = adc.System(n=n, L=1.0, periodic=True)
+    sim = pops.System(n=n, L=1.0, periodic=True)
     if not hasattr(sim, "install_program"):
-        print("-- (B) skipped: _adc lacks install_program (rebuild _adc) --")
+        print("-- (B) skipped: _pops lacks install_program (rebuild _pops) --")
         return None
 
-    from adc import dsl
+    from pops import dsl
 
     count = 3
     try:
-        compiled = adc.compile_problem(model=_passive_model(dsl, "cf_rg"),
+        compiled = pops.compile_problem(model=_passive_model(dsl, "cf_rg"),
                                        time=_contraction_program(t, "range", count, name="cf_range"))
-        compiled_sr = adc.compile_problem(model=_passive_model(dsl, "cf_sr"),
+        compiled_sr = pops.compile_problem(model=_passive_model(dsl, "cf_sr"),
                                           time=_contraction_program(t, "static", count, name="cf_sr"))
-        compiled_if = adc.compile_problem(model=_passive_model(dsl, "cf_if"),
+        compiled_if = pops.compile_problem(model=_passive_model(dsl, "cf_if"),
                                           time=_if_program(t, name="cf_if", threshold=1e3))  # cond FALSE
-        compiled_if_t = adc.compile_problem(model=_passive_model(dsl, "cf_ift"),
+        compiled_if_t = pops.compile_problem(model=_passive_model(dsl, "cf_ift"),
                                             time=_if_program(t, name="cf_ift", threshold=0.0))  # TRUE
     except RuntimeError as exc:  # no compiler / no Kokkos visible / .so compile failed
         print("-- (B) skipped: compile_problem could not build a .so: %s --" % str(exc)[:160])
         return None
 
     def run(handle):
-        s = adc.System(n=n, L=1.0, periodic=True)
+        s = pops.System(n=n, L=1.0, periodic=True)
         try:
             cm = _passive_model(dsl, "blk_" + handle.program_name).compile(backend="production")
         except RuntimeError as exc:
             print("-- (B) skipped: model compile failed: %s --" % str(exc)[:140])
             return None
-        s.add_equation("blk", cm, spatial=adc.FiniteVolume(limiter="none", riemann="rusanov"),
-                       time=adc.Explicit(method="euler"))
+        s.add_equation("blk", cm, spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                       time=pops.Explicit(method="euler"))
         x = (np.arange(n) + 0.5) / n
         X, Y = np.meshgrid(x, x, indexing="ij")
         rho0 = 1.0 + 0.3 * np.sin(2 * np.pi * X) * np.cos(2 * np.pi * Y)
@@ -242,7 +242,7 @@ def _run_section_b(t):
 
 
 def _run():
-    t = _adc_time()
+    t = _pops_time()
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:
         fn(t)

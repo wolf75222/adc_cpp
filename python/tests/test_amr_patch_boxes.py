@@ -16,7 +16,7 @@ import sys
 
 import numpy as np
 
-import adc
+import pops
 
 
 def _band(n, L=1.0, width=0.06, floor=1.0, amp=1.0):
@@ -55,12 +55,12 @@ def main():
     ne0 = _band(n, L)
 
     # --- MONO-BLOC : AmrCouplerMP ---
-    mono = adc.AmrSystem(n=n, L=L, regrid_every=10, periodic=True)
+    mono = pops.AmrSystem(n=n, L=L, regrid_every=10, periodic=True)
     mono.add_block("ne",
-                   model=adc.Model(state=adc.Scalar(), transport=adc.ExB(B0=1.0),
-                                   source=adc.NoSource(),
-                                   elliptic=adc.BackgroundDensity(alpha=1.0, n0=float(ne0.mean()))),
-                   spatial=adc.Spatial(minmod=True), time=adc.Explicit())
+                   model=pops.Model(state=pops.Scalar(), transport=pops.ExB(B0=1.0),
+                                   source=pops.NoSource(),
+                                   elliptic=pops.BackgroundDensity(alpha=1.0, n0=float(ne0.mean()))),
+                   spatial=pops.Spatial(minmod=True), time=pops.Explicit())
     mono.set_refinement(threshold=0.05)
     mono.set_poisson(rhs="charge_density", solver="geometric_mg")
     mono.set_density("ne", ne0)
@@ -77,13 +77,13 @@ def main():
     # --- MULTI-BLOCS : AmrRuntime (>= 2 add_block, hierarchie figee regrid_every=0) ---
     ne1 = _band(n, L)
     ne2 = _band(n, L) * 0.5 + 0.5
-    multi = adc.AmrSystem(n=n, L=L, regrid_every=0, periodic=True)
+    multi = pops.AmrSystem(n=n, L=L, regrid_every=0, periodic=True)
     for nm, arr in (("a", ne1), ("b", ne2)):
         multi.add_block(nm,
-                        model=adc.Model(state=adc.Scalar(), transport=adc.ExB(B0=1.0),
-                                        source=adc.NoSource(),
-                                        elliptic=adc.BackgroundDensity(alpha=1.0, n0=float(arr.mean()))),
-                        spatial=adc.Spatial(minmod=True), time=adc.Explicit())
+                        model=pops.Model(state=pops.Scalar(), transport=pops.ExB(B0=1.0),
+                                        source=pops.NoSource(),
+                                        elliptic=pops.BackgroundDensity(alpha=1.0, n0=float(arr.mean()))),
+                        spatial=pops.Spatial(minmod=True), time=pops.Explicit())
     multi.set_refinement(threshold=0.05)
     multi.set_poisson(rhs="charge_density", solver="geometric_mg")
     multi.set_density("a", ne1)

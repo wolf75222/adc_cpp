@@ -6,14 +6,14 @@
 //   - CoarseFineInterface : couverture batie depuis un BoxArray fin (empreinte PatchRange)
 //     et routage bordant du reflux (formules et garde de couverture).
 
-#include <adc/numerics/time/amr/reflux/amr_reflux_mf.hpp>  // adc::SubcyclingSchedule, adc::CoarseFineInterface
-#include <adc/mesh/index/box2d.hpp>
-#include <adc/mesh/layout/box_array.hpp>
+#include <pops/numerics/time/amr/reflux/amr_reflux_mf.hpp>  // pops::SubcyclingSchedule, pops::CoarseFineInterface
+#include <pops/mesh/index/box2d.hpp>
+#include <pops/mesh/layout/box_array.hpp>
 
 #include <cstdio>
 #include <vector>
 
-using namespace adc;
+using namespace pops;
 
 // registre minimal a la disposition de Reg / RegMP (champs lus par route_reflux).
 struct RegLite {

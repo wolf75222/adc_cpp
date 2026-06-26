@@ -30,7 +30,7 @@ the current code's exact behavior, which class A always reflects.
 The source of truth is the code. The page is produced by extraction; it is not proofread by
 hand, it is rebuilt.
 
-- `docs/sphinx/reference/python-api.md`: autodoc of the `adc` module (signatures, docstrings).
+- `docs/sphinx/reference/python-api.md`: autodoc of the `pops` module (signatures, docstrings).
 - `docs/sphinx/reference/cpp-api.md` plus the Doxygen site published under `/cpp/`: the C++
   API extracted from the headers.
 

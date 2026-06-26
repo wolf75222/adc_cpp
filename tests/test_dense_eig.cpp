@@ -1,4 +1,4 @@
-// adc::real_eig_minmax : extremes du spectre (parties reelles) d'un petit bloc dense.
+// pops::real_eig_minmax : extremes du spectre (parties reelles) d'un petit bloc dense.
 //
 // References EXACTES sans LAPACK : matrices compagnon (racines prescrites d'un polynome),
 // matrices triangulaires (spectre = diagonale), similarites entieres S D S^-1 (spectre = D),
@@ -7,22 +7,22 @@
 // fortement non normale (triangulaire a grand hors-diagonale). Contrat de repli : cap
 // d'iterations a 0 -> bornes de Gershgorin (converged = false) qui ENCADRENT le vrai spectre.
 
-#include <adc/numerics/linalg/dense_eig.hpp>
+#include <pops/numerics/linalg/dense_eig.hpp>
 
-#include "test_harness.hpp"  // adc::test::Checker (style verbose) + close_rel partages
+#include "test_harness.hpp"  // pops::test::Checker (style verbose) + close_rel partages
 
 #include <cmath>
 #include <cstdio>
 
-using adc::Real;
-using adc::EigBounds;
-using adc::real_eig_minmax;
-using adc::Spectrum;  // predicat de spectre reel/complexe (ADC-276)
-using adc::real_spectrum;
-using adc::test::close_rel;  // comparaison relative+absolue partagee (atol defaut 1e-12)
+using pops::Real;
+using pops::EigBounds;
+using pops::real_eig_minmax;
+using pops::Spectrum;  // predicat de spectre reel/complexe (ADC-276)
+using pops::real_spectrum;
+using pops::test::close_rel;  // comparaison relative+absolue partagee (atol defaut 1e-12)
 
 // Compteur d'echecs partage, en style VERBOSE (imprime chaque ligne [OK ]/[XX ] comme avant).
-static adc::test::Checker g_chk{adc::test::Checker::Style::Verbose};
+static pops::test::Checker g_chk{pops::test::Checker::Style::Verbose};
 
 static void chk(bool ok, const char* label) {
   g_chk(ok, label);
@@ -50,9 +50,9 @@ static void companion(const Real (&roots)[N], Real (&A)[N][N]) {
 
 /// Consommateur DEVICE-SAFE (pile uniquement, ni NumPy ni MATLAB) : tient lieu du projecteur
 /// HyQMOM15 qui classe un bloc 3x3 de moments puis choisit une action. Le switch est EXHAUSTIF sur
-/// adc::Spectrum -- kUnknown (non-convergence) y est traite explicitement, jamais confondu avec kReal.
-ADC_HD static int classify_action(const Real (&B)[3][3]) {
-  switch (adc::real_spectrum(B)) {
+/// pops::Spectrum -- kUnknown (non-convergence) y est traite explicitement, jamais confondu avec kReal.
+POPS_HD static int classify_action(const Real (&B)[3][3]) {
+  switch (pops::real_spectrum(B)) {
     case Spectrum::kReal:
       return 0;
     case Spectrum::kComplexPair:
@@ -63,7 +63,7 @@ ADC_HD static int classify_action(const Real (&B)[3][3]) {
   return -1;  // injoignable : enumere clos
 }
 
-// --- helpers pour adc::roe_abs_apply (ADC-368) : reference |A| = R |Lambda| R^T par construction ---
+// --- helpers pour pops::roe_abs_apply (ADC-368) : reference |A| = R |Lambda| R^T par construction ---
 template <int N>
 static void roe_matmul(const Real (&A)[N][N], const Real (&B)[N][N], Real (&C)[N][N]) {
   for (int i = 0; i < N; ++i)
@@ -124,7 +124,7 @@ static Real roe_abs_sym_err(const Real (&lam)[N]) {
   Real ref[N];
   roe_matvec(Aabs, dU, ref);
   Real out[N];
-  if (!adc::roe_abs_apply(A, dU, out))
+  if (!pops::roe_abs_apply(A, dU, out))
     return Real(1e30);
   Real m = 0;
   for (int i = 0; i < N; ++i) {
@@ -329,7 +329,7 @@ int main() {
     chk(!b.converged && fb && b.lmin <= Real(-3) && b.lmax >= Real(5),
         "cap 0 : converged = false, fallback = true, bornes de Gershgorin englobantes");
     Real glo, ghi;
-    adc::detail::gershgorin_bounds(A, glo, ghi);
+    pops::detail::gershgorin_bounds(A, glo, ghi);
     chk(b.lmin == glo && b.lmax == ghi, "le repli EST la borne de Gershgorin (contrat documente)");
   }
 
@@ -464,14 +464,14 @@ int main() {
     // N=1 : |A| = |a|, donc |A| dU = |a| dU.
     const Real A[1][1] = {{Real(-5)}}, dU[1] = {Real(2)};
     Real out[1];
-    chk(adc::roe_abs_apply(A, dU, out) && close_rel(out[0], Real(10), 1e-12),
+    chk(pops::roe_abs_apply(A, dU, out) && close_rel(out[0], Real(10), 1e-12),
         "roe_abs N=1 : A=-5 -> |A|*2 = 10");
   }
   {
     // N=2 non symetrique, VP 1 et -2 : |A| = [[1,-1/3],[0,2]] (calcul a la main), dU=(1,1) -> (2/3,2).
     const Real A[2][2] = {{Real(1), Real(1)}, {Real(0), Real(-2)}}, dU[2] = {Real(1), Real(1)};
     Real out[2];
-    chk(adc::roe_abs_apply(A, dU, out) && close_rel(out[0], Real(2) / Real(3), 1e-12) &&
+    chk(pops::roe_abs_apply(A, dU, out) && close_rel(out[0], Real(2) / Real(3), 1e-12) &&
             close_rel(out[1], Real(2), 1e-12),
         "roe_abs N=2 non-sym (VP 1,-2) : |A| dU = (2/3, 2)");
   }
@@ -497,14 +497,14 @@ int main() {
     // Spectre COMPLEXE (rotation pure, VP +-i) : false (repli appelant), out intact.
     const Real A[2][2] = {{Real(0), Real(-1)}, {Real(1), Real(0)}}, dU[2] = {Real(1), Real(0)};
     Real out[2] = {Real(7), Real(7)};
-    chk(!adc::roe_abs_apply(A, dU, out) && out[0] == Real(7) && out[1] == Real(7),
+    chk(!pops::roe_abs_apply(A, dU, out) && out[0] == Real(7) && out[1] == Real(7),
         "roe_abs spectre complexe -> false, out inchange (repli)");
   }
   {
     // A singuliere (VP nulle, sign indefini sur l'axe imaginaire) : false.
     const Real A[2][2] = {{Real(0), Real(0)}, {Real(0), Real(3)}}, dU[2] = {Real(1), Real(1)};
     Real out[2];
-    chk(!adc::roe_abs_apply(A, dU, out), "roe_abs A singuliere (VP nulle) -> false");
+    chk(!pops::roe_abs_apply(A, dU, out), "roe_abs A singuliere (VP nulle) -> false");
   }
 
   std::printf("FAILS = %d\n", g_chk.fails());

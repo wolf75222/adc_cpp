@@ -17,7 +17,7 @@ Tests :
 """
 import numpy as np
 
-import adc
+import pops
 
 PI = np.pi
 
@@ -25,8 +25,8 @@ PI = np.pi
 def _scalar(elliptic):
     """Bloc scalaire (1 var) transporte par ExB : set_density n'ecrit que la densite (comp 0), ce
     qui isole le second membre du Poisson pour la brique elliptique choisie."""
-    return adc.Model(state=adc.Scalar(), transport=adc.ExB(B0=1.0),
-                     source=adc.NoSource(), elliptic=elliptic)
+    return pops.Model(state=pops.Scalar(), transport=pops.ExB(B0=1.0),
+                     source=pops.NoSource(), elliptic=elliptic)
 
 
 def _density(n):
@@ -36,8 +36,8 @@ def _density(n):
 
 
 def _solve_single(elliptic, dens, n, rhs="composite"):
-    sim = adc.System(n=n, L=1.0, periodic=True)
-    sim.add_block("blk", model=_scalar(elliptic), spatial=adc.Spatial(none=True))
+    sim = pops.System(n=n, L=1.0, periodic=True)
+    sim.add_block("blk", model=_scalar(elliptic), spatial=pops.Spatial(none=True))
     sim.set_poisson(rhs=rhs, solver="fft")
     sim.set_density("blk", dens.reshape(-1).tolist())
     sim.solve_fields()
@@ -50,12 +50,12 @@ def background_is_generic():
     alpha, n0 = 1.7, 0.4
     dens = _density(n)
 
-    phi_bg = _solve_single(adc.BackgroundDensity(alpha=alpha, n0=n0), dens, n)
+    phi_bg = _solve_single(pops.BackgroundDensity(alpha=alpha, n0=n0), dens, n)
 
     # Reference : un bloc de charge unite (f = q n = n) dont la densite vaut DIRECTEMENT le second
     # membre de la brique de fond, alpha (n - n0). Meme operateur, meme f -> meme phi.
     f_ref = alpha * (dens - n0)
-    phi_ref = _solve_single(adc.ChargeDensity(charge=1.0), f_ref, n, rhs="charge_density")
+    phi_ref = _solve_single(pops.ChargeDensity(charge=1.0), f_ref, n, rhs="charge_density")
 
     scale = float(np.max(np.abs(phi_ref)))
     assert scale > 1e-6, "potentiel nul (second membre de fond trivial ?)"
@@ -63,7 +63,7 @@ def background_is_generic():
     assert err < 1e-10, "BackgroundDensity : phi != reference alpha(n-n0) (err %.2e)" % err
 
     # Garde-fou : le fond n'est PAS la densite de charge q n. phi(fond) doit differer de phi(charge n).
-    phi_charge = _solve_single(adc.ChargeDensity(charge=1.0), dens, n, rhs="charge_density")
+    phi_charge = _solve_single(pops.ChargeDensity(charge=1.0), dens, n, rhs="charge_density")
     diff = float(np.max(np.abs(phi_bg - phi_charge))) / scale
     assert diff > 1e-2, "fond == charge ? (le second membre serait fige sur q n)"
     print("OK  BackgroundDensity : f = alpha (n - n0) compose (err %.1e, ecart a q n %.1e)"
@@ -76,10 +76,10 @@ def mixed_bricks_sum():
     q0, alpha, n0bg = -0.8, 1.3, 0.5
     d0, d1 = _density(n), 1.0 + 0.2 * np.cos(2 * PI * (np.arange(n) + 0.5) / n)[None, :] * np.ones((n, n))
 
-    sim = adc.System(n=n, L=1.0, periodic=True)
-    sim.add_block("a", model=_scalar(adc.ChargeDensity(charge=q0)), spatial=adc.Spatial(none=True))
-    sim.add_block("b", model=_scalar(adc.BackgroundDensity(alpha=alpha, n0=n0bg)),
-                  spatial=adc.Spatial(none=True))
+    sim = pops.System(n=n, L=1.0, periodic=True)
+    sim.add_block("a", model=_scalar(pops.ChargeDensity(charge=q0)), spatial=pops.Spatial(none=True))
+    sim.add_block("b", model=_scalar(pops.BackgroundDensity(alpha=alpha, n0=n0bg)),
+                  spatial=pops.Spatial(none=True))
     sim.set_poisson(rhs="composite", solver="fft")
     sim.set_density("a", d0.reshape(-1).tolist())
     sim.set_density("b", d1.reshape(-1).tolist())
@@ -88,7 +88,7 @@ def mixed_bricks_sum():
 
     # Reference : un seul bloc de charge unite dont la densite vaut la somme manuelle des deux briques.
     f_ref = q0 * d0 + alpha * (d1 - n0bg)
-    phi_ref = _solve_single(adc.ChargeDensity(charge=1.0), f_ref, n, rhs="charge_density")
+    phi_ref = _solve_single(pops.ChargeDensity(charge=1.0), f_ref, n, rhs="charge_density")
 
     scale = float(np.max(np.abs(phi_ref)))
     err = float(np.max(np.abs(phi_mix - phi_ref))) / scale
@@ -101,15 +101,15 @@ def epm_facade_roundtrip():
     n = 64
     alpha, n0 = 0.9, 0.3
     dens = _density(n)
-    phi_setpoisson = _solve_single(adc.BackgroundDensity(alpha=alpha, n0=n0), dens, n)
+    phi_setpoisson = _solve_single(pops.BackgroundDensity(alpha=alpha, n0=n0), dens, n)
 
-    sim = adc.System(n=n, L=1.0, periodic=True)
-    sim.add_block("blk", model=_scalar(adc.BackgroundDensity(alpha=alpha, n0=n0)),
-                  spatial=adc.Spatial(none=True))
+    sim = pops.System(n=n, L=1.0, periodic=True)
+    sim.add_block("blk", model=_scalar(pops.BackgroundDensity(alpha=alpha, n0=n0)),
+                  spatial=pops.Spatial(none=True))
     sim.add_elliptic_model("poisson",
-                           adc.elliptic(operator=adc.div_eps_grad(1.0), rhs=adc.composite_rhs(),
-                                        output=adc.electric_field_from_potential()),
-                           solver=adc.EllipticSolver("fft"))
+                           pops.elliptic(operator=pops.div_eps_grad(1.0), rhs=pops.composite_rhs(),
+                                        output=pops.electric_field_from_potential()),
+                           solver=pops.EllipticSolver("fft"))
     sim.set_density("blk", dens.reshape(-1).tolist())
     sim.solve_fields()
     phi_epm = np.array(sim.potential()).reshape(n, n)
@@ -124,15 +124,15 @@ def token_alias():
     """'composite' et 'charge_density' empruntent le MEME chemin : phi identique sur un bloc charge."""
     n = 64
     dens = _density(n)
-    phi_charge = _solve_single(adc.ChargeDensity(charge=1.0), dens, n, rhs="charge_density")
-    phi_comp = _solve_single(adc.ChargeDensity(charge=1.0), dens, n, rhs="composite")
+    phi_charge = _solve_single(pops.ChargeDensity(charge=1.0), dens, n, rhs="charge_density")
+    phi_comp = _solve_single(pops.ChargeDensity(charge=1.0), dens, n, rhs="composite")
     err = float(np.max(np.abs(phi_comp - phi_charge)))
     assert err == 0.0, "token 'composite' != 'charge_density' sur un bloc charge (err %.2e)" % err
     print("OK  token 'composite' alias bit-identique de 'charge_density' (bloc charge)")
 
     # Un token inconnu est refuse explicitement.
-    sim = adc.System(n=n, L=1.0, periodic=True)
-    sim.add_block("blk", model=_scalar(adc.ChargeDensity(charge=1.0)), spatial=adc.Spatial(none=True))
+    sim = pops.System(n=n, L=1.0, periodic=True)
+    sim.add_block("blk", model=_scalar(pops.ChargeDensity(charge=1.0)), spatial=pops.Spatial(none=True))
     try:
         sim.set_poisson(rhs="bogus", solver="fft")
         sim.set_density("blk", dens.reshape(-1).tolist())

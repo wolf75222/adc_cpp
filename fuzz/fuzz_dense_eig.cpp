@@ -8,7 +8,7 @@
 ///  - brut : 8 octets -> double tel quel (NaN/Inf/denormaux compris) -> seul le no-crash/no-UB
 ///    est exige (ASan + UBSan sont lies au harnais, -fno-sanitize-recover rend l'UB fatal).
 
-#include <adc/numerics/linalg/dense_eig.hpp>
+#include <pops/numerics/linalg/dense_eig.hpp>
 
 #include <cmath>
 #include <cstdint>
@@ -28,14 +28,14 @@ void expect(bool ok, const char* what) {
 
 template <int N>
 void run(ByteReader& br, bool raw_mode) {
-  adc::Real a[N][N];
+  pops::Real a[N][N];
   for (int i = 0; i < N; ++i) {
     for (int j = 0; j < N; ++j) {
       a[i][j] = raw_mode ? br.raw() : br.finite(1.0e3);
     }
   }
 
-  const adc::EigBounds e = adc::real_eig_minmax(a);
+  const pops::EigBounds e = pops::real_eig_minmax(a);
 
   if (raw_mode) {
     return;  // NaN/Inf en entree : le contrat est "pas de crash, pas d'UB", rien de plus.
@@ -44,14 +44,14 @@ void run(ByteReader& br, bool raw_mode) {
   if (e.converged) {
     expect(std::isfinite(e.lmin) && std::isfinite(e.lmax), "lmin/lmax finis quand converged");
     expect(e.lmin <= e.lmax, "lmin <= lmax quand converged");
-    expect(e.max_im >= adc::Real(0), "max_im >= 0 quand converged");
+    expect(e.max_im >= pops::Real(0), "max_im >= 0 quand converged");
 
     // Gershgorin contient mathematiquement le spectre ; tolerance relative generouse pour
     // l'arithmetique flottante de l'iteration QR (sinon faux positifs).
-    adc::Real lo = adc::Real(0), hi = adc::Real(0);
-    adc::detail::gershgorin_bounds(a, lo, hi);
-    const adc::Real tol =
-        adc::Real(1e-6) * (adc::Real(1) + std::fabs(lo) + std::fabs(hi));
+    pops::Real lo = pops::Real(0), hi = pops::Real(0);
+    pops::detail::gershgorin_bounds(a, lo, hi);
+    const pops::Real tol =
+        pops::Real(1e-6) * (pops::Real(1) + std::fabs(lo) + std::fabs(hi));
     expect(e.lmin >= lo - tol && e.lmax <= hi + tol,
            "spectre dans l'encadrement de Gershgorin (a tolerance pres)");
   }

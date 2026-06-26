@@ -1,8 +1,8 @@
-# Operator-first modules (`adc.model`)
+# Operator-first modules (`pops.model`)
 
 A **module** is the *model-free* description of a model: typed spaces plus a registry of
 typed operators. It is the generalization of the physical DSL ({doc}`symbolic-dsl`): where
-`adc.dsl.Model` describes a PDE with flux, sources and elliptic fields, `adc.model.Module`
+`pops.dsl.Model` describes a PDE with flux, sources and elliptic fields, `pops.model.Module`
 describes any model as **operators with signatures**, and a compiled time program
 ({doc}`time-program`) composes those operators *by signature*, never by a hardcoded PDE
 category.
@@ -35,7 +35,7 @@ An operator is a named, typed function with a `Signature` `(inputs) -> output` a
 The `>>` sugar builds a signature:
 
 ```python
-import adc.model as M
+import pops.model as M
 
 U = M.StateSpace("U", ("rho", "mx", "my"))
 Fields = M.FieldSpace("fields", ("phi", "grad_x", "grad_y"))
@@ -66,7 +66,7 @@ def explicit_rhs(state, fields):
 
 ## Calling operators from a program
 
-`adc.time.Program` composes operators by name. Bind the module's registry, then call:
+`pops.time.Program` composes operators by name. Bind the module's registry, then call:
 
 ```python
 P = adctime.Program("generic_predictor_corrector").bind_operators(mod)
@@ -83,7 +83,7 @@ flux, source, Poisson or Lorentz: it only composes typed operator calls, linear 
 local and global solves, and a commit. That is the model-free level.
 
 The standard library provides model-free macros keyed on operator names:
-`adc.time.std.predictor_corrector_local_linear`, `explicit_rk` and `imex_local_linear`. The
+`pops.time.std.predictor_corrector_local_linear`, `explicit_rk` and `imex_local_linear`. The
 same macro runs against any module that provides operators with the expected signatures; see
 `examples/operator_modules/predictor_corrector_operator_first.py`.
 
@@ -95,7 +95,7 @@ self-contained, compilable model. `module.to_dsl()` lowers it to a `dsl.Model` (
 to the dsl method of its kind: `grid_operator` to `flux`, `local_source` to `source_term`,
 `local_linear_operator` to `linear_source`, `field_operator` to `elliptic_rhs`, `local_rate` to
 `rate_operator`), so it reuses the dsl codegen engine -- a translation, not a second backend.
-`adc.compile_problem(model=module, time=P)` accepts a Module and does this implicitly; use
+`pops.compile_problem(model=module, time=P)` accepts a Module and does this implicitly; use
 `module.to_dsl()` to build the block model for `sim.add_equation`. `examples/operator_modules/
 predictor_corrector_operator_first.py` is authored this way.
 
@@ -123,9 +123,9 @@ Scope (what is and is not checked):
 - POSIX only (the descriptor reader uses `dlsym`); a pre-Spec-2 `.so` carries no descriptor and is
   unaffected.
 
-## Compatibility with `adc.dsl.Model`
+## Compatibility with `pops.dsl.Model`
 
-`adc.dsl.Model` is the **PDE convenience facade** over a module: its `flux` / `source_term` /
+`pops.dsl.Model` is the **PDE convenience facade** over a module: its `flux` / `source_term` /
 `linear_source` / `elliptic_field` / `projection` lower into typed operators, exposed via
 `m.operator_registry()` and `m.module`:
 
@@ -153,23 +153,23 @@ sugar that lowers to the same IR as `P.call`. To move a model toward the operato
 3. Replace `P.rhs(state=U, fields=f, sources=[...])` with `P.call("explicit_rhs", U, f)` and
    `P.solve_fields(U)` with `P.call("fields_from_state", U)` (after `P.bind_operators(m)`).
 4. Optionally express the whole step with a `std` operator-first macro.
-5. When a model is no longer naturally a single PDE, define it as an `adc.model.Module` directly.
+5. When a model is no longer naturally a single PDE, define it as an `pops.model.Module` directly.
 
 ## Introspection
 
 The compiled handle and the module expose the registry metadata without loading the `.so`:
 `list_operators()`, `operator_signature(name)`, `operator_requirements(name)`,
 `operator_capabilities(name)`, `list_state_spaces()`, `list_field_spaces()`. For example
-`compiled.operator_signature("explicit_rhs").output == adc.model.Rate("U")`.
+`compiled.operator_signature("explicit_rhs").output == pops.model.Rate("U")`.
 
 ## The compiled module (`.so`)
 
 A combined model+program `problem.so` carries two parts. **GeneratedProgram** is the installed step
-(`adc_install_program`, driven by `sim.step`). **GeneratedModule** is a descriptor of the typed
-operator registry: `extern "C"` accessors (`adc_module_operator_count` / `_name` / `_kind` /
+(`pops_install_program`, driven by `sim.step`). **GeneratedModule** is a descriptor of the typed
+operator registry: `extern "C"` accessors (`pops_module_operator_count` / `_name` / `_kind` /
 `_signature` / `_requirements`, and the state/field space names) keyed by integer `OperatorId` -- the
 operator's registration index. The C++ side reads it from a dlopen'd handle with
-`adc::runtime::program::read_module_metadata` (`include/adc/runtime/program/module_metadata.hpp`),
+`pops::runtime::program::read_module_metadata` (`include/pops/runtime/program/module_metadata.hpp`),
 which returns `present=false` for a pre-Spec-2 `.so`. The descriptor is read once at install (for
 introspection and requirement validation); the step body never references it, so operators stay
 inlined and there is no string lookup in any hot kernel.

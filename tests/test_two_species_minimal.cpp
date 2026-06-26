@@ -10,49 +10,49 @@
 // Couvre aussi : RHS Poisson non nul a N blocs (jalon 2.1.1 / 2.5.1) et le defaut
 // implicite inconditionnellement stable sur source raide (jalon 2.2.1 / 2.5.3).
 
-#include <adc/core/model/coupled_system.hpp>
-#include <adc/core/state/state.hpp>
-#include <adc/coupling/system/system_coupler.hpp>
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/layout/distribution_mapping.hpp>
-#include <adc/mesh/geometry/geometry.hpp>
-#include <adc/mesh/storage/multifab.hpp>
+#include <pops/core/model/coupled_system.hpp>
+#include <pops/core/state/state.hpp>
+#include <pops/coupling/system/system_coupler.hpp>
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/layout/distribution_mapping.hpp>
+#include <pops/mesh/geometry/geometry.hpp>
+#include <pops/mesh/storage/multifab.hpp>
 
 #include <cmath>
 #include <cstdio>
 #include <type_traits>
 
-using namespace adc;
+using namespace pops;
 
 // Electrons : densite scalaire qui RELAXE vers neq a un taux RAIDE k. Pas de flux
 // (drift gele dans ce squelette). C'est exactement le terme qu'on veut implicite :
 // en explicite il imposerait dt < 1/k.
 struct ElectronRelax {
   using State = StateVec<1>;
-  using Aux = adc::Aux;
+  using Aux = pops::Aux;
   static constexpr int n_vars = 1;
 
   Real k = Real(1000);  // raideur
   Real neq = Real(1);   // densite d'equilibre
 
-  ADC_HD State flux(const State&, const Aux&, int) const { return State{Real(0)}; }
-  ADC_HD Real max_wave_speed(const State&, const Aux&, int) const { return Real(0); }
-  ADC_HD State source(const State& u, const Aux&) const { return State{-k * (u[0] - neq)}; }
-  ADC_HD Real elliptic_rhs(const State& u) const { return -u[0]; }
+  POPS_HD State flux(const State&, const Aux&, int) const { return State{Real(0)}; }
+  POPS_HD Real max_wave_speed(const State&, const Aux&, int) const { return Real(0); }
+  POPS_HD State source(const State& u, const Aux&) const { return State{-k * (u[0] - neq)}; }
+  POPS_HD Real elliptic_rhs(const State& u) const { return -u[0]; }
 };
 
 // Ions : production constante, explicite. Pas de flux.
 struct IonProduction {
   using State = StateVec<1>;
-  using Aux = adc::Aux;
+  using Aux = pops::Aux;
   static constexpr int n_vars = 1;
 
   Real rate = Real(3);
 
-  ADC_HD State flux(const State&, const Aux&, int) const { return State{Real(0)}; }
-  ADC_HD Real max_wave_speed(const State&, const Aux&, int) const { return Real(0); }
-  ADC_HD State source(const State&, const Aux&) const { return State{rate}; }
-  ADC_HD Real elliptic_rhs(const State& u) const { return u[0]; }
+  POPS_HD State flux(const State&, const Aux&, int) const { return State{Real(0)}; }
+  POPS_HD Real max_wave_speed(const State&, const Aux&, int) const { return Real(0); }
+  POPS_HD State source(const State&, const Aux&) const { return State{rate}; }
+  POPS_HD Real elliptic_rhs(const State& u) const { return u[0]; }
 };
 
 using ElectronBlock = EquationBlock<ElectronRelax, FirstOrder, ImplicitTime<UserTimeIntegrator, 1>>;

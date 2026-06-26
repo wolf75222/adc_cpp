@@ -1,24 +1,24 @@
-"""adc.time codegen (epic ADC-399 / ADC-401, ADC-407): Program.emit_cpp_program.
+"""pops.time codegen (epic ADC-399 / ADC-401, ADC-407): Program.emit_cpp_program.
 
 `emit_cpp_program` lowers the Program IR to the C++ source of a problem.so by a topological SSA walk.
-This test pins the generated source: the stable .so ABI (adc_program_abi_key via the
-ADC_ABI_KEY_LITERAL preprocessor literal -- never the interposable inline -- plus adc_program_name /
-adc_program_hash / adc_install_program), the Forward-Euler body, and that a multi-stage scheme
+This test pins the generated source: the stable .so ABI (pops_program_abi_key via the
+POPS_ABI_KEY_LITERAL preprocessor literal -- never the interposable inline -- plus pops_program_name /
+pops_program_hash / pops_install_program), the Forward-Euler body, and that a multi-stage scheme
 (SSPRK2) now lowers (a scratch state + a second rhs + a lincomb commit). Multi-block (ADC-426) now
 lowers too -- N P.state / N P.commit, each op routed to its block index; the SIMULTANEOUS multi-target
 solve_fields_from_blocks lowers to ctx.solve_fields_from_blocks (Spec 3 crit 24, ADC-457). Constructs
 the codegen still cannot lower -- named sources beyond 'default', a commit of an undeclared block --
-must be REFUSED with a clear error, never silently mis-lowered. Pure Python (no compile); skips if adc
+must be REFUSED with a clear error, never silently mis-lowered. Pure Python (no compile); skips if pops
 is unavailable.
 """
 import sys
 
 
-def _adc_time():
+def _pops_time():
     try:
-        import adc.time as t
-    except Exception as exc:  # adc not importable in this environment -> skip, never fake
-        print("skip test_time_codegen (adc.time unavailable: %s)" % exc)
+        import pops.time as t
+    except Exception as exc:  # pops not importable in this environment -> skip, never fake
+        print("skip test_time_codegen (pops.time unavailable: %s)" % exc)
         sys.exit(0)
     return t
 
@@ -49,9 +49,9 @@ def _ssprk2(t):
 def test_forward_euler_abi(t):
     P = _forward_euler(t)
     src = P.emit_cpp_program()
-    for tok in ('extern "C"', "ADC_ABI_KEY_LITERAL", "adc_program_abi_key", "adc_program_name",
-                "adc_program_hash", "adc_install_program",
-                "adc::runtime::program::ProgramContext ctx(sys)"):
+    for tok in ('extern "C"', "POPS_ABI_KEY_LITERAL", "pops_program_abi_key", "pops_program_name",
+                "pops_program_hash", "pops_install_program",
+                "pops::runtime::program::ProgramContext ctx(sys)"):
         assert tok in src, "generated source missing %r" % tok
     assert '"forward_euler_program"' in src, "program name not embedded"
     assert P._ir_hash() in src, "IR hash not embedded (cache/restart key)"
@@ -67,7 +67,7 @@ def test_forward_euler_algorithm(t):
                  "ctx.rhs_scratch_like(",
                  "ctx.rhs_into(0, ",
                  "ctx.scratch_state_like(",
-                 "static_cast<adc::Real>(dt)",
+                 "static_cast<pops::Real>(dt)",
                  "ctx.axpy(",
                  "ctx.lincomb("):
         assert frag in src, "generated FE body missing %r" % frag
@@ -87,9 +87,9 @@ def test_multistage_lowers(t):
 
 def test_includes_present(t):
     src = _forward_euler(t).emit_cpp_program()
-    for inc in ("adc/runtime/program/program_context.hpp",
-                "adc/runtime/dynamic/abi_key.hpp",
-                "adc/mesh/storage/multifab.hpp"):
+    for inc in ("pops/runtime/program/program_context.hpp",
+                "pops/runtime/dynamic/abi_key.hpp",
+                "pops/mesh/storage/multifab.hpp"):
         assert ("#include <%s>" % inc) in src, "missing #include <%s>" % inc
 
 
@@ -156,7 +156,7 @@ def test_solve_fields_from_blocks_lowers(t):
     P.commit("b", P.linear_combine("b1", Ub + P.dt * P.rhs(state=Ub, sources=["default"])))
     src = P.emit_cpp_program()
     assert "ctx.solve_fields_from_blocks(" in src
-    assert "std::vector<const adc::MultiFab*>" in src
+    assert "std::vector<const pops::MultiFab*>" in src
     assert "ctx.n_blocks()" in src
     assert src.count("] = &") >= 2  # both listed blocks slot their stage state by index
 
@@ -173,7 +173,7 @@ def test_uncommitted_refused(t):
 
 
 def _run():
-    t = _adc_time()
+    t = _pops_time()
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:
         fn(t)

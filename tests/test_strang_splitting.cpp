@@ -20,25 +20,25 @@
 //
 // Attendu : Lie ordre ~1 (erreur /2 quand dt /2), Strang ordre ~2 (erreur /4).
 
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/layout/distribution_mapping.hpp>
-#include <adc/mesh/geometry/geometry.hpp>
-#include <adc/mesh/storage/multifab.hpp>
-#include <adc/runtime/system/system_block_store.hpp>
-#include <adc/runtime/system/system_stepper.hpp>
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/layout/distribution_mapping.hpp>
+#include <pops/mesh/geometry/geometry.hpp>
+#include <pops/mesh/storage/multifab.hpp>
+#include <pops/runtime/system/system_block_store.hpp>
+#include <pops/runtime/system/system_stepper.hpp>
 // run_source_stage (gabarit, instancie via SystemStepper<MockImpl>::step) DEREFERENCE les types Schur
 // dans des branches MORTES ici (s.schur / s.schur_polar restent nullptr ; on passe par source_step).
 // Le member-access ->step(...) exige neanmoins le type COMPLET a l'instanciation -> on inclut les deux
 // en-tetes Schur (comme python/system.cpp). On n'en CONSTRUIT aucun objet : le test reste leger.
-#include <adc/coupling/schur/source/condensed_schur_source_stepper.hpp>
-#include <adc/coupling/schur/source/polar_condensed_schur_source_stepper.hpp>
+#include <pops/coupling/schur/source/condensed_schur_source_stepper.hpp>
+#include <pops/coupling/schur/source/polar_condensed_schur_source_stepper.hpp>
 
 #include <cmath>
 #include <cstdio>
 #include <functional>
 #include <vector>
 
-using namespace adc;
+using namespace pops;
 
 // --- Impl JOUET : satisfait le contrat structurel de SystemStepper<Impl> -----------------------------
 // Membres lus par le gabarit : Species (= SystemBlockStore::BlockState), sp, solve_fields(), t,
@@ -96,7 +96,7 @@ struct MockImpl {
   }
 };
 
-using Stepper = adc::stepper::SystemStepper<MockImpl>;
+using Stepper = pops::stepper::SystemStepper<MockImpl>;
 
 static void fill_ic(MultiFab& U, Real x0, Real y0) {
   for (int li = 0; li < U.local_size(); ++li) {
@@ -164,7 +164,7 @@ static double run(bool strang, int n, double T, Real x0, Real y0) {
   MockImpl impl = make_impl(x0, y0);
   attach_source(impl);
   Stepper st(&impl);
-  st.set_scheme(strang ? adc::stepper::SplitScheme::Strang : adc::stepper::SplitScheme::Lie);
+  st.set_scheme(strang ? pops::stepper::SplitScheme::Strang : pops::stepper::SplitScheme::Lie);
 
   const double dt = T / n;
   st.advance(dt, n);
@@ -187,7 +187,7 @@ static int count_solves(bool strang, int k) {
   MockImpl impl = make_impl(Real(1), Real(0));
   attach_source(impl);
   Stepper st(&impl);
-  st.set_scheme(strang ? adc::stepper::SplitScheme::Strang : adc::stepper::SplitScheme::Lie);
+  st.set_scheme(strang ? pops::stepper::SplitScheme::Strang : pops::stepper::SplitScheme::Lie);
   st.advance(0.01, k);
   return impl.solve_calls;
 }
@@ -203,7 +203,7 @@ static void run_one_step(bool with_transport, bool with_source, double dt, Real 
     attach_source(impl);  // sinon source_step reste nullptr -> S = no-op (etage absent)
 
   Stepper st(&impl);
-  st.set_scheme(adc::stepper::SplitScheme::Strang);
+  st.set_scheme(pops::stepper::SplitScheme::Strang);
   st.step(dt);
   const ConstArray4 a = impl.sp[0].U.fab(0).const_array();
   xf = a(0, 0, 0);
@@ -242,7 +242,7 @@ int main() {
       MockImpl impl = make_impl(x0, y0);
       attach_source(impl);
       Stepper st(&impl);
-      st.set_scheme(adc::stepper::SplitScheme::Lie);
+      st.set_scheme(pops::stepper::SplitScheme::Lie);
       st.step(dt);
       const ConstArray4 a = impl.sp[0].U.fab(0).const_array();
       xs = a(0, 0, 0);

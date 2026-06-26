@@ -10,24 +10,24 @@
 // elle l'est aussi sous Kokkos Cuda (GPU, valide sur ROMEO GH200, cf docs/GPU_RUNTIME_PORT.md). Sous
 // Cuda, for_each_cell ne fence pas (async) : on insere une barriere Kokkos::fence() avant la lecture
 // HOTE du residu. Lance via ctest a np=1/2/4 ; resultat bit-identique (dmax == 0) a chaque rang count.
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/geometry/geometry.hpp>
-#include <adc/mesh/storage/multifab.hpp>
-#include <adc/parallel/comm.hpp>
-#include <adc/parallel/load_balance.hpp>
-#include <adc/physics/bricks/bricks.hpp>  // CompositeModel, GravityForce, GravityCoupling
-#include <adc/physics/fluids/euler.hpp>   // Euler (transport compressible)
-#include <adc/runtime/builders/block/block_builder.hpp>
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/geometry/geometry.hpp>
+#include <pops/mesh/storage/multifab.hpp>
+#include <pops/parallel/comm.hpp>
+#include <pops/parallel/load_balance.hpp>
+#include <pops/physics/bricks/bricks.hpp>  // CompositeModel, GravityForce, GravityCoupling
+#include <pops/physics/fluids/euler.hpp>   // Euler (transport compressible)
+#include <pops/runtime/builders/block/block_builder.hpp>
 
 #include <cmath>
 #include <cstdio>
 #include <vector>
 
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
 #include <Kokkos_Core.hpp>
 #endif
 
-using namespace adc;
+using namespace pops;
 using Model = CompositeModel<Euler, GravityForce, GravityCoupling>;
 static const double kPi = 3.14159265358979323846;
 
@@ -71,7 +71,7 @@ static void residual_norms(const BoxArray& ba, const DistributionMapping& dm, co
   BlockClosures clo =
       make_block(model, "minmod", "rusanov", ctx, /*imex=*/false, /*recon_prim=*/false);
   clo.rhs_into(U, R);  // fill_ghosts(U) [halos multi-box / MPI] + assemble_rhs (foncteurs nommes)
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   Kokkos::fence();  // barriere avant lecture HOTE du residu device (no-op sous Serial)
 #endif
   double s = 0, ss = 0, mx = 0;
@@ -96,7 +96,7 @@ static void residual_norms(const BoxArray& ba, const DistributionMapping& dm, co
 
 int main(int argc, char** argv) {
   comm_init(&argc, &argv);
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   Kokkos::ScopeGuard guard(argc, argv);
 #else
   (void)argc;

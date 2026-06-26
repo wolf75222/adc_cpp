@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""adc.time per-cell conditional select (epic ADC-399 spec section 17, ADC-418): ``P.where``.
+"""pops.time per-cell conditional select (epic ADC-399 spec section 17, ADC-418): ``P.where``.
 
 ``P.where(mask, a, b)`` is a PER-CELL select -- ``out(i,j,c) = mask ? a(i,j,c) : b(i,j,c)``
 COMPONENT-WISE -- lowered to a condition INSIDE a Kokkos for_each_cell kernel (a ternary), NOT the
@@ -14,17 +14,17 @@ scalar runtime branch ``if_``. The 0/1 mask is built per cell with ``P.cell_ge``
 (B) End-to-end parity (skips unless the full toolchain is present): a per-cell select
     ``U <- where(U >= floor, U, 0.5*U)`` stepped once, compared to an offline numpy ``np.where`` doing
     the IDENTICAL per-cell select -> bit-exact. The IC straddles the threshold so SOME cells take a and
-    SOME take b (non-vacuous). Self-skips without numpy / _adc / a compiler / Kokkos / install_program
+    SOME take b (non-vacuous). Self-skips without numpy / _pops / a compiler / Kokkos / install_program
     (never faking the engine).
 """
 import sys
 
 
-def _adc_time():
+def _pops_time():
     try:
-        import adc.time as t
-    except Exception as exc:  # adc not importable here -> skip, never fake
-        print("skip test_time_where (adc.time unavailable: %s)" % exc)
+        import pops.time as t
+    except Exception as exc:  # pops not importable here -> skip, never fake
+        print("skip test_time_where (pops.time unavailable: %s)" % exc)
         sys.exit(0)
     return t
 
@@ -79,9 +79,9 @@ def test_where_codegen(t):
     P = _clamp_program(t)
     src = P.emit_cpp_program()
     for frag in ("ctx.alloc_scalar_field(1, 1)",          # the mask field
-                 "adc::for_each_cell",                      # the per-cell select kernel
-                 "static_cast<adc::Real>(0.5))",            # the threshold in the compare kernel
-                 "? static_cast<adc::Real>(1) : static_cast<adc::Real>(0)",  # 0/1 mask
+                 "pops::for_each_cell",                      # the per-cell select kernel
+                 "static_cast<pops::Real>(0.5))",            # the threshold in the compare kernel
+                 "? static_cast<pops::Real>(1) : static_cast<pops::Real>(0)",  # 0/1 mask
                  "for (int c = 0; c < ncomp_; ++c)",        # component-wise select
                  "(mask_ncomp_ == 1) ? 0 : c",              # shared vs per-component mask
                  "? aA(i, j, c) : bA(i, j, c)"):            # the select ternary
@@ -172,18 +172,18 @@ def _run_section_b(t):
     try:
         import numpy as np
 
-        import adc
-    except Exception as exc:  # noqa: BLE001  -- numpy / _adc unavailable in this interpreter
-        print("-- (B) skipped: adc/numpy unavailable: %s --" % exc)
+        import pops
+    except Exception as exc:  # noqa: BLE001  -- numpy / _pops unavailable in this interpreter
+        print("-- (B) skipped: pops/numpy unavailable: %s --" % exc)
         return None
 
     n = 8
-    sim = adc.System(n=n, L=1.0, periodic=True)
+    sim = pops.System(n=n, L=1.0, periodic=True)
     if not hasattr(sim, "install_program"):
-        print("-- (B) skipped: _adc lacks the install_program binding (rebuild _adc) --")
+        print("-- (B) skipped: _pops lacks the install_program binding (rebuild _pops) --")
         return None
 
-    from adc import dsl
+    from pops import dsl
 
     # A minimal 1-variable model with NO Poisson coupling: solve_fields is inert and the select needs
     # no fields. A complete compilable block (flux + primitive + eigenvalue).
@@ -199,7 +199,7 @@ def _run_section_b(t):
 
     floor = 0.5
     try:
-        compiled = adc.compile_problem(
+        compiled = pops.compile_problem(
             model=passive_model("where_prog"),
             time=_clamp_program(t, name="where_step", floor=floor))
     except RuntimeError as exc:  # no compiler / no Kokkos visible / .so compile failed
@@ -214,8 +214,8 @@ def _run_section_b(t):
         print("-- (B) skipped: model compile could not build the .so: %s --" % str(exc)[:160])
         return None
     sim.add_equation("blk", compiled_model,
-                     spatial=adc.FiniteVolume(limiter="none", riemann="rusanov"),
-                     time=adc.Explicit(method="euler"))
+                     spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                     time=pops.Explicit(method="euler"))
     # An IC that STRADDLES the floor: a sine swinging through 0.5 so some cells are >= floor and some
     # are < floor (the select must genuinely vary per cell -- non-vacuous).
     x = (np.arange(n) + 0.5) / n
@@ -245,7 +245,7 @@ def _run_section_b(t):
 
 
 def _run():
-    t = _adc_time()
+    t = _pops_time()
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:
         fn(t)

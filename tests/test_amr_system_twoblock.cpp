@@ -18,14 +18,14 @@
 // build_amr_block (les briques introduites par cette PR), ou l'on a acces au RHS du MG et aux
 // niveaux des blocs ; les points (a)(c)(d)(e) au niveau de la facade AmrSystem.
 
-#include <adc/coupling/base/elliptic_rhs.hpp>  // add_scaled_component (RHS de reference assemble main)
-#include <adc/runtime/builders/compiled/amr_dsl_block.hpp>  // detail::make_shared_amr_layout / dispatch_amr_block
-#include <adc/runtime/amr/amr_runtime.hpp>    // AmrRuntime, AmrRuntimeBlock
-#include <adc/runtime/amr_system.hpp>     // facade AmrSystem
-#include <adc/runtime/builders/factory/model_factory.hpp>  // detail::dispatch_model
-#include <adc/runtime/config/model_spec.hpp>
-#include <adc/mesh/storage/mf_arith.hpp>  // norm_inf
-#include <adc/mesh/storage/multifab.hpp>
+#include <pops/coupling/base/elliptic_rhs.hpp>  // add_scaled_component (RHS de reference assemble main)
+#include <pops/runtime/builders/compiled/amr_dsl_block.hpp>  // detail::make_shared_amr_layout / dispatch_amr_block
+#include <pops/runtime/amr/amr_runtime.hpp>    // AmrRuntime, AmrRuntimeBlock
+#include <pops/runtime/amr_system.hpp>     // facade AmrSystem
+#include <pops/runtime/builders/factory/model_factory.hpp>  // detail::dispatch_model
+#include <pops/runtime/config/model_spec.hpp>
+#include <pops/mesh/storage/mf_arith.hpp>  // norm_inf
+#include <pops/mesh/storage/multifab.hpp>
 
 #include <cmath>
 #include <cstdio>
@@ -33,11 +33,11 @@
 #include <string>
 #include <vector>
 
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
 #include <Kokkos_Core.hpp>
 #endif
 
-using namespace adc;
+using namespace pops;
 
 template <class F>
 static bool raises(F&& f) {
@@ -76,7 +76,7 @@ static std::vector<double> bump(int n, double base, double amp) {
 }
 
 int main(int argc, char** argv) {
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   Kokkos::ScopeGuard guard(argc, argv);
 #else
   (void)argc;

@@ -46,7 +46,7 @@ one build invites diamond-dependency failures, silent version skew, and wasted w
 
 - **Third-party dependencies are pinned to one version.** Kokkos, Eigen, and pybind11 come from a
   single pinned revision (FetchContent pins / the conda env), never chosen per target.
-- **One compiled core.** There is a single `_adc` module; the DSL backends (`aot` / `production`) and
+- **One compiled core.** There is a single `_pops` module; the DSL backends (`aot` / `production`) and
   the native bricks all build against the same headers. The **`abi_key`** guard makes this concrete:
   it refuses to load a model `.so` built against a *different* header or toolchain revision rather
   than risk a silent ABI mismatch. That is the One-Version Rule, enforced at load time.

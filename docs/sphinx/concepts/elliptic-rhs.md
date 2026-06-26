@@ -1,13 +1,13 @@
 # Elliptic right-hand side and the aux channel
 
 This page explains how a hyperbolic block couples to the elliptic (Poisson)
-solve in `adc`. The coupling is a contract with two halves: a model declares
+solve in `pops`. The coupling is a contract with two halves: a model declares
 what it pushes into the elliptic right-hand side, and it reads back what the
 solve produces through a shared channel called `aux`.
 
 ## Why the coupling exists
 
-The systems `adc` targets are not pure conservation laws. The transport of a
+The systems `pops` targets are not pure conservation laws. The transport of a
 density depends on a field (a potential `phi` and its gradient) that the density
 itself sources. A drift-advected plasma and a self-gravitating fluid are both
 this shape: an evolving state `U` feeds an elliptic equation, the elliptic
@@ -44,7 +44,7 @@ of charge is composed across species.
 
 After assembling the summed right-hand side, the system solves the elliptic
 equation for `phi`, then derives the field and stores everything in `aux` (the
-`adc::Aux` channel). The channel carries:
+`pops::Aux` channel). The channel carries:
 
 - `phi`: the potential.
 - `grad_x`, `grad_y`: the components of its gradient.
@@ -76,8 +76,8 @@ deliberately identical between the single-level and AMR pipelines.
 ## Writing the contract two ways
 
 You declare the same contract whichever way you author a model. With native
-bricks you pick an elliptic brick in `adc.Model(..., elliptic=...)`, for example
-`adc.ChargeDensity` or `adc.BackgroundDensity`. With the DSL you write
+bricks you pick an elliptic brick in `pops.Model(..., elliptic=...)`, for example
+`pops.ChargeDensity` or `pops.BackgroundDensity`. With the DSL you write
 `m.elliptic_rhs(expr)` and reference the aux fields you need with `m.aux("phi")`,
 `m.aux("grad_x")`, `m.aux("grad_y")`. Both produce the same C++ object and plug
 into a `System` or `AmrSystem` the same way.

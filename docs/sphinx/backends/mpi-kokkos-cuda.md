@@ -12,7 +12,7 @@ Kokkos Cuda computes on each GPU, CUDA-aware OpenMPI exchanges the halos device-
 ```bash
 module load cuda/12.6
 cmake -S . -B build-mpicuda -DCMAKE_BUILD_TYPE=Release \
-  -DADC_USE_KOKKOS=ON -DADC_USE_MPI=ON \
+  -DPOPS_USE_KOKKOS=ON -DPOPS_USE_MPI=ON \
   -DCMAKE_CXX_COMPILER="$KOKKOS_PREFIX/bin/nvcc_wrapper" \
   -DKokkos_ROOT="$KOKKOS_PREFIX"
 cmake --build build-mpicuda -j

@@ -1,7 +1,7 @@
 """SSPRK3 (Shu-Osher, ordre 3) sur AMR avec REFLUX PAR ETAGE (ADC-64).
 
 L'AMR sous-cycle (Berger-Oliger) avec reflux conservatif aux interfaces grossier-fin. SSPRK3 y est
-cable comme METHODE TEMPORELLE optionnelle (adc.Explicit(ssprk3=True) -> time.kind == "ssprk3"),
+cable comme METHODE TEMPORELLE optionnelle (pops.Explicit(ssprk3=True) -> time.kind == "ssprk3"),
 mono-bloc (coupleur AmrCouplerMP) ET multi-blocs (moteur AmrRuntime). Le reflux enregistre le FLUX
 EFFECTIF du pas SSP, Feff = 1/6 F(U0) + 1/6 F(U1) + 2/3 F(U2) : la correction grossier-fin reste
 exactement conservative pour le pas d'ordre 3 (cf. subcycle_level_mp / ssprk3_advance_level).
@@ -22,7 +22,7 @@ Test PUR Python (aucune compilation .so) : ne gate sur rien, toujours execute.
 """
 import numpy as np
 
-import adc
+import pops
 
 
 def _bump(n, amp):
@@ -34,15 +34,15 @@ def _bump(n, amp):
 
 
 def _scalar_charge(q, B0=1.0):
-    return adc.Model(adc.Scalar(), adc.ExB(B0=B0), adc.NoSource(), adc.ChargeDensity(charge=q))
+    return pops.Model(pops.Scalar(), pops.ExB(B0=B0), pops.NoSource(), pops.ChargeDensity(charge=q))
 
 
 # --- (a) mono-bloc + multi-blocs ssprk3 : fini + masse conservee, patchs fins actifs ---
 def _check_mono(n=32):
-    sim = adc.AmrSystem(n=n, L=1.0, periodic=True, regrid_every=4)
+    sim = pops.AmrSystem(n=n, L=1.0, periodic=True, regrid_every=4)
     sim.add_block("ne", _scalar_charge(+1.0),
-                  spatial=adc.Spatial(limiter="minmod", flux="rusanov"),
-                  time=adc.Explicit(ssprk3=True))  # SSPRK3 mono-bloc (chemin AmrCouplerMP)
+                  spatial=pops.Spatial(limiter="minmod", flux="rusanov"),
+                  time=pops.Explicit(ssprk3=True))  # SSPRK3 mono-bloc (chemin AmrCouplerMP)
     sim.set_poisson(bc="periodic")
     sim.set_refinement(1.05)  # seuil bas -> le bump tague et raffine (patchs fins actifs)
     sim.set_density("ne", _bump(n, 0.40))
@@ -59,13 +59,13 @@ def _check_mono(n=32):
 
 
 def _check_multi(n=32):
-    sim = adc.AmrSystem(n=n, L=1.0, periodic=True, regrid_every=4)
+    sim = pops.AmrSystem(n=n, L=1.0, periodic=True, regrid_every=4)
     sim.add_block("ions", _scalar_charge(+1.0),
-                  spatial=adc.Spatial(limiter="none", flux="rusanov"),
-                  time=adc.Explicit(ssprk3=True))     # SSPRK3 multi-blocs (moteur AmrRuntime)
+                  spatial=pops.Spatial(limiter="none", flux="rusanov"),
+                  time=pops.Explicit(ssprk3=True))     # SSPRK3 multi-blocs (moteur AmrRuntime)
     sim.add_block("electrons", _scalar_charge(-1.0),
-                  spatial=adc.Spatial(limiter="minmod", flux="rusanov"),
-                  time=adc.Explicit(ssprk3=True))     # 2e bloc ssprk3, SCHEMA SPATIAL DIFFERENT
+                  spatial=pops.Spatial(limiter="minmod", flux="rusanov"),
+                  time=pops.Explicit(ssprk3=True))     # 2e bloc ssprk3, SCHEMA SPATIAL DIFFERENT
     sim.set_poisson(bc="periodic")
     sim.set_refinement(1.05)  # union des tags -> patchs fins actifs
     sim.set_density("ions", _bump(n, 0.40))
@@ -88,9 +88,9 @@ def _check_multi(n=32):
 # --- (b) defaut bit-identique : euler explicit deterministe (verrou du threading time_method) ---
 def _check_default_bit_identical(n=32):
     def run_euler():
-        s = adc.AmrSystem(n=n, L=1.0, periodic=True, regrid_every=0)
+        s = pops.AmrSystem(n=n, L=1.0, periodic=True, regrid_every=0)
         s.add_block("ne", _scalar_charge(+1.0),
-                    spatial=adc.Spatial(limiter="minmod", flux="rusanov"))  # time defaut = Explicit() euler
+                    spatial=pops.Spatial(limiter="minmod", flux="rusanov"))  # time defaut = Explicit() euler
         s.set_poisson(bc="periodic")
         s.set_density("ne", _bump(n, 0.40))
         s.advance(0.002, 10)
@@ -107,10 +107,10 @@ def _check_default_bit_identical(n=32):
 def _build_advect(n, kind):
     """AMR mono-bloc, hierarchie FIGEE (regrid_every=0, patch seed central) : SEULE la methode
     temporelle (time) change entre les runs -> l'erreur mesuree est purement TEMPORELLE."""
-    s = adc.AmrSystem(n=n, L=1.0, periodic=True, regrid_every=0)
+    s = pops.AmrSystem(n=n, L=1.0, periodic=True, regrid_every=0)
     s.add_block("ne", _scalar_charge(+1.0),
-                spatial=adc.Spatial(limiter="none", flux="rusanov"),  # MEME schema spatial pour tous
-                time=adc.Explicit(ssprk3=True) if kind == "ssprk3" else adc.Explicit())
+                spatial=pops.Spatial(limiter="none", flux="rusanov"),  # MEME schema spatial pour tous
+                time=pops.Explicit(ssprk3=True) if kind == "ssprk3" else pops.Explicit())
     s.set_poisson(bc="periodic")
     s.set_density("ne", _bump(n, 0.40))
     return s
@@ -157,7 +157,7 @@ def _check_imex_ssprk3_rejected(n=16):
     model = _scalar_charge(+1.0)
 
     def add(time, **kw):
-        s = adc.AmrSystem(n=n, L=1.0, periodic=True, regrid_every=0)
+        s = pops.AmrSystem(n=n, L=1.0, periodic=True, regrid_every=0)
         kwargs = dict(implicit_vars=[], implicit_roles=[], newton_max_iters=2, newton_rel_tol=0.0,
                       newton_abs_tol=0.0, newton_fd_eps=1e-7, newton_damping=1.0,
                       newton_fail_policy="none", newton_diagnostics=False)
@@ -185,10 +185,10 @@ def _check_imex_ssprk3_rejected(n=16):
 
 # --- (e) loader .so + ssprk3 : rejet explicite (ABI plate ne transporte pas la methode) ---
 def _check_native_loader_rejects_ssprk3(n=16):
-    s = adc.AmrSystem(n=n, L=1.0, periodic=True, regrid_every=0)
+    s = pops.AmrSystem(n=n, L=1.0, periodic=True, regrid_every=0)
     # add_native_block valide time AVANT le dlopen : aucun .so reel requis pour observer le rejet.
     try:
-        s._s.add_native_block("b", "/tmp/_adc_ssprk3_inexistant.so", "minmod", "rusanov",
+        s._s.add_native_block("b", "/tmp/_pops_ssprk3_inexistant.so", "minmod", "rusanov",
                               "conservative", "ssprk3", 1.4, 1)
     except Exception as e:
         assert "ssprk3" in str(e), "rejet .so present mais message inattendu : %s" % e
@@ -198,7 +198,7 @@ def _check_native_loader_rejects_ssprk3(n=16):
     # SPECIFIQUE a ssprk3, pas un refus generique de add_native_block. NB : chemin SANS 'ssprk3'
     # dans le nom -- dlopen echoie le chemin dans son message, ce qui piegerait l'assertion.
     try:
-        s._s.add_native_block("b", "/tmp/_adc_loader_inexistant.so", "minmod", "rusanov",
+        s._s.add_native_block("b", "/tmp/_pops_loader_inexistant.so", "minmod", "rusanov",
                               "conservative", "explicit", 1.4, 1)
     except Exception as e:
         assert "ssprk3" not in str(e), "explicit rejete pour cause de ssprk3 (rejet trop large)"

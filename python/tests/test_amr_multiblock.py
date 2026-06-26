@@ -13,7 +13,7 @@ Test PUR Python (aucune compilation .so) : ne gate sur rien, toujours execute.
 """
 import numpy as np
 
-import adc
+import pops
 
 
 def _bump(n, amp):
@@ -24,15 +24,15 @@ def _bump(n, amp):
 
 
 def _scalar_charge(q, B0=1.0):
-    return adc.Model(adc.Scalar(), adc.ExB(B0=B0), adc.NoSource(), adc.ChargeDensity(charge=q))
+    return pops.Model(pops.Scalar(), pops.ExB(B0=B0), pops.NoSource(), pops.ChargeDensity(charge=q))
 
 
 def _build(n=32, regrid_every=0):
-    sim = adc.AmrSystem(n=n, L=1.0, periodic=True, regrid_every=regrid_every)
+    sim = pops.AmrSystem(n=n, L=1.0, periodic=True, regrid_every=regrid_every)
     sim.add_block("ions", _scalar_charge(+1.0),
-                  spatial=adc.Spatial(limiter="none", flux="rusanov"))
+                  spatial=pops.Spatial(limiter="none", flux="rusanov"))
     sim.add_block("electrons", _scalar_charge(-1.0),
-                  spatial=adc.Spatial(limiter="minmod", flux="rusanov"))  # SCHEMA DIFFERENT
+                  spatial=pops.Spatial(limiter="minmod", flux="rusanov"))  # SCHEMA DIFFERENT
     sim.set_poisson(bc="periodic")
     sim.set_density("ions", _bump(n, 0.40))
     sim.set_density("electrons", _bump(n, 0.20))
@@ -70,8 +70,8 @@ def main():
 
     # (d) MONO-BLOC deterministe (chemin AmrCouplerMP intouche) : run x2 -> dmax == 0.
     def run_mono():
-        s = adc.AmrSystem(n=n, L=1.0, periodic=True, regrid_every=0)
-        s.add_block("ne", _scalar_charge(+1.0), spatial=adc.Spatial(limiter="none", flux="rusanov"))
+        s = pops.AmrSystem(n=n, L=1.0, periodic=True, regrid_every=0)
+        s.add_block("ne", _scalar_charge(+1.0), spatial=pops.Spatial(limiter="none", flux="rusanov"))
         s.set_poisson(bc="periodic")
         s.set_density("ne", _bump(n, 0.40))
         s.advance(0.001, 10)

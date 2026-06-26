@@ -25,8 +25,8 @@ import tempfile
 
 import numpy as np
 
-import adc
-from adc import dsl
+import pops
+from pops import dsl
 
 fails = 0
 INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "include"))
@@ -47,9 +47,9 @@ def err_msg(fn):
 
 
 def gas():  # Euler compressible 4-var : a pressure() + wave_speeds()
-    return adc.Model(state=adc.FluidState("compressible", gamma=1.4),
-                     transport=adc.CompressibleFlux(), source=adc.NoSource(),
-                     elliptic=adc.ChargeDensity(charge=0.0))
+    return pops.Model(state=pops.FluidState("compressible", gamma=1.4),
+                     transport=pops.CompressibleFlux(), source=pops.NoSource(),
+                     elliptic=pops.ChargeDensity(charge=0.0))
 
 
 def smooth_rho(n):
@@ -58,9 +58,9 @@ def smooth_rho(n):
 
 
 def run_gas(riemann, n=48, nsteps=10, cfl=0.2):
-    s = adc.System(n=n, L=1.0, periodic=True)
-    s.add_block("gas", model=gas(), spatial=adc.Spatial(weno5=True, flux=riemann),
-                time=adc.Explicit())
+    s = pops.System(n=n, L=1.0, periodic=True)
+    s.add_block("gas", model=gas(), spatial=pops.Spatial(weno5=True, flux=riemann),
+                time=pops.Explicit())
     s.set_poisson()
     s.set_density("gas", smooth_rho(n))
     for _ in range(nsteps):
@@ -82,7 +82,7 @@ chk("godunov" in err_msg(lambda: run_gas("godunov")), "(1) flux inconnu 'godunov
 # --- (3)/(4) capacite DSL 3-var isotherme (avec compilateur) ---------------------------------------
 cxx = shutil.which("c++") or shutil.which("g++") or shutil.which("clang++")
 if not cxx or not os.path.isdir(INCLUDE):
-    print("skip  (3)/(4) : compilateur ou en-tetes adc absents")
+    print("skip  (3)/(4) : compilateur ou en-tetes pops absents")
     print("test_hll_isothermal : OK (HLL natif vert)" if fails == 0 else f"{fails} ECHEC(S)")
     sys.exit(0 if fails == 0 else 1)
 
@@ -112,10 +112,10 @@ try:
     chk("p" not in cm_p.prim_names, "(3) 'p' hors primitive_vars (hllc/roe le rejetteraient)")
 
     def build(cm, riem):
-        s = adc.System(n=40, L=1.0, periodic=True)
-        s.add_equation("f", model=cm, spatial=adc.FiniteVolume(limiter="weno5", riemann=riem,
+        s = pops.System(n=40, L=1.0, periodic=True)
+        s.add_equation("f", model=cm, spatial=pops.FiniteVolume(limiter="weno5", riemann=riem,
                                                               variables="conservative"),
-                       time=adc.Explicit(method="ssprk2"))
+                       time=pops.Explicit(method="ssprk2"))
         s.set_poisson()
         z = np.zeros((40, 40)); r = 1.0 + 0.2 * smooth_rho(40) / smooth_rho(40).max()
         s.set_primitive_state("f", rho=r, u=z, v=z)

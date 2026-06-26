@@ -3,7 +3,7 @@
 // unifiee (Kokkos::SharedSpace) sync_host() est un device_fence() cible et
 // sync_device() un no-op ; le comportement doit rester BIT-IDENTIQUE a un acces
 // hote nu. Ce test verifie :
-//   1) les seams libres adc::sync_host()/sync_device() s'appellent (idempotents,
+//   1) les seams libres pops::sync_host()/sync_device() s'appellent (idempotents,
 //      sans effet observable sur les donnees) ;
 //   2) les methodes MultiFab::sync_host()/sync_device() sont idempotentes : un
 //      sync repete ne change AUCUN bit des fabs ;
@@ -11,15 +11,15 @@
 //      meme resultat qu'aujourd'hui (set_val + sum inchanges) ;
 //   4) sync_device() avant un kernel for_each_cell ne perturbe pas le calcul.
 
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/layout/distribution_mapping.hpp>
-#include <adc/mesh/storage/fab2d.hpp>
-#include <adc/mesh/execution/for_each.hpp>
-#include <adc/mesh/storage/multifab.hpp>
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/layout/distribution_mapping.hpp>
+#include <pops/mesh/storage/fab2d.hpp>
+#include <pops/mesh/execution/for_each.hpp>
+#include <pops/mesh/storage/multifab.hpp>
 
 #include <cstdio>
 
-using namespace adc;
+using namespace pops;
 
 int main() {
   int fails = 0;
@@ -62,7 +62,7 @@ int main() {
   mf.sync_device();  // intention : un kernel va ecrire (no-op sous unifiee)
   for (int li = 0; li < mf.local_size(); ++li) {
     Array4 a = mf.fab(li).array();
-    for_each_cell(mf.box(li), [a] ADC_HD(int i, int j) { a(i, j, 0) = i + 100.0 * j; });
+    for_each_cell(mf.box(li), [a] POPS_HD(int i, int j) { a(i, j, 0) = i + 100.0 * j; });
   }
   mf.sync_host();  // intention : on va relire cote hote (fence cible)
 

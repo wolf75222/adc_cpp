@@ -1,10 +1,10 @@
 """Composite HYBRIDE sur AMR (loader natif AMR hybride) : un modele melant transport NATIF (Euler) +
 source DSL (gravite) + elliptique NATIVE (GravityCoupling) est compile en loader natif AMR via
-adc.CompositeModel(...).compile(backend="production", target="amr_system"), puis branche dans une
-AmrSystem (symbole adc_install_native_amr -> add_compiled_model(AmrSystem&), MEME hierarchie que
+pops.CompositeModel(...).compile(backend="production", target="amr_system"), puis branche dans une
+AmrSystem (symbole pops_install_native_amr -> add_compiled_model(AmrSystem&), MEME hierarchie que
 AmrSystem.add_block : reflux conservatif, regrid).
 
-On verifie la PARITE FORTE contre l'oracle 100% natif (adc.Model -> add_block) : memes masse, densite
+On verifie la PARITE FORTE contre l'oracle 100% natif (pops.Model -> add_block) : memes masse, densite
 grossiere et nombre de patchs a la precision machine (< 1e-12 ; le solve MG elliptique accumule un bruit
 FP d'ordre 1e-16). On verifie aussi les garde-fous (aot+amr_system refuse ; CompiledModel target=system
 refuse sur AMR). Auto-saute sans compilateur. Lance avec python3.
@@ -15,15 +15,15 @@ import tempfile
 
 import numpy as np
 
-import adc
-from adc import dsl
+import pops
+from pops import dsl
 
 GAMMA = 1.4
 INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "include"))
 
 
 def build_gravity_source():
-    """Source DSL repliquant adc::GravityForce sur 4 variables : rho g, g = -grad phi (travail inclus)."""
+    """Source DSL repliquant pops::GravityForce sur 4 variables : rho g, g = -grad phi (travail inclus)."""
     s = dsl.SourceBrick("grav")
     rho, rho_u, rho_v, E = s.conservative_vars("rho", "rho_u", "rho_v", "E")
     gx = s.aux("grad_x")
@@ -39,12 +39,12 @@ def _bubble(n):
 
 
 def _amr(n, L, branch):
-    cfg = adc.AmrSystemConfig()
+    cfg = pops.AmrSystemConfig()
     cfg.n = n
     cfg.L = L
     cfg.periodic = True
     cfg.regrid_every = 4
-    s = adc.AmrSystem(cfg)
+    s = pops.AmrSystem(cfg)
     branch(s)
     s.set_refinement(1.2)
     s.set_density("gas", _bubble(n))
@@ -54,7 +54,7 @@ def _amr(n, L, branch):
 def main():
     cxx = shutil.which("c++") or shutil.which("g++") or shutil.which("clang++")
     if not cxx or not os.path.isdir(INCLUDE):
-        print("skip  compilateur ou en-tetes adc absents")
+        print("skip  compilateur ou en-tetes pops absents")
         print("test_dsl_hybrid_amr : OK (rien a compiler)")
         return
 
@@ -62,9 +62,9 @@ def main():
     tmp = tempfile.mkdtemp()
     try:
         # Composite hybride : transport NATIF Euler + source DSL gravite + elliptique NATIVE.
-        m = adc.CompositeModel(transport=adc.CompressibleFlux(),
+        m = pops.CompositeModel(transport=pops.CompressibleFlux(),
                                source=build_gravity_source().compile(),
-                               elliptic=adc.GravityCoupling(sign=-1.0, four_pi_G=1.0, rho0=1.0))
+                               elliptic=pops.GravityCoupling(sign=-1.0, four_pi_G=1.0, rho0=1.0))
         assert m.n_vars == 4
         co = m.compile(backend="production", target="amr_system",
                        so_path=os.path.join(tmp, "hybrid_amr.so"), include=INCLUDE)
@@ -72,16 +72,16 @@ def main():
         assert co.caps.get("amr") is True
 
         # Oracle 100% natif equivalent (Euler + GravityForce + GravityCoupling).
-        spec = adc.Model(state=adc.FluidState("compressible", gamma=GAMMA),
-                         transport=adc.CompressibleFlux(), source=adc.GravityForce(),
-                         elliptic=adc.GravityCoupling(sign=-1.0, four_pi_G=1.0, rho0=1.0))
+        spec = pops.Model(state=pops.FluidState("compressible", gamma=GAMMA),
+                         transport=pops.CompressibleFlux(), source=pops.GravityForce(),
+                         elliptic=pops.GravityCoupling(sign=-1.0, four_pi_G=1.0, rho0=1.0))
 
         def poisson(s):
             s.set_poisson("charge_density", "geometric_mg")
 
-        spatial = adc.FiniteVolume(limiter="minmod", riemann="rusanov", variables="conservative")
+        spatial = pops.FiniteVolume(limiter="minmod", riemann="rusanov", variables="conservative")
         H = _amr(n, L, lambda s: (s.add_equation("gas", co, spatial=spatial), poisson(s)))
-        N = _amr(n, L, lambda s: (s.add_block("gas", spec, spatial=spatial, time=adc.Explicit()),
+        N = _amr(n, L, lambda s: (s.add_block("gas", spec, spatial=spatial, time=pops.Explicit()),
                                   poisson(s)))
         assert H.n_patches() == N.n_patches(), "n_patches initial hybride != add_block"
         m0h, m0n = H.mass(), N.mass()
@@ -109,7 +109,7 @@ def main():
         co_sys = m.compile(backend="production", target="system",
                            so_path=os.path.join(tmp, "hybrid_sys.so"), include=INCLUDE)
         try:
-            adc.AmrSystem(n=n, L=L, periodic=True).add_equation("gas", co_sys, spatial=spatial)
+            pops.AmrSystem(n=n, L=L, periodic=True).add_equation("gas", co_sys, spatial=spatial)
             raise AssertionError("AmrSystem.add_equation a accepte un CompiledModel target='system'")
         except ValueError as ex:
             assert "target='system'" in str(ex) or "amr_system" in str(ex)

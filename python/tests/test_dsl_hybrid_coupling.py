@@ -6,7 +6,7 @@ donc au couplage EXACTEMENT comme un bloc 100% natif.
 
 Montage : deux especes isothermes (electrons natif, ions HYBRIDE) avec des vitesses initiales
 differentes + une collision electrons<->ions. On compare a l'oracle ou les ions sont 100% natifs
-(adc.Model) : densite ET quantite de mouvement des deux blocs bit-identiques (< 1e-12) => les roles du
+(pops.Model) : densite ET quantite de mouvement des deux blocs bit-identiques (< 1e-12) => les roles du
 bloc hybride resolvent la friction au bon endroit. On verifie aussi que la collision agit reellement
 (la qte de mvt des ions differe du cas sans collision) et que la qte de mvt totale est conservee.
 Lance avec python3.
@@ -17,8 +17,8 @@ import tempfile
 
 import numpy as np
 
-import adc
-from adc import dsl
+import pops
+from pops import dsl
 from test_dsl_hybrid import build_iso_transport, CS2
 
 RATE = 3.0
@@ -38,31 +38,31 @@ def _states(n):
 def main():
     cxx = shutil.which("c++") or shutil.which("g++") or shutil.which("clang++")
     if not cxx or not os.path.isdir(INCLUDE):
-        print("skip  compilateur ou en-tetes adc absents")
+        print("skip  compilateur ou en-tetes pops absents")
         print("test_dsl_hybrid_coupling : OK (rien a compiler)")
         return
 
     n, L = 40, 1.0
     Ue, Ui = _states(n)
     Ueflat, Uiflat = Ue.reshape(-1).tolist(), Ui.reshape(-1).tolist()
-    spatial = adc.FiniteVolume(limiter="minmod", riemann="rusanov", variables="conservative")
+    spatial = pops.FiniteVolume(limiter="minmod", riemann="rusanov", variables="conservative")
 
-    spec_e = adc.Model(state=adc.FluidState("isothermal", cs2=CS2), transport=adc.IsothermalFlux(),
-                       source=adc.NoSource(), elliptic=adc.ChargeDensity(charge=-1.0))
-    spec_i = adc.Model(state=adc.FluidState("isothermal", cs2=CS2), transport=adc.IsothermalFlux(),
-                       source=adc.NoSource(), elliptic=adc.ChargeDensity(charge=1.0))
+    spec_e = pops.Model(state=pops.FluidState("isothermal", cs2=CS2), transport=pops.IsothermalFlux(),
+                       source=pops.NoSource(), elliptic=pops.ChargeDensity(charge=-1.0))
+    spec_i = pops.Model(state=pops.FluidState("isothermal", cs2=CS2), transport=pops.IsothermalFlux(),
+                       source=pops.NoSource(), elliptic=pops.ChargeDensity(charge=1.0))
 
     tmp = tempfile.mkdtemp()
     try:
         # Bloc ions HYBRIDE (production) : transport DSL isotherme + NoSource natif + ChargeDensity native.
-        co_i = adc.CompositeModel(transport=build_iso_transport(CS2).compile(),
-                                  source=adc.NoSource(),
-                                  elliptic=adc.ChargeDensity(charge=1.0)).compile(
+        co_i = pops.CompositeModel(transport=build_iso_transport(CS2).compile(),
+                                  source=pops.NoSource(),
+                                  elliptic=pops.ChargeDensity(charge=1.0)).compile(
             backend="production", so_path=os.path.join(tmp, "ions_hybrid.so"), include=INCLUDE)
 
         def run(add_ions, collision=True):
-            s = adc.System(n=n, L=L, periodic=True)
-            s.add_block("electrons", spec_e, spatial=spatial, time=adc.Explicit())
+            s = pops.System(n=n, L=L, periodic=True)
+            s.add_block("electrons", spec_e, spatial=spatial, time=pops.Explicit())
             add_ions(s)
             s.set_poisson(rhs="charge_density", solver="geometric_mg")
             if collision:
@@ -76,7 +76,7 @@ def main():
             return e, i
 
         hyb = lambda s: s.add_equation("ions", co_i, spatial=spatial)        # production : sans names=
-        nat = lambda s: s.add_block("ions", spec_i, spatial=spatial, time=adc.Explicit())
+        nat = lambda s: s.add_block("ions", spec_i, spatial=spatial, time=pops.Explicit())
 
         He, Hi = run(hyb, collision=True)
         Ne, Ni = run(nat, collision=True)

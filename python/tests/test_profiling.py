@@ -2,9 +2,9 @@
 """Spec 3 profiling (ADC-459): sim.enable_profiling() / profile_report() over a real System.
 
 Section (A) checks the binding surface and the enable/disable/report state machine on a bare
-System. Section (B) builds a real NATIVE block (no DSL compile, so it needs only the _adc module),
+System. Section (B) builds a real NATIVE block (no DSL compile, so it needs only the _pops module),
 steps it under profiling, and asserts the report carries the timed "step" phase + the step counter.
-It never fakes the engine -- it builds a real adc.System; it self-skips only if _adc/numpy is
+It never fakes the engine -- it builds a real pops.System; it self-skips only if _pops/numpy is
 unavailable, and otherwise fails loudly (a setup bug must not masquerade as a skip).
 """
 import sys
@@ -18,9 +18,9 @@ def _skip(msg):
 try:
     import numpy as np
 
-    import adc
+    import pops
 except Exception as exc:  # noqa: BLE001
-    _skip("adc/numpy unavailable: %s" % exc)
+    _skip("pops/numpy unavailable: %s" % exc)
 
 fails = 0
 
@@ -34,7 +34,7 @@ def chk(cond, label):
 
 # ---- (A) binding surface + enable/disable state machine (no compile needed) ----
 print("== (A) profiling API present + toggles ==")
-sim = adc.System(n=8, L=1.0, periodic=True)
+sim = pops.System(n=8, L=1.0, periodic=True)
 for name in ("enable_profiling", "disable_profiling", "is_profiling", "reset_profiling",
              "profile_report"):
     chk(hasattr(sim, name), "System exposes %s" % name)
@@ -48,17 +48,17 @@ chk(isinstance(sim.profile_report(), str), "profile_report returns a str")
 
 
 # ---- (B) end-to-end: a stepped NATIVE block records its "step" phase + counter ----
-# Native block (no install_program) -> needs only _adc, no compiler/Kokkos-root. So this runs
+# Native block (no install_program) -> needs only _pops, no compiler/Kokkos-root. So this runs
 # whenever section A ran; a failure here is a real bug, not a skip.
 print("== (B) profile_report carries the timed step phase ==")
 N = 16
-sim2 = adc.System(n=N, L=1.0, periodic=True)
+sim2 = pops.System(n=N, L=1.0, periodic=True)
 sim2.add_block("gas",
-               adc.Model(state=adc.FluidState("isothermal", cs2=0.5),
-                         transport=adc.IsothermalFlux(),
-                         source=adc.NoSource(),
-                         elliptic=adc.BackgroundDensity(alpha=1.0, n0=0.0)),
-               spatial=adc.FiniteVolume(limiter="none", riemann="rusanov"), time=adc.Explicit())
+               pops.Model(state=pops.FluidState("isothermal", cs2=0.5),
+                         transport=pops.IsothermalFlux(),
+                         source=pops.NoSource(),
+                         elliptic=pops.BackgroundDensity(alpha=1.0, n0=0.0)),
+               spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"), time=pops.Explicit())
 rho = np.ones((N, N), dtype=float)
 sim2.set_state("gas", np.stack([rho, 0.1 * rho, 0.0 * rho]))
 

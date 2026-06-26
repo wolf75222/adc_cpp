@@ -1,4 +1,4 @@
-# ADC macro-step sequence (real, as wired on master)
+# PoPS macro-step sequence (real, as wired on master)
 
 This is the ACTUAL order the engine runs, verified from `system_stepper.hpp`, `amr_runtime.hpp`, `condensed_schur_source_stepper.hpp`, and `system_field_solver.hpp`. Both paths are LIE (Godunov) splits, NOT Strang. `strang_step` (splitting.hpp:29) is dead code, never called by any orchestrator.
 

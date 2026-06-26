@@ -1,5 +1,5 @@
-[ 25%] Building CXX object python/CMakeFiles/_adc.dir/bindings.cpp.o
-[ 75%] Building CXX object python/CMakeFiles/_adc.dir/amr_system.cpp.o
-[ 75%] Building CXX object python/CMakeFiles/_adc.dir/system.cpp.o
-[100%] Linking CXX shared module adc/_adc.cpython-310-x86_64-linux-gnu.so
-[100%] Built target _adc
+[ 25%] Building CXX object python/CMakeFiles/_pops.dir/bindings.cpp.o
+[ 75%] Building CXX object python/CMakeFiles/_pops.dir/amr_system.cpp.o
+[ 75%] Building CXX object python/CMakeFiles/_pops.dir/system.cpp.o
+[100%] Linking CXX shared module pops/_pops.cpython-310-x86_64-linux-gnu.so
+[100%] Built target _pops

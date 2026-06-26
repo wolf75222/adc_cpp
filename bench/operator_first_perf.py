@@ -7,11 +7,11 @@ that lowers every heavy operation to the same adc_cpp primitives (flux, fill_bou
 no silent CPU fallback, no per-step Python.
 
 This benchmark times the SSPRK3 step loop for the SAME 2D Euler model two ways:
-  1. native     -- ``adc.Explicit(method="ssprk3")`` driving ``sim.step``;
-  2. program    -- ``adc.time.std.ssprk3`` -> ``compile_problem`` -> ``sim.install_program``,
+  1. native     -- ``pops.Explicit(method="ssprk3")`` driving ``sim.step``;
+  2. program    -- ``pops.time.std.ssprk3`` -> ``compile_problem`` -> ``sim.install_program``,
                    which lowers to the same three Shu-Osher stages.
 It reports ms/step for each and the generated/native ratio. Needs a compiler + Kokkos
-(``ADC_KOKKOS_ROOT``); prints a skip notice and exits 0 otherwise (run it on ROMEO).
+(``POPS_KOKKOS_ROOT``); prints a skip notice and exits 0 otherwise (run it on ROMEO).
 
 The model is pure Euler with NO elliptic coupling, so ``solve_fields`` is a no-op and the two
 paths do the same work per step. (On a field-coupled model the comparison would be apples-to-
@@ -25,11 +25,11 @@ import time
 try:
     import numpy as np
 
-    import adc
-    from adc import dsl
-    from adc import time as adctime
+    import pops
+    from pops import dsl
+    from pops import time as adctime
 except Exception as exc:  # noqa: BLE001
-    print("skip operator_first_perf (adc/numpy unavailable: %s)" % exc)
+    print("skip operator_first_perf (pops/numpy unavailable: %s)" % exc)
     sys.exit(0)
 
 GAMMA = 1.4
@@ -75,10 +75,10 @@ def initial_state(n):
 
 
 def native_sim():
-    sim = adc.System(n=N, L=1.0, periodic=True)
+    sim = pops.System(n=N, L=1.0, periodic=True)
     sim.add_equation("gas", euler_model("perf_native").compile(backend="production"),
-                     spatial=adc.FiniteVolume(limiter="none", riemann="rusanov"),
-                     time=adc.Explicit(method="ssprk3"))
+                     spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                     time=pops.Explicit(method="ssprk3"))
     sim.set_state("gas", initial_state(N).reshape(-1))
     return sim
 
@@ -87,11 +87,11 @@ def program_sim():
     m = euler_model("perf_program")
     prog = adctime.Program("ssprk3_perf")
     adctime.std.ssprk3(prog, "gas", sources=[], flux=True)
-    compiled = adc.compile_problem(model=m, time=prog)
-    sim = adc.System(n=N, L=1.0, periodic=True)
+    compiled = pops.compile_problem(model=m, time=prog)
+    sim = pops.System(n=N, L=1.0, periodic=True)
     sim.add_equation("gas", m.compile(backend="production"),
-                     spatial=adc.FiniteVolume(limiter="none", riemann="rusanov"),
-                     time=adc.Explicit(method="euler"))  # block; the installed Program drives step
+                     spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                     time=pops.Explicit(method="euler"))  # block; the installed Program drives step
     sim.set_state("gas", initial_state(N).reshape(-1))
     sim.install_program(compiled.so_path)
     return sim
@@ -107,8 +107,8 @@ def ms_per_step(sim):
 
 
 def main():
-    if not hasattr(adc.System(n=8, L=1.0, periodic=True), "install_program"):
-        print("skip operator_first_perf (_adc lacks install_program; rebuild _adc)")
+    if not hasattr(pops.System(n=8, L=1.0, periodic=True), "install_program"):
+        print("skip operator_first_perf (_pops lacks install_program; rebuild _pops)")
         return 0
     try:
         native = native_sim()

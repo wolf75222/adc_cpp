@@ -8,21 +8,21 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
 #SBATCH --time=00:30:00
-#SBATCH --job-name=adc_mpicuda_halo
-#SBATCH --output=/home/rmdraux/adc_perf_master_halo_20260608/logs/mpicuda_halo_%j.out
-#SBATCH --error=/home/rmdraux/adc_perf_master_halo_20260608/logs/mpicuda_halo_%j.err
+#SBATCH --job-name=pops_mpicuda_halo
+#SBATCH --output=/home/rmdraux/pops_perf_master_halo_20260608/logs/mpicuda_halo_%j.out
+#SBATCH --error=/home/rmdraux/pops_perf_master_halo_20260608/logs/mpicuda_halo_%j.err
 
 set -u
 
-BASE="${ADC_PERF_BASE:-$HOME/adc_perf_master_halo_20260608}"
+BASE="${POPS_PERF_BASE:-$HOME/pops_perf_master_halo_20260608}"
 SRC="$BASE/adc_cpp"
 RESULTS="$BASE/results"
 LOGS="$BASE/logs"
-KROOT="${ADC_KOKKOS_CUDA_ROOT:-$HOME/adc_gpu_p1/kinstall}"
+KROOT="${POPS_KOKKOS_CUDA_ROOT:-$HOME/pops_gpu_p1/kinstall}"
 NW="$KROOT/bin/nvcc_wrapper"
 mkdir -p "$RESULTS" "$LOGS"
 
-echo "=== ADC MPI+CUDA HALO job=$SLURM_JOBID node=$(hostname) date=$(date) ==="
+echo "=== PoPS MPI+CUDA HALO job=$SLURM_JOBID node=$(hostname) date=$(date) ==="
 
 module load cuda/12.6
 romeo_load_armgpu_env
@@ -45,10 +45,10 @@ git -C "$SRC" checkout --detach origin/master
 git -C "$SRC" checkout origin/feat/perf-campaign-bench -- \
   bench/CMakeLists.txt bench/scaling_step.cpp
 
-ADC_CPP_COMMIT="$(git -C "$SRC" rev-parse --short HEAD)"
-ADC_CPP_BRANCH="master+perf-harness"
-echo "ADC_CPP_COMMIT=$ADC_CPP_COMMIT"
-echo "ADC_CPP_BRANCH=$ADC_CPP_BRANCH"
+POPS_CPP_COMMIT="$(git -C "$SRC" rev-parse --short HEAD)"
+POPS_CPP_BRANCH="master+perf-harness"
+echo "POPS_CPP_COMMIT=$POPS_CPP_COMMIT"
+echo "POPS_CPP_BRANCH=$POPS_CPP_BRANCH"
 git -C "$SRC" log -1 --oneline
 git -C "$SRC" diff --stat
 
@@ -60,10 +60,10 @@ fi
 BUILD="$BASE/build_mpicuda_halo"
 rm -rf "$BUILD"
 cmake -S "$SRC" -B "$BUILD" \
-  -DADC_USE_MPI=ON -DADC_USE_KOKKOS=ON -DKokkos_ROOT="$KROOT" \
+  -DPOPS_USE_MPI=ON -DPOPS_USE_KOKKOS=ON -DKokkos_ROOT="$KROOT" \
   -DCMAKE_CXX_COMPILER="$NW" \
-  -DADC_BUILD_BENCH=ON -DADC_BUILD_TESTS=OFF -DCMAKE_BUILD_TYPE=Release \
-  -DADC_BUILD_SHA="$ADC_CPP_COMMIT" -DADC_BUILD_BRANCH="$ADC_CPP_BRANCH" \
+  -DPOPS_BUILD_BENCH=ON -DPOPS_BUILD_TESTS=OFF -DCMAKE_BUILD_TYPE=Release \
+  -DPOPS_BUILD_SHA="$POPS_CPP_COMMIT" -DPOPS_BUILD_BRANCH="$POPS_CPP_BRANCH" \
   > "$LOGS/cfg_${SLURM_JOBID}.log" 2>&1
 rc=$?
 echo "CONFIG rc=$rc"
@@ -74,7 +74,7 @@ rc=$?
 echo "BUILD rc=$rc"
 [ $rc -eq 0 ] || { tail -160 "$LOGS/build_${SLURM_JOBID}.log"; exit $rc; }
 
-OUT="$RESULTS/mpicuda_halo_${ADC_CPP_COMMIT}_${SLURM_JOBID}.jsonl"
+OUT="$RESULTS/mpicuda_halo_${POPS_CPP_COMMIT}_${SLURM_JOBID}.jsonl"
 : > "$OUT"
 
 run_case() {
@@ -90,7 +90,7 @@ run_case() {
   if [ $rc -eq 0 ]; then
     tail -1 "$log" | tee -a "$OUT"
   else
-    echo "{\"schema\":\"adc_perf_v1\",\"front\":\"cpp_scaling\",\"adc_cpp_sha\":\"$ADC_CPP_COMMIT\",\"adc_cpp_branch\":\"$ADC_CPP_BRANCH\",\"backend\":\"mpi-cuda\",\"machine\":\"romeo-gh200\",\"ranks\":$np,\"workload\":\"transport\",\"scaling\":\"$scaling\",\"nx\":$n,\"status\":\"failed\",\"rc\":$rc}" | tee -a "$OUT"
+    echo "{\"schema\":\"pops_perf_v1\",\"front\":\"cpp_scaling\",\"pops_cpp_sha\":\"$POPS_CPP_COMMIT\",\"pops_cpp_branch\":\"$POPS_CPP_BRANCH\",\"backend\":\"mpi-cuda\",\"machine\":\"romeo-gh200\",\"ranks\":$np,\"workload\":\"transport\",\"scaling\":\"$scaling\",\"nx\":$n,\"status\":\"failed\",\"rc\":$rc}" | tee -a "$OUT"
     tail -80 "$log"
   fi
 }

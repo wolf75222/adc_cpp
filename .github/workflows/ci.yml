@@ -2,11 +2,11 @@ name: CI
 
 # adc_cpp est KOKKOS-ONLY : Kokkos est le seul backend on-node (Serial / OpenMP / Cuda selon
 # l'install Kokkos). Il n'existe plus de build non-Kokkos -- TOUS les jobs configurent avec
-# -DADC_USE_KOKKOS=ON. Topologie (ADC-171) :
+# -DPOPS_USE_KOKKOS=ON. Topologie (ADC-171) :
 #  - changes : routage par chemins (dorny/paths-filter). Calcule deux drapeaux cpp / python a
 #    partir des fichiers modifies pour ne lancer que le gate utile sur une pull_request.
 #  - gate-cpp + gate-python (sur pull_request, gate OBLIGATOIRE) : Kokkos SERIAL, scindes et
-#    tournant EN PARALLELE. gate-cpp = ctest C++ ; gate-python = module _adc + suite python/tests.
+#    tournant EN PARALLELE. gate-cpp = ctest C++ ; gate-python = module _pops + suite python/tests.
 #    Avant ADC-171 c'etait UN seul job sequentiel (build C++ -> module Python -> tests Python) ;
 #    le split + jobs 4 + mold raccourcissent le chemin critique, et le routage epargne le gate
 #    inutile (une PR pur-Python ne paie que gate-python). Rapides grace aux caches (Kokkos
@@ -203,11 +203,11 @@ jobs:
 
       # Flags du build : CMakePresets.json (preset ci-kokkos) = SOURCE UNIQUE DE VERITE, partagee
       # avec le dev local ; Kokkos_ROOT vient de $KOKKOS_PREFIX (install en cache ci-dessus) et
-      # ccache est auto-detecte par le CMakeLists (ADC_USE_CCACHE). Le preset pose aussi
-      # ADC_TESTS_FAST_O0=ON : sous Kokkos, l'inlining -O3 des foncteurs device dans les ~242
+      # ccache est auto-detecte par le CMakeLists (POPS_USE_CCACHE). Le preset pose aussi
+      # POPS_TESTS_FAST_O0=ON : sous Kokkos, l'inlining -O3 des foncteurs device dans les ~242
       # cibles de test rendait le build du gate enorme. Les tests sont des controles de correction
-      # sur grilles minuscules -> compiles a -O0 (build rapide ; la lib de production et _adc restent
-      # a -O3) ; le pool Ninja adc_heavy_tu=1 serialise en plus les TU system.cpp et borne la RAM
+      # sur grilles minuscules -> compiles a -O0 (build rapide ; la lib de production et _pops restent
+      # a -O3) ; le pool Ninja pops_heavy_tu=1 serialise en plus les TU system.cpp et borne la RAM
       # (cf. tests/CMakeLists.txt). Parallelisme jobs: 4 (runner public = 4 vCPU) dans les presets.
       # CMAKE_LINKER_TYPE=MOLD : mold pose en -D ICI uniquement (hors presets, cf. extra-apt mold).
       # SECONDS chronometre configure+build puis tests, ecrits dans GITHUB_STEP_SUMMARY (baseline ADC-171).
@@ -242,14 +242,14 @@ jobs:
         run: ccache -s
 
   # GATE PYTHON (ADC-171). Ex-moitie Python du job sequentiel build-and-test : construit le module
-  # _adc AVEC Kokkos puis exerce la suite python/tests. Tourne EN PARALLELE de gate-cpp.
+  # _pops AVEC Kokkos puis exerce la suite python/tests. Tourne EN PARALLELE de gate-cpp.
   gate-python:
     # ADC-366: sharded into N legs (matrix.shard) so the ~18-19 min Python suite runs ~1/N per leg in
     # parallel. The job ID stays `gate-python`, so the required `gate` aggregator (needs: gate-python)
     # rolls the WHOLE matrix up to ONE result -- branch protection (pinned to `gate`) is unchanged; the
     # individual shard legs are NOT required checks. fail-fast:false so one red shard does not cancel the
     # others (full red/green signal, no cancel-cascade that hides which shard failed). Each shard rebuilds
-    # _adc ccache-hot (the 38 DSL tests compile loaders at runtime, so a prebuilt artifact would not
+    # _pops ccache-hot (the 38 DSL tests compile loaders at runtime, so a prebuilt artifact would not
     # suffice; the shared ccache + Kokkos cache make the per-shard rebuild cheap).
     name: ubuntu-latest / Kokkos Serial (Python) shard ${{ matrix.shard }}
     runs-on: ubuntu-latest
@@ -311,12 +311,12 @@ jobs:
             ccache-${{ runner.os }}-python-shard${{ matrix.shard }}-refs/heads/master-
             ccache-${{ runner.os }}-python-
 
-      # Les bindings de la lib (module `adc` : System + facades) vivent ICI. On construit l'extension
-      # _adc AVEC Kokkos (preset ci-kokkos-python, jobs: 4 ; CMAKE_LINKER_TYPE=MOLD en -D ici uniquement)
+      # Les bindings de la lib (module `pops` : System + facades) vivent ICI. On construit l'extension
+      # _pops AVEC Kokkos (preset ci-kokkos-python, jobs: 4 ; CMAKE_LINKER_TYPE=MOLD en -D ici uniquement)
       # puis on exerce TOUTE la suite python/tests/test_*.py par AUTO-DECOUVERTE (find ... | xargs -P 4, runners publics 4 vCPU) :
       # la liste ne peut plus se perimer et un nouveau test livre par une PR soeur est pris automatiquement.
       # SECONDS chronometre configure+build puis tests, ecrits dans GITHUB_STEP_SUMMARY (baseline ADC-171).
-      - name: Build + test module Python `adc` (Kokkos Serial)
+      - name: Build + test module Python `pops` (Kokkos Serial)
         run: |
           pip install --upgrade pip numpy pytest
           SECONDS=0
@@ -330,9 +330,9 @@ jobs:
           build_s=$SECONDS
           export PYTHONPATH="$PWD/build-kokkos-py/python"
           # adc_cpp est Kokkos-only : les tests DSL qui compilent un loader/.so (aot, production, ABI)
-          # incluent les en-tetes adc (-> for_each, #error sans Kokkos). Ils lisent le Kokkos a utiliser
-          # via Kokkos_ROOT / ADC_KOKKOS_ROOT : on pointe le MEME Kokkos Serial que le module _adc.
-          export Kokkos_ROOT="${KOKKOS_PREFIX}" ADC_KOKKOS_ROOT="${KOKKOS_PREFIX}"
+          # incluent les en-tetes pops (-> for_each, #error sans Kokkos). Ils lisent le Kokkos a utiliser
+          # via Kokkos_ROOT / POPS_KOKKOS_ROOT : on pointe le MEME Kokkos Serial que le module _pops.
+          export Kokkos_ROOT="${KOKKOS_PREFIX}" POPS_KOKKOS_ROOT="${KOKKOS_PREFIX}"
           SECONDS=0
           # ADC-366 instrumented + sharded runner. SHARD_INDEX/SHARD_TOTAL default to 0/1 (run EVERY file,
           # identical to the old behaviour) when unset. The union of the 3 shards (index%total) is the full
@@ -364,7 +364,7 @@ jobs:
           echo "::endgroup::"
           { printf '['; awk -F'\t' 'NR>1{printf ","} {printf "{\"file\":\"%s\",\"seconds\":%s,\"rc\":%s}",$1,$2,$3}' "$timings/timings.sorted.tsv"; printf ']\n'; } > "$timings/timings.json"
           {
-            echo "### gate-python shard ${SHARD_INDEX}/${SHARD_TOTAL} (module _adc, Kokkos Serial)"
+            echo "### gate-python shard ${SHARD_INDEX}/${SHARD_TOTAL} (module _pops, Kokkos Serial)"
             echo ""
             echo "| Phase | Duree (s) |"
             echo "| --- | --- |"
@@ -587,14 +587,14 @@ jobs:
           python-version: '3.12'
           cache: pip
 
-      # GARDE-FOU ABI std (regression GH200). Sous Kokkos le module _adc est compile en C++20
-      # (ADC_CXX_STD=20, CUDA 12.x sans -std=c++23) tandis que le DSL backend="production" figeait
+      # GARDE-FOU ABI std (regression GH200). Sous Kokkos le module _pops est compile en C++20
+      # (POPS_CXX_STD=20, CUDA 12.x sans -std=c++23) tandis que le DSL backend="production" figeait
       # le std du modele natif a c++23 -> cles d'ABI divergentes -> add_native_block rejetait tout
       # bloc natif. Aucun job CI ne couvrait ce chemin (le modele production est compile au RUNTIME,
       # pas en CI). On construit donc ICI le module Python AVEC Kokkos (loader c++20) puis on exerce
       # les tests qui compilent un modele production et appellent add_native_block : ils echoueraient
       # avec l'ancien defaut c++23, ils passent avec le std aligne sur le loader.
-      - name: Build module Python `adc` (backend Kokkos OpenMP)
+      - name: Build module Python `pops` (backend Kokkos OpenMP)
         env:
           CCACHE_DIR: ${{ github.workspace }}/.ccache
           CCACHE_MAXSIZE: 2G
@@ -607,17 +607,17 @@ jobs:
         env:
           OMP_NUM_THREADS: "2"
           OMP_PROC_BIND: "false"
-          # PARITE KOKKOS du loader runtime : le module _adc est compile AVEC Kokkos ; sans cette
-          # variable, dsl.py compile le loader SANS -DADC_HAS_KOKKOS -> cle d'ABI kokkos=0 vs
+          # PARITE KOKKOS du loader runtime : le module _pops est compile AVEC Kokkos ; sans cette
+          # variable, dsl.py compile le loader SANS -DPOPS_HAS_KOKKOS -> cle d'ABI kokkos=0 vs
           # kokkos=1 du module -> rejet explicite (jeton ajoute expres : cette divergence etait
           # auparavant un fallback serie MUET). Le step suit desormais la regle documentee partout :
-          # exporter ADC_KOKKOS_ROOT = la racine Kokkos du build.
-          ADC_KOKKOS_ROOT: ${{ env.KOKKOS_PREFIX }}
+          # exporter POPS_KOKKOS_ROOT = la racine Kokkos du build.
+          POPS_KOKKOS_ROOT: ${{ env.KOKKOS_PREFIX }}
         run: |
           export PYTHONPATH="$PWD/build-kokkos-py/python"
-          # Kokkos-only : ces tests compilent un loader/.so qui inclut les en-tetes adc (-> for_each).
-          # Ils lisent le Kokkos via Kokkos_ROOT / ADC_KOKKOS_ROOT : MEME install Kokkos OpenMP que _adc.
-          export Kokkos_ROOT="${KOKKOS_PREFIX}" ADC_KOKKOS_ROOT="${KOKKOS_PREFIX}"
+          # Kokkos-only : ces tests compilent un loader/.so qui inclut les en-tetes pops (-> for_each).
+          # Ils lisent le Kokkos via Kokkos_ROOT / POPS_KOKKOS_ROOT : MEME install Kokkos OpenMP que _pops.
+          export Kokkos_ROOT="${KOKKOS_PREFIX}" POPS_KOKKOS_ROOT="${KOKKOS_PREFIX}"
           # Le test cle de regression + les suites production qui compilent un modele au runtime et
           # le branchent par add_native_block (System et AMR). Sous Kokkos, loader = c++20.
           # Le teardown est redevenu STRICT : le SIGABRT post-succes de test_dsl_production_amr
@@ -641,7 +641,7 @@ jobs:
     # COMPILE-TEST du harnais bench/ (jamais execute : sortie chronometree non deterministe).
     # bench/ n'est configure par aucun autre job : sans cette etape, un changement de signature
     # dans le coeur ou dans python/amr_system.cpp (que scaling_amr recompile) peut le casser
-    # sans detection jusqu'au prochain ADC_BUILD_BENCH=ON manuel. Suite complete uniquement.
+    # sans detection jusqu'au prochain POPS_BUILD_BENCH=ON manuel. Suite complete uniquement.
     if: needs.set-mode.outputs.full == 'true'
 
     env:

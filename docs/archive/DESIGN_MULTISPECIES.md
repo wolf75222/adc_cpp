@@ -1,4 +1,4 @@
-# adc : Multi-species milestone : from `PhysicalModel` to `CoupledSystem`
+# pops : Multi-species milestone : from `PhysicalModel` to `CoupledSystem`
 
 *Design document for the whiteboard session (with Sacha). Updates the roadmap
 after the supervisor's remarks and the increments already done.*
@@ -126,34 +126,34 @@ alongside, without breaking the historical API.
 Python **configures** the system; the cell / AMR / MPI / GPU loops stay in C++.
 
 ```python
-import adc
+import pops
 
-mesh = adc.Mesh2D(nx=512, ny=512, xlim=(0,1), ylim=(0,1),
-                  amr=adc.AMR(levels=3, ratio=2))
-sim  = adc.Simulation(mesh, backend="kokkos")   # cpu / openmp / mpi / kokkos
+mesh = pops.Mesh2D(nx=512, ny=512, xlim=(0,1), ylim=(0,1),
+                  amr=pops.AMR(levels=3, ratio=2))
+sim  = pops.Simulation(mesh, backend="kokkos")   # cpu / openmp / mpi / kokkos
 
 sim.add_equation(name="electrons",
-    model=adc.models.ElectronEuler(charge=-1, mass=1, gamma=5/3),
-    spatial=adc.FiniteVolume(reconstruction="vanleer", flux="hllc"),
-    time=adc.Implicit(scheme="imex", substeps=10))
+    model=pops.models.ElectronEuler(charge=-1, mass=1, gamma=5/3),
+    spatial=pops.FiniteVolume(reconstruction="vanleer", flux="hllc"),
+    time=pops.Implicit(scheme="imex", substeps=10))
 
 sim.add_equation(name="ions",
-    model=adc.models.IonEuler(charge=+1, mass=1836, gamma=5/3),
-    spatial=adc.FiniteVolume(reconstruction="minmod", flux="rusanov"),
-    time=adc.Explicit(scheme="ssprk2", substeps=1))
+    model=pops.models.IonEuler(charge=+1, mass=1836, gamma=5/3),
+    spatial=pops.FiniteVolume(reconstruction="minmod", flux="rusanov"),
+    time=pops.Explicit(scheme="ssprk2", substeps=1))
 
 sim.add_poisson(unknown="phi",
-    rhs=adc.ChargeDensity(positive=["ions"], negative=["electrons"]),
-    solver=adc.GeometricMG(tol=1e-10, max_iter=200))
+    rhs=pops.ChargeDensity(positive=["ions"], negative=["electrons"]),
+    solver=pops.GeometricMG(tol=1e-10, max_iter=200))
 
 sim.run(t_end=1.0, cfl=0.4,
-        output=adc.Output(path="runs/two_species", every=20,
+        output=pops.Output(path="runs/two_species", every=20,
                           fields=["electrons.rho", "ions.rho", "phi"]))
 ```
 
 The strings (`flux="hllc"`, `time="imex"`) **select compiled C++ bricks**;
 they are never cell-by-cell callbacks (slow, not GPU/MPI-friendly). An
-advanced user writes their `PhysicalModel` in C++ (`StateVec<N>`, `ADC_HD`) and then exposes
+advanced user writes their `PhysicalModel` in C++ (`StateVec<N>`, `POPS_HD`) and then exposes
 it to Python, always in composition, never in a Python inner loop.
 
 ## 5. Current state vs target
@@ -173,7 +173,7 @@ it to Python, always in composition, never in a Python inner loop.
 All pushed, all green (adc_cpp 30/30, adc_cases 44/44; MPI 7+7):
 
 1. **Core/applications split**: `adc_cpp` = generic engine (zero model), `adc_cases`
-   = models/facades/examples/Python, via FetchContent (`adc::adc`).
+   = models/facades/examples/Python, via FetchContent (`pops::pops`).
 2. **`SpatialDiscretisation<Limiter, NumericalFlux>`** + tags `SSPRK2`/`SSPRK3` +
    `Coupler::step<Disc, TimeInteg, Policy>`: spatial discretization and time
    integrator **selectable** (the future "per block" will plug into it).
@@ -240,12 +240,12 @@ all cells). The cell hot path stays in C++.
 
 ## 8. Summary (whiteboard sentence)
 
-> `adc` already knows how to take a **local physical law** and run it on a mesh
+> `pops` already knows how to take a **local physical law** and run it on a mesh
 > with Poisson, AMR, MPI and GPU. What is missing to become a **solver-building
 > library** is a level of **multi-block assembly**: several
 > states, several models, several numerical methods, several time steps, and
 > global couplings in Poisson and in the sources.
 >
 > The `PhysicalModel` describes a local equation. The `CoupledSystem` describes a physical
-> system. The `Scheduler` describes the execution order. The `adc` core guarantees that these
+> system. The `Scheduler` describes the execution order. The `pops` core guarantees that these
 > choices stay compatible with AMR / MPI / GPU.

@@ -1,21 +1,21 @@
 // AmrHierarchy : construction du niveau grossier, ajout d'un niveau fin imbrique,
 // et interpolation grossier->fin sur la region raffinee.
 
-#include <adc/amr/hierarchy/amr_hierarchy.hpp>
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/execution/for_each.hpp>
-#include <adc/mesh/layout/refinement.hpp>
+#include <pops/amr/hierarchy/amr_hierarchy.hpp>
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/execution/for_each.hpp>
+#include <pops/mesh/layout/refinement.hpp>
 
-#include "test_harness.hpp"  // adc::test::Checker (compteur + assertion partages)
+#include "test_harness.hpp"  // pops::test::Checker (compteur + assertion partages)
 
 #include <cmath>
 #include <cstdio>
 #include <vector>
 
-using namespace adc;
+using namespace pops;
 
 int main() {
-  adc::test::Checker chk;  // style terse : n'imprime que les echecs (FAIL <libelle>)
+  pops::test::Checker chk;  // style terse : n'imprime que les echecs (FAIL <libelle>)
   auto close = [](Real x, Real y) { return std::fabs(x - y) < 1e-9; };  // tolerance absolue locale
 
   Box2D cdom = Box2D::from_extents(8, 8);  // [0..7]

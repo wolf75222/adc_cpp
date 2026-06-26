@@ -4,19 +4,19 @@
 // device) + le chemin MPI cross-rang (OpenMPI CUDA-aware). Avec np>1 sur plusieurs GH200, les ghosts
 // viennent de fabs distants -> valide le transfert device-to-device. device_fence() avant la lecture
 // hote (kernels async + MPI). Invariant au nombre de rangs : OK en np=1/2/4.
-#include <adc/mesh/index/box2d.hpp>
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/boundary/fill_boundary.hpp>
-#include <adc/mesh/execution/for_each.hpp>
-#include <adc/mesh/storage/multifab.hpp>
-#include <adc/parallel/comm.hpp>
-#include <adc/parallel/load_balance.hpp>
+#include <pops/mesh/index/box2d.hpp>
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/boundary/fill_boundary.hpp>
+#include <pops/mesh/execution/for_each.hpp>
+#include <pops/mesh/storage/multifab.hpp>
+#include <pops/parallel/comm.hpp>
+#include <pops/parallel/load_balance.hpp>
 
 #include <Kokkos_Core.hpp>
 #include <cmath>
 #include <cstdio>
 
-using namespace adc;
+using namespace pops;
 
 int main(int argc, char** argv) {
   comm_init(&argc, &argv);
@@ -57,7 +57,7 @@ int main(int argc, char** argv) {
               ++fails;
     }
     gfails = all_reduce_sum(fails);
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
     const char* space = Kokkos::DefaultExecutionSpace::name();
 #else
     const char* space = "Serial(host)";

@@ -23,21 +23,21 @@
 //
 // Independant du backend : Kokkos Serial (CI, CPU) et Cuda (GH200). Le script ROMEO relance le MEME
 // binaire en np=1/2/4 et diff cmax (bit-identique attendu).
-#include <adc/physics/bricks/bricks.hpp>         // CompositeModel, GravityForce, GravityCoupling
-#include <adc/physics/fluids/euler.hpp>          // Euler
-#include <adc/runtime/builders/compiled/amr_dsl_block.hpp>  // add_compiled_model(AmrSystem, ...)
-#include <adc/runtime/amr_system.hpp>
-#include <adc/parallel/comm.hpp>
+#include <pops/physics/bricks/bricks.hpp>         // CompositeModel, GravityForce, GravityCoupling
+#include <pops/physics/fluids/euler.hpp>          // Euler
+#include <pops/runtime/builders/compiled/amr_dsl_block.hpp>  // add_compiled_model(AmrSystem, ...)
+#include <pops/runtime/amr_system.hpp>
+#include <pops/parallel/comm.hpp>
 
 #include <cmath>
 #include <cstdio>
 #include <vector>
 
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
 #include <Kokkos_Core.hpp>
 #endif
 
-using namespace adc;
+using namespace pops;
 using Model = CompositeModel<Euler, GravityForce, GravityCoupling>;
 
 static std::vector<double> four_bubbles(int n) {
@@ -86,7 +86,7 @@ static Result run(int n, int nsteps, double dt, bool distribute) {
   R.m0 = sys.mass();
   for (int s = 0; s < nsteps; ++s)
     sys.step(dt);
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   Kokkos::fence();
 #endif
   R.dens = sys.density();
@@ -97,7 +97,7 @@ static Result run(int n, int nsteps, double dt, bool distribute) {
 
 int main(int argc, char** argv) {
   comm_init(&argc, &argv);
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   Kokkos::ScopeGuard guard(argc, argv);
 #else
   (void)argc;
@@ -138,7 +138,7 @@ int main(int argc, char** argv) {
         "AMRDIST np=%d distribute_npf=%d replicated_npf=%d | cmax=%.17e | "
         "dist_vs_repl_dmax=%.3e | cmax_crossrank_spread=%.3e\n",
         np, dis.npf, rep.npf, cmax, dmax_g, cmax_spread);
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
     const char* space = Kokkos::DefaultExecutionSpace::name();
 #else
     const char* space = "Serial(host)";

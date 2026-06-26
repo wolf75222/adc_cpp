@@ -22,7 +22,7 @@ import sys
 
 import numpy as np
 
-import adc
+import pops
 from test_strang_split import INCLUDE, build_sim, isothermal_magnetized, strang
 
 fails = 0
@@ -45,16 +45,16 @@ def raises(fn):
 
 # --- (a) API (sans compilateur) --------------------------------------------------------------------
 print("== (a) set_gauss_policy : restart/evolve acceptes, inconnu rejete ==")
-s = adc.System(n=16)
+s = pops.System(n=16)
 s.set_gauss_policy("restart")
 s.set_gauss_policy("evolve")
 chk(True, "(a) set_gauss_policy('restart'/'evolve') acceptes")
 chk(raises(lambda: s.set_gauss_policy("rejoindre")), "(a) politique inconnue rejetee")
 
-# --- (b)/(c) comportement (necessite un compilateur + en-tetes adc) --------------------------------
+# --- (b)/(c) comportement (necessite un compilateur + en-tetes pops) --------------------------------
 cxx = shutil.which("c++") or shutil.which("g++") or shutil.which("clang++")
 if not cxx or not os.path.isdir(INCLUDE):
-    print("skip  (b)/(c) : compilateur ou en-tetes adc absents")
+    print("skip  (b)/(c) : compilateur ou en-tetes pops absents")
     print("test_gauss_policy : OK (API verte)" if fails == 0 else f"{fails} ECHEC(S)")
     sys.exit(0 if fails == 0 else 1)
 

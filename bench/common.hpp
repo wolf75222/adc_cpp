@@ -3,12 +3,12 @@
 /// @file
 /// @brief Helpers partages des harnais de bench/profilage (chronometrage, percentiles, argparse).
 ///
-/// Couche : `bench/` (hors `include/adc` ; harnais de MESURE, hors du build par defaut, jamais en CI).
+/// Couche : `bench/` (hors `include/pops` ; harnais de MESURE, hors du build par defaut, jamais en CI).
 /// Role : factoriser les briques copiees a l'identique dans profile_step / frontend_cpp /
 ///   profile_transport_mbox / scaling_step / scaling_amr -- le chronometre `timed` (avec fences
 ///   device autour de la phase), le `percentile` interpole, l'accumulateur `PhaseTimers` par phase,
 ///   et la lambda d'argparse `eat`.
-/// Contrat : header-only, zero dependance externe HORMIS `adc/core/kokkos_env.hpp` pour `device_fence()`
+/// Contrat : header-only, zero dependance externe HORMIS `pops/core/kokkos_env.hpp` pour `device_fence()`
 ///   (deja tire transitivement par tous les harnais : c'est le seam qui porte le backend Kokkos/serie).
 ///   Les harnais restent des main() autonomes ; ce header ne fournit que les briques de mesure.
 ///
@@ -26,7 +26,7 @@
 ///   dette CONNUE, a resorber aux prochaines passes en pointant vers les briques d'ici. Aucun
 ///   changement de comportement attendu a chaque migration (meme sortie chronometree, meme JSON).
 
-#include <adc/core/foundation/kokkos_env.hpp>  // device_fence (seam backend : no-op serie/OpenMP, fence sous Cuda)
+#include <pops/core/foundation/kokkos_env.hpp>  // device_fence (seam backend : no-op serie/OpenMP, fence sous Cuda)
 
 #include <algorithm>
 #include <chrono>
@@ -36,7 +36,7 @@
 #include <type_traits>
 #include <vector>
 
-namespace adc::bench {
+namespace pops::bench {
 
 /// Horloge monotone des harnais (insensible aux ajustements d'horloge murale).
 using Clock = std::chrono::steady_clock;
@@ -115,4 +115,4 @@ bool eat(int argc, char** argv, int& a, const char* key, T& out) {
   return false;
 }
 
-}  // namespace adc::bench
+}  // namespace pops::bench

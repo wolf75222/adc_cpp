@@ -25,14 +25,14 @@ tests/test_positivity_floor.cpp; that is out of scope of the floor):
 The guarantee is face / C/F-ghost-mean Density positivity only (order-1 fallback), NOT updated-mean
 positivity: the coarse MEAN density can still dip negative under aggressive CFL (parity with System).
 The compiled .so AMR path REJECTS positivity_floor > 0 (flat ABI, no floor slot) -- covered by the
-facade guards (python/adc/__init__.py, python/amr_system.cpp) and the C++ no-Density reject in
+facade guards (python/pops/__init__.py, python/amr_system.cpp) and the C++ no-Density reject in
 tests/test_amr_positivity_floor.cpp; not re-tested here to keep this test compiler-free.
 """
 import sys
 
 import numpy as np
 
-import adc
+import pops
 
 CS2 = 0.25       # isothermal sound speed^2 (p = cs2 rho): flooring rho floors the pressure
 n = 48
@@ -49,8 +49,8 @@ def chk(cond, label):
 
 def iso_spec():
     """Native isothermal block (3 var, Density role at component 0). No compiler required."""
-    return adc.Model(state=adc.FluidState("isothermal", cs2=CS2), transport=adc.IsothermalFlux(),
-                     source=adc.NoSource(), elliptic=adc.BackgroundDensity(alpha=0.0, n0=0.0))
+    return pops.Model(state=pops.FluidState("isothermal", cs2=CS2), transport=pops.IsothermalFlux(),
+                     source=pops.NoSource(), elliptic=pops.BackgroundDensity(alpha=0.0, n0=0.0))
 
 
 def spike_state():
@@ -77,11 +77,11 @@ def smooth_state():
 
 
 def build(pf, regrid_every=0, refine=1e30):
-    s = adc.AmrSystem(n=n, L=1.0, periodic=True, regrid_every=regrid_every)
+    s = pops.AmrSystem(n=n, L=1.0, periodic=True, regrid_every=regrid_every)
     s.set_refinement(refine)
     s.add_block("gas", iso_spec(),
-                spatial=adc.Spatial(limiter="weno5", flux="rusanov", positivity_floor=pf),
-                time=adc.Explicit())
+                spatial=pops.Spatial(limiter="weno5", flux="rusanov", positivity_floor=pf),
+                time=pops.Explicit())
     return s
 
 
@@ -141,12 +141,12 @@ chk(s_rg.n_patches() >= 1, "fine patch created (C/F interface exercised)")
 print("== (4) multi-block: positivity_floor accepted + threaded through dispatch_amr_block ==")
 band = np.full((n, n), 1e-6)
 band[:, n // 3:2 * n // 3] = 1.0  # contrast-1e6 band (Density role, component 0)
-sm = adc.AmrSystem(n=n, L=1.0, periodic=True)
+sm = pops.AmrSystem(n=n, L=1.0, periodic=True)
 sm.set_refinement(1e30)
 sm.add_block("a", iso_spec(),
-             spatial=adc.Spatial(limiter="weno5", flux="rusanov", positivity_floor=1e-8))
+             spatial=pops.Spatial(limiter="weno5", flux="rusanov", positivity_floor=1e-8))
 sm.add_block("b", iso_spec(),
-             spatial=adc.Spatial(limiter="weno5", flux="rusanov", positivity_floor=1e-8))
+             spatial=pops.Spatial(limiter="weno5", flux="rusanov", positivity_floor=1e-8))
 sm.set_density("a", band.ravel().copy())
 sm.set_density("b", band.ravel().copy())
 step_n(sm, 5)

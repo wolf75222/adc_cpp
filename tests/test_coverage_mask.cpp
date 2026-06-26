@@ -4,12 +4,12 @@
 // le double-reflux d'un joint fin-fin ; son integration AMR est couverte par les tests de
 // reflux (np=1/2/4 bit-identiques), ici on fige les mecaniques locales.
 
-#include <adc/numerics/time/amr/reflux/amr_reflux_mf.hpp>  // adc::CoverageMask
-#include <adc/mesh/index/box2d.hpp>
+#include <pops/numerics/time/amr/reflux/amr_reflux_mf.hpp>  // pops::CoverageMask
+#include <pops/mesh/index/box2d.hpp>
 
 #include <cstdio>
 
-using namespace adc;
+using namespace pops;
 
 int main() {
   int fails = 0;

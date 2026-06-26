@@ -1,22 +1,22 @@
-// ADC-291: the C++ canonical aux name<->component table (adc/core/aux_names.hpp) is the mirror of
-// AUX_CANONICAL (python/adc/dsl.py), generated from the SAME single source as adc::Aux (the base
-// contract phi/grad_x/grad_y + the ADC_AUX_FIELDS X-macro B_z/T_e). It lets a C++ caller resolve a
+// ADC-291: the C++ canonical aux name<->component table (pops/core/aux_names.hpp) is the mirror of
+// AUX_CANONICAL (python/pops/dsl.py), generated from the SAME single source as pops::Aux (the base
+// contract phi/grad_x/grad_y + the POPS_AUX_FIELDS X-macro B_z/T_e). It lets a C++ caller resolve a
 // canonical aux field by name WITHOUT the Python facade. This test pins the C++ side; the
 // C++<->Python coherence is pinned by python/tests/test_capabilities.py.
 
-#include <adc/core/state/aux_names.hpp>
-#include <adc/core/state/state.hpp>
+#include <pops/core/state/aux_names.hpp>
+#include <pops/core/state/state.hpp>
 
 #include <cstdio>
 #include <string_view>
 
-using namespace adc;
+using namespace pops;
 
 // Compile-time coherence: the table is constexpr, so the canonical indices are pinned at build time
-// (a drift from ADC_AUX_FIELDS / the base contract is a hard compile error, not a runtime surprise).
+// (a drift from POPS_AUX_FIELDS / the base contract is a hard compile error, not a runtime surprise).
 static_assert(aux_canonical_index("phi") == 0, "phi must be aux component 0");
-static_assert(aux_canonical_index("B_z") == 3, "B_z must be aux component 3 (ADC_AUX_FIELDS)");
-static_assert(aux_canonical_index("T_e") == 4, "T_e must be aux component 4 (ADC_AUX_FIELDS)");
+static_assert(aux_canonical_index("B_z") == 3, "B_z must be aux component 3 (POPS_AUX_FIELDS)");
+static_assert(aux_canonical_index("T_e") == 4, "T_e must be aux component 4 (POPS_AUX_FIELDS)");
 static_assert(aux_canonical_index("kappa") == -1, "a model-named field is not canonical");
 static_assert(kAuxMaxComps == kAuxNamedBase + kAuxMaxExtra, "kAuxMaxComps = base + max extras");
 

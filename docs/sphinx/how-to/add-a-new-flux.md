@@ -11,10 +11,10 @@ This page assumes you already have a model and a `System`. If not, start with th
 
 ## Choose a flux
 
-Pass the flux through `adc.FiniteVolume`, where the numerical flux is named `riemann`:
+Pass the flux through `pops.FiniteVolume`, where the numerical flux is named `riemann`:
 
 ```python
-spatial = adc.FiniteVolume(limiter="minmod", riemann="rusanov")
+spatial = pops.FiniteVolume(limiter="minmod", riemann="rusanov")
 ```
 
 Replace `riemann` with one of these values, matched to your model:
@@ -37,7 +37,7 @@ Replace `riemann` with one of these values, matched to your model:
 Pass the spatial scheme as the `spatial=` argument of `add_block` or `add_equation`:
 
 ```python
-sim.add_block("gas", model=model, spatial=adc.FiniteVolume(limiter="minmod", riemann="hll"))
+sim.add_block("gas", model=model, spatial=pops.FiniteVolume(limiter="minmod", riemann="hll"))
 ```
 
 For the full list of limiters, fluxes and reconstruction variables, see the
@@ -50,7 +50,7 @@ model declares the primitive `p` and provides eigenvalues, which makes the gener
 `pressure` and `wave_speeds`. A DSL model can also become a generic `hllc`/`roe` model by emitting
 the capability hooks: `m.enable_hllc()` / `m.enable_roe()` generate them from the declared roles
 (including some 3-variable, non-Euler systems), or provide `m.roe_dissipation()` for a user-supplied
-eigenstructure. See `adc.capabilities()["riemann"]` for the exact gates and
+eigenstructure. See `pops.capabilities()["riemann"]` for the exact gates and
 [write a model with the DSL](../tutorials/write-a-model-with-dsl.md).
 
 ## Check backend support

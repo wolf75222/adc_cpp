@@ -8,7 +8,7 @@ produces ``ctx.solve_fields_from_blocks(<vec>)`` with each listed block slotted 
 is sized to ``ctx.n_blocks()`` (a nullptr entry uses the block's live state), so the runtime sees
 each coupled block at its stage state into the one shared phi/aux.
 
-Pure-Python codegen check (always runs when adc.time imports; skips cleanly if _adc is absent). The
+Pure-Python codegen check (always runs when pops.time imports; skips cleanly if _pops is absent). The
 .so that runs the coupled solve is validated on ROMEO (Kokkos-only AOT, not buildable host-only)."""
 
 import sys
@@ -19,11 +19,11 @@ def _skip(msg):
     sys.exit(0)
 
 
-def _adc_time():
+def _pops_time():
     try:
-        import adc.time as t
-    except Exception as exc:  # noqa: BLE001 -- adc.time needs _adc; skip cleanly, never fake
-        _skip("adc.time unavailable: %s" % exc)
+        import pops.time as t
+    except Exception as exc:  # noqa: BLE001 -- pops.time needs _pops; skip cleanly, never fake
+        _skip("pops.time unavailable: %s" % exc)
     return t
 
 
@@ -62,7 +62,7 @@ def coupled_program(t, name, blocks):
 
 
 def main():
-    t = _adc_time()
+    t = _pops_time()
     print("== coupled multi-block field-solve codegen (ADC-457) ==")
 
     # (1) _check_lowerable no longer raises for solve_fields_from_blocks (3 blocks, N>2).
@@ -75,7 +75,7 @@ def main():
     src = P.emit_cpp_program()
     chk("ctx.solve_fields_from_blocks(" in src,
         "emit contains the coupled multi-block solve call")
-    chk("std::vector<const adc::MultiFab*>" in src,
+    chk("std::vector<const pops::MultiFab*>" in src,
         "emit builds a per-block MultiFab pointer vector")
     chk("ctx.n_blocks()" in src,
         "the pointer vector is sized to ctx.n_blocks() (nullptr = the block's live state)")

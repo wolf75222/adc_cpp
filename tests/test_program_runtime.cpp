@@ -1,5 +1,5 @@
 // Compiled time-program runtime seam (epic ADC-399 / ADC-401 Phase 2b): a Forward-Euler Program,
-// installed as a macro-step closure via adc::runtime::program::ProgramContext, runs C++-side during
+// installed as a macro-step closure via pops::runtime::program::ProgramContext, runs C++-side during
 // sim.step(dt). This test proves the seam end-to-end WITHOUT codegen or a .so: it builds the closure
 // in C++ (the role the generated problem.so will later fill) and checks bit-parity against a reference
 // Forward-Euler step computed from the SAME existing primitives (solve_fields + eval_rhs + U + dt*R).
@@ -8,13 +8,13 @@
 // momentum component -> the step actually changes the state (parity is not vacuous). No source, no
 // charge (NoEll), so the result is pure gas dynamics and deterministic across two System instances.
 
-#include <adc/mesh/storage/multifab.hpp>
-#include <adc/physics/bricks/source.hpp>                // NoSource
-#include <adc/physics/composition/composite.hpp>        // CompositeModel
-#include <adc/physics/fluids/euler.hpp>                 // Euler
-#include <adc/runtime/builders/compiled/dsl_block.hpp>  // add_compiled_model
-#include <adc/runtime/program/program_context.hpp>      // ProgramContext (the seam under test)
-#include <adc/runtime/system.hpp>
+#include <pops/mesh/storage/multifab.hpp>
+#include <pops/physics/bricks/source.hpp>                // NoSource
+#include <pops/physics/composition/composite.hpp>        // CompositeModel
+#include <pops/physics/fluids/euler.hpp>                 // Euler
+#include <pops/runtime/builders/compiled/dsl_block.hpp>  // add_compiled_model
+#include <pops/runtime/program/program_context.hpp>      // ProgramContext (the seam under test)
+#include <pops/runtime/system.hpp>
 
 #include <cmath>
 #include <cstdio>
@@ -22,17 +22,17 @@
 #include <string>
 #include <vector>
 
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
 #include <Kokkos_Core.hpp>
 #endif
 
-using namespace adc;
+using namespace pops;
 
 // Elliptic brick that contributes nothing (no charge): the Poisson RHS stays zero, phi = 0, and the
 // Euler flux ignores aux -> the residual is pure gas dynamics.
 struct NoEll {
   template <class State>
-  ADC_HD Real rhs(const State&) const {
+  POPS_HD Real rhs(const State&) const {
     return Real(0);
   }
 };
@@ -62,7 +62,7 @@ static void add_gas(System& s, double gamma) {
 }
 
 int main(int argc, char** argv) {
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   Kokkos::ScopeGuard guard(argc, argv);
 #else
   (void)argc;

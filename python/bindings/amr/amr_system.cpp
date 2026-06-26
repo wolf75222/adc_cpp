@@ -1,28 +1,28 @@
-#include <adc/runtime/amr_system.hpp>
+#include <pops/runtime/amr_system.hpp>
 
-#include <adc/runtime/dynamic/abi_key.hpp>  // detail::abi_key_string: ABI key (header-only), compared to the loader's
-#include <adc/runtime/builders/compiled/amr_dsl_block.hpp>  // detail::dispatch_amr_compiled + build_amr_compiled (shared path)
-#include <adc/runtime/amr/amr_runtime.hpp>  // AmrRuntime + AmrRuntimeBlock (multi-block runtime engine)
-#include <adc/runtime/builders/block/amr_block_seam.hpp>  // ADC-335: per-transport AMR build seam (build_amr_block/_compiled_<transport>)
-#include <adc/runtime/builders/factory/model_factory.hpp>  // detail::dispatch_model + compiled bricks
-#include <adc/runtime/dynamic/model_registry.hpp>  // unknown_transport_msg: single-source transport rejection (ADC-331)
-#include <adc/runtime/context/wall_predicate.hpp>  // detail::wall_predicate (wall shared System/AmrSystem)
-#include <adc/numerics/time/integrators/implicit_stepper.hpp>  // NewtonOptions + validate_newton_options (shared range check)
+#include <pops/runtime/dynamic/abi_key.hpp>  // detail::abi_key_string: ABI key (header-only), compared to the loader's
+#include <pops/runtime/builders/compiled/amr_dsl_block.hpp>  // detail::dispatch_amr_compiled + build_amr_compiled (shared path)
+#include <pops/runtime/amr/amr_runtime.hpp>  // AmrRuntime + AmrRuntimeBlock (multi-block runtime engine)
+#include <pops/runtime/builders/block/amr_block_seam.hpp>  // ADC-335: per-transport AMR build seam (build_amr_block/_compiled_<transport>)
+#include <pops/runtime/builders/factory/model_factory.hpp>  // detail::dispatch_model + compiled bricks
+#include <pops/runtime/dynamic/model_registry.hpp>  // unknown_transport_msg: single-source transport rejection (ADC-331)
+#include <pops/runtime/context/wall_predicate.hpp>  // detail::wall_predicate (wall shared System/AmrSystem)
+#include <pops/numerics/time/integrators/implicit_stepper.hpp>  // NewtonOptions + validate_newton_options (shared range check)
 
 #include <algorithm>  // std::find, std::sort (partial IMEX mask resolution: sorted unique indices)
 #include <cmath>
 #include <cstddef>
 #include <limits>  // std::numeric_limits (global step bounds: neutralization to +inf before the min)
-#include <adc/runtime/dynamic/dynlib.hpp>  // portable dlopen<->LoadLibraryW layer (ADC-99); <dlfcn.h> on POSIX
+#include <pops/runtime/dynamic/dynlib.hpp>  // portable dlopen<->LoadLibraryW layer (ADC-99); <dlfcn.h> on POSIX
 #include <functional>
 #include <memory>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
-namespace adc {
+namespace pops {
 
-// resolve_implicit_components (AMR) moved to amr_block_seam.hpp (adc::detail::
+// resolve_implicit_components (AMR) moved to amr_block_seam.hpp (pops::detail::
 // resolve_implicit_components_amr) so the per-transport seam TUs share one definition; otherwise
 // unchanged (AmrSystem-specific error wording preserved verbatim).
 
@@ -88,14 +88,14 @@ struct AmrSystem::Impl {
     // states + C/F fine ghost means to >= pos_floor. 0 (default) = inactive, bit-identical. Threaded
     // to dispatch_amr_block (multi-block) and to AmrBuildParams::pos_floor (single-block, build_amr_compiled).
     // COMPILED blocks carry it too (ADC-322): set_compiled_block stores it here from the regenerated
-    // .so loader (adc_install_native_amr -> add_compiled_model), so both routings floor like a native block.
+    // .so loader (pops_install_native_amr -> add_compiled_model), so both routings floor like a native block.
     double pos_floor = 0.0;
   };
 
   std::vector<BlockSpec> blocks;
   double gamma = 1.4;  // gamma of the FIRST block (compat: read by the single-block path)
 
-  // Coupled inter-species sources (compiled adc.dsl.CoupledSource, flat P5 bytecode ABI) FROZEN at
+  // Coupled inter-species sources (compiled pops.dsl.CoupledSource, flat P5 bytecode ABI) FROZEN at
   // add_coupled_source and injected into the AmrRuntime runtime engine at lazy build (build_multi).
   // The runtime does not yet exist at registration (built at ensure_built): so we store the flat
   // spec here, then replay it on the runtime right after its construction (multi-block only).
@@ -179,7 +179,7 @@ struct AmrSystem::Impl {
   std::function<void(int, const std::vector<double>&)> set_level_potential_fn;
   std::function<void(const std::vector<PatchBox>&)> set_hierarchy_fn;
   // --- multi-block path (AmrRuntime, shared hierarchy + summed Poisson) ---
-  std::shared_ptr<adc::AmrRuntime> runtime;
+  std::shared_ptr<pops::AmrRuntime> runtime;
   double t = 0;
   // AUTHORITATIVE MACRO-STEP counter (parity System::Impl::macro_step_): incremented by
   // AmrSystem::step / step_cfl, read by macro_step(). The engines (AmrRuntime; single-block step_state)
@@ -325,10 +325,10 @@ struct AmrSystem::Impl {
         throw std::runtime_error(
             "AmrSystem::set_conservative_state : not transported by the compiled .so loader (block "
             "'" +
-            b.name + "') in multi-block ; use a native block adc.Model(...), or set_density.");
+            b.name + "') in multi-block ; use a native block pops.Model(...), or set_density.");
     AmrBuildParams bp = make_build_params();  // geometry + poisson_bc + wall + common ownership
     const detail::SharedAmrLayout S = detail::make_shared_amr_layout(bp);
-    std::vector<adc::AmrRuntimeBlock> rblocks;
+    std::vector<pops::AmrRuntimeBlock> rblocks;
     rblocks.reserve(blocks.size());
     for (auto& b : blocks) {
       if (b.is_compiled) {
@@ -356,7 +356,7 @@ struct AmrSystem::Impl {
           throw std::runtime_error(
               "AmrSystem : Newton options are not transported by the compiled .so loader "
               "(block '" +
-              b.name + "') ; use a native block adc.Model(...) in multi-block.");
+              b.name + "') ; use a native block pops.Model(...) in multi-block.");
         // newton_diagnostics report likewise: the .so loader builder allocates no NewtonReport nor
         // threads it (flat ABI). Explicit rejection (defense in depth; the Python facade already
         // filters it upstream) rather than a silently empty report.
@@ -364,7 +364,7 @@ struct AmrSystem::Impl {
           throw std::runtime_error(
               "AmrSystem : newton_diagnostics (newton_report) is not transported by the "
               "compiled .so loader (block '" +
-              b.name + "') ; use a native block adc.Model(...).");
+              b.name + "') ; use a native block pops.Model(...).");
         // Zhang-Shu positivity floor (ADC-322): the AmrCompiledBlockBuilder now carries a floor slot,
         // so a loader regenerated against this header floors the Density-role face states like a native
         // block (forwarded to dispatch_amr_block -> build_amr_block). b.pos_floor == 0 for an OLDER .so
@@ -412,7 +412,7 @@ struct AmrSystem::Impl {
       }
     }
     runtime =
-        std::make_shared<adc::AmrRuntime>(S.geom, S.ba_coarse, S.poisson_bc, std::move(rblocks),
+        std::make_shared<pops::AmrRuntime>(S.geom, S.ba_coarse, S.poisson_bc, std::move(rblocks),
                                           S.base_per, S.replicated_coarse, S.wall);
     // Model-NAMED aux fields (ADC-291): push the pending coarse fields into the runtime engine, which
     // re-applies them onto the shared aux each solve_fields (so they persist across the union regrid)
@@ -458,7 +458,7 @@ struct AmrSystem::Impl {
                 "AmrSystem::set_refinement : variable/role selector not supported on the compiled "
                 ".so "
                 "block '" +
-                blocks[b].name + "' (component 0 only) ; use a native block adc.Model(...)");
+                blocks[b].name + "' (component 0 only) ; use a native block pops.Model(...)");
           comp = detail::resolve_selected_component("AmrSystem::set_refinement", blocks[b].name,
                                                     runtime->block_cons_vars(b), refine_var_name,
                                                     refine_var_role);
@@ -658,7 +658,7 @@ void AmrSystem::add_block(const std::string& name, const ModelSpec& model,
   if (recon != "conservative" && recon != "primitive")
     throw std::runtime_error("AmrSystem : unknown recon '" + recon + "' (conservative|primitive)");
   const bool imex = (time == "imex");
-  const int time_method = (time == "ssprk3") ? 1 : 0;  // adc::AmrTimeMethod (0 kEuler, 1 kSsprk3)
+  const int time_method = (time == "ssprk3") ? 1 : 0;  // pops::AmrTimeMethod (0 kEuler, 1 kSsprk3)
   // The partial IMEX mask (implicit_vars / implicit_roles) only applies to the IMEX source step:
   // requesting it in explicit is an ERROR (no silent ignore; same guard as System::add_block).
   if (!imex && (!implicit_vars.empty() || !implicit_roles.empty()))
@@ -710,7 +710,7 @@ void AmrSystem::add_block(const std::string& name, const ModelSpec& model,
   p_->blocks.push_back(std::move(b));
 }
 
-ADC_EXPORT void AmrSystem::set_compiled_block(
+POPS_EXPORT void AmrSystem::set_compiled_block(
     int ncomp, double gamma, int substeps,
     std::function<AmrCompiledHooks(const AmrBuildParams&)> mono_builder,
     AmrCompiledBlockBuilder multi_builder, const std::string& name, bool recon_prim, bool imex,
@@ -756,7 +756,7 @@ ADC_EXPORT void AmrSystem::set_compiled_block(
   b.implicit_vars =
       implicit_vars;  // partial IMEX mask (resolved into indices by multi_builder at build)
   b.implicit_roles = implicit_roles;
-  // Zhang-Shu positivity floor (ADC-322): carried by the regenerated .so loader (adc_install_native_amr
+  // Zhang-Shu positivity floor (ADC-322): carried by the regenerated .so loader (pops_install_native_amr
   // -> add_compiled_model). Stored on the block so the MONO path reads it via make_build_params ->
   // AmrBuildParams::pos_floor, and the MULTI path forwards it through the AmrCompiledBlockBuilder.
   b.pos_floor = pos_floor;
@@ -766,10 +766,10 @@ ADC_EXPORT void AmrSystem::set_compiled_block(
 }
 
 namespace {
-// Module anchor for dladdr: its ADDRESS lives in the image that contains amr_system.cpp (the _adc
+// Module anchor for dladdr: its ADDRESS lives in the image that contains amr_system.cpp (the _pops
 // module, or the test binary). add_native_block uses it to locate the module and promote it to
 // global scope (RTLD_NOLOAD). A TU-local function suffices (no need to export) and avoids
-// depending on a symbol defined elsewhere (adc::abi_key, system.cpp).
+// depending on a symbol defined elsewhere (pops::abi_key, system.cpp).
 void amr_native_anchor() {}
 }  // namespace
 
@@ -780,7 +780,7 @@ void AmrSystem::add_native_block(const std::string& name, const std::string& so_
   if (substeps < 1)
     throw std::runtime_error("AmrSystem::add_native_block : substeps >= 1");
   // Zhang-Shu positivity floor (ADC-322): eager validation (parity with add_block). 0 = inactive,
-  // bit-identical. Marshaled down to the loader (adc_install_native_amr) -> add_compiled_model; an
+  // bit-identical. Marshaled down to the loader (pops_install_native_amr) -> add_compiled_model; an
   // older .so (no floor slot) ignores it, so a non-zero floor on such a loader is a silent no-op.
   if (!(positivity_floor >= 0.0) || !std::isfinite(positivity_floor))
     throw std::runtime_error(
@@ -797,16 +797,16 @@ void AmrSystem::add_native_block(const std::string& name, const std::string& so_
         "(got '" +
         recon + "')");
   // time == "ssprk3": SSPRK3 IS NOT transported by the AMR .so loader flat ABI -- the extern "C"
-  // installer (adc_install_native_amr) only marshals the time STRING, and the add_compiled_model
+  // installer (pops_install_native_amr) only marshals the time STRING, and the add_compiled_model
   // template it inlines only maps {explicit, imex} (it does NOT freeze AmrBuildParams::time_method). Rather
   // than SILENTLY FALLING BACK to kEuler (option ignored), we REJECT explicitly here: an SSPRK3 block
-  // must go through a NATIVE block adc.Model(...) (AmrSystem.add_block), not a compiled .so loader.
+  // must go through a NATIVE block pops.Model(...) (AmrSystem.add_block), not a compiled .so loader.
   if (time == "ssprk3")
     throw std::runtime_error(
         "AmrSystem::add_native_block : time='ssprk3' not transported by the compiled .so loader "
         "(flat "
-        "ABI : only {explicit, imex} is marshaled) ; use a native block adc.Model(...) with "
-        "adc.Explicit(ssprk3=True) via AmrSystem.add_block.");
+        "ABI : only {explicit, imex} is marshaled) ; use a native block pops.Model(...) with "
+        "pops.Explicit(ssprk3=True) via AmrSystem.add_block.");
   if (time != "explicit" && time != "imex")
     throw std::runtime_error(
         "AmrSystem::add_native_block : time 'explicit' | 'imex' on AMR (got '" + time + "')");
@@ -814,44 +814,44 @@ void AmrSystem::add_native_block(const std::string& name, const std::string& so_
   // target="amr_system") inlines the header template add_compiled_model(AmrSystem&, ...), which
   // materializes a concrete AmrCouplerMP<Model> at lazy build and installs its hooks via
   // set_compiled_block -- NATIVE path, SAME AMR hierarchy as add_block (reflux, regrid). The loader
-  // thus calls set_compiled_block (out-of-line method of adc::AmrSystem) DEFINED in THIS module;
-  // it must be resolved through the dlopen against the already-loaded _adc module.
-  // ELF PORTABILITY (Linux): CPython loads _adc with RTLD_LOCAL, so its symbols are NOT in
+  // thus calls set_compiled_block (out-of-line method of pops::AmrSystem) DEFINED in THIS module;
+  // it must be resolved through the dlopen against the already-loaded _pops module.
+  // ELF PORTABILITY (Linux): CPython loads _pops with RTLD_LOCAL, so its symbols are NOT in
   // the global scope. We PROMOTE the current module to global scope (RTLD_NOLOAD = without
   // reloading it; RTLD_GLOBAL OR'd into the flags of the already-loaded object), located by dladdr on
   // an ADDRESS of THIS module: amr_native_anchor (TU-local function). We thus avoid depending
-  // on adc::abi_key (defined in system.cpp) -- which would link-couple any test compiling
+  // on pops::abi_key (defined in system.cpp) -- which would link-couple any test compiling
   // amr_system.cpp alone. On macOS, harmless (the loader resolves via dynamic_lookup).
 #if defined(_WIN32)
-  // Windows (ADC-100): no RTLD_GLOBAL. The generated AMR .dll is linked against _adc.lib (symbol
-  // AmrSystem::set_compiled_block ADC_EXPORT) + kokkoscore.lib (shared Kokkos). Undefined symbols resolved
-  // by the OS loader against the already-loaded _adc.pyd + kokkos*.dll. We load + resolve adc_install_native_amr.
-  adc::dynlib::handle h = adc::dynlib::open(so_path);
+  // Windows (ADC-100): no RTLD_GLOBAL. The generated AMR .dll is linked against _pops.lib (symbol
+  // AmrSystem::set_compiled_block POPS_EXPORT) + kokkoscore.lib (shared Kokkos). Undefined symbols resolved
+  // by the OS loader against the already-loaded _pops.pyd + kokkos*.dll. We load + resolve pops_install_native_amr.
+  pops::dynlib::handle h = pops::dynlib::open(so_path);
   if (!h)
     throw std::runtime_error("AmrSystem::add_native_block : LoadLibrary('" + so_path +
-                             "') : " + adc::dynlib::last_error() +
-                             " (.dll linked against _adc.lib + kokkoscore.lib ; cf. ADC-100)");
+                             "') : " + pops::dynlib::last_error() +
+                             " (.dll linked against _pops.lib + kokkoscore.lib ; cf. ADC-100)");
   {
-    auto key_fn = reinterpret_cast<const char* (*)()>(adc::dynlib::sym(h, "adc_native_abi_key"));
+    auto key_fn = reinterpret_cast<const char* (*)()>(pops::dynlib::sym(h, "pops_native_abi_key"));
     if (!key_fn) {
-      adc::dynlib::close(h);
+      pops::dynlib::close(h);
       throw std::runtime_error(
-          "AmrSystem::add_native_block : adc_native_abi_key missing from the .dll");
+          "AmrSystem::add_native_block : pops_native_abi_key missing from the .dll");
     }
     const std::string loader_key = key_fn();
     const std::string module_key = detail::abi_key_string();
     if (loader_key != module_key) {
-      adc::dynlib::close(h);
+      pops::dynlib::close(h);
       throw std::runtime_error("AmrSystem::add_native_block : incompatible ABI -- loader '" +
                                loader_key + "' != module '" + module_key + "'");
     }
     using install_fn_t = void (*)(void*, const char*, const char*, const char*, const char*,
                                   const char*, double, int, double);
-    auto install = reinterpret_cast<install_fn_t>(adc::dynlib::sym(h, "adc_install_native_amr"));
+    auto install = reinterpret_cast<install_fn_t>(pops::dynlib::sym(h, "pops_install_native_amr"));
     if (!install) {
-      adc::dynlib::close(h);
+      pops::dynlib::close(h);
       throw std::runtime_error(
-          "AmrSystem::add_native_block : adc_install_native_amr missing from the .dll");
+          "AmrSystem::add_native_block : pops_install_native_amr missing from the .dll");
     }
     install(static_cast<void*>(this), name.c_str(), limiter.c_str(), riemann.c_str(), recon.c_str(),
             time.c_str(), gamma, substeps, positivity_floor);
@@ -863,54 +863,54 @@ void AmrSystem::add_native_block(const std::string& name, const std::string& so_
       dlopen(info.dli_fname, RTLD_NOW | RTLD_GLOBAL | RTLD_NOLOAD);
   }
   // RTLD_GLOBAL: places the loader's symbols in the global scope AND lets the loader resolve
-  // its undefined symbols (set_compiled_block exported ADC_EXPORT) against the already-loaded images. RTLD_NOW:
+  // its undefined symbols (set_compiled_block exported POPS_EXPORT) against the already-loaded images. RTLD_NOW:
   // immediate resolution -> a missing AmrSystem symbol fails HERE, not in flight.
   void* h = dlopen(so_path.c_str(), RTLD_NOW | RTLD_GLOBAL);
   if (!h) {
     const char* e = dlerror();
     throw std::runtime_error(
         "AmrSystem::add_native_block : dlopen('" + so_path + "') : " + std::string(e ? e : "?") +
-        " (the symbol adc::AmrSystem::set_compiled_block must be exported AND the "
-        "_adc module loaded globally ; cf. ADC_EXPORT)");
+        " (the symbol pops::AmrSystem::set_compiled_block must be exported AND the "
+        "_pops module loaded globally ; cf. POPS_EXPORT)");
   }
   // EXPLICIT ABI GUARD: the key baked into the loader (at ITS compilation) must equal the module's
   // key. A mismatch = divergent headers / compiler / standard -> potentially different memory layout
   // of AmrSystem/AmrBuildParams/AmrCompiledHooks at the boundary -> UB. We raise
   // a CLEAR error rather than let an incompatible loader through. SAME key symbol as the
-  // System path (adc_native_abi_key): only the installer (adc_install_native_amr) differs.
-  auto key_fn = reinterpret_cast<const char* (*)()>(dlsym(h, "adc_native_abi_key"));
+  // System path (pops_native_abi_key): only the installer (pops_install_native_amr) differs.
+  auto key_fn = reinterpret_cast<const char* (*)()>(dlsym(h, "pops_native_abi_key"));
   if (!key_fn) {
     dlclose(h);
     throw std::runtime_error(
-        "AmrSystem::add_native_block : adc_native_abi_key missing from the .so "
+        "AmrSystem::add_native_block : pops_native_abi_key missing from the .so "
         "(regenerate via dsl.compile_native(target='amr_system') / "
         "compile(backend='production', target='amr_system'))");
   }
   const std::string loader_key = key_fn();
-  // Module key = SAME computation as adc::abi_key() (header-only detail::abi_key_string()): avoids the
-  // dependency on the out-of-line symbol adc::abi_key (system.cpp). The loader bakes its own at ITS compile.
+  // Module key = SAME computation as pops::abi_key() (header-only detail::abi_key_string()): avoids the
+  // dependency on the out-of-line symbol pops::abi_key (system.cpp). The loader bakes its own at ITS compile.
   const std::string module_key = detail::abi_key_string();
   if (loader_key != module_key) {
     dlclose(h);
     throw std::runtime_error("AmrSystem::add_native_block : incompatible ABI -- loader key '" +
                              loader_key + "' != module key '" + module_key +
                              "'. Recompile the loader with the SAME compiler, C++ standard and "
-                             "adc headers as the _adc module.");
+                             "pops headers as the _pops module.");
   }
   // AMR native installer of the loader: reinterpret_cast<AmrSystem*>(this) then
   // add_compiled_model<ProdModel>(*amrsys, ...). Scheme marshaled as flat extern "C" arguments. No
   // evolve parameter (single-block AMR, no frozen background block like System). DISTINCT SYMBOL
-  // (adc_install_native_amr, vs adc_install_native on the System side): a loader generated for System
+  // (pops_install_native_amr, vs pops_install_native on the System side): a loader generated for System
   // does NOT export it, so wiring it here fails clearly instead of an inconsistent cast. The trailing
   // double is the Zhang-Shu positivity floor (ADC-322): old 8-argument loaders carry an ABI key from
   // the pre-floor headers and are REJECTED above, so the 9-argument call never reaches a stale .so.
   using install_fn_t = void (*)(void*, const char*, const char*, const char*, const char*,
                                 const char*, double, int, double);
-  auto install = reinterpret_cast<install_fn_t>(dlsym(h, "adc_install_native_amr"));
+  auto install = reinterpret_cast<install_fn_t>(dlsym(h, "pops_install_native_amr"));
   if (!install) {
     dlclose(h);
     throw std::runtime_error(
-        "AmrSystem::add_native_block : adc_install_native_amr missing from the .so "
+        "AmrSystem::add_native_block : pops_install_native_amr missing from the .so "
         "(loader generated for System, or regenerate via "
         "dsl.compile_native(target='amr_system'))");
   }
@@ -1449,4 +1449,4 @@ void AmrSystem::set_hierarchy(const std::vector<PatchBox>& boxes) {
   p_->set_hierarchy_fn(boxes);
 }
 
-}  // namespace adc
+}  // namespace pops

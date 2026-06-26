@@ -24,7 +24,7 @@ as before.
     (Forward Euler, different IR hash) from that checkpoint -> RuntimeError containing
     "checkpoint was created with a different compiled Program hash".
 
-Sections (B)/(C) self-skip (never fake the engine) without numpy / _adc / install_program / a compiler /
+Sections (B)/(C) self-skip (never fake the engine) without numpy / _pops / install_program / a compiler /
 a visible Kokkos, exactly like test_time_history.py.
 """
 import os
@@ -32,11 +32,11 @@ import sys
 import tempfile
 
 
-def _adc_time():
+def _pops_time():
     try:
-        import adc.time as t
-    except Exception as exc:  # adc not importable here -> skip, never fake
-        print("skip test_time_history_checkpoint (adc.time unavailable: %s)" % exc)
+        import pops.time as t
+    except Exception as exc:  # pops not importable here -> skip, never fake
+        print("skip test_time_history_checkpoint (pops.time unavailable: %s)" % exc)
         sys.exit(0)
     return t
 
@@ -53,13 +53,13 @@ def test_npz_key_scheme_roundtrips(_t):
     except Exception as exc:  # noqa: BLE001 -- numpy unavailable in this interpreter
         print("-- (A) skipped: numpy unavailable: %s --" % exc)
         return
-    # Mirror EXACTLY the keys + dtypes adc.System.checkpoint writes for a program with one AB2 history.
+    # Mirror EXACTLY the keys + dtypes pops.System.checkpoint writes for a program with one AB2 history.
     hname = "blk.R"
     depth = 2
     ncomp, ny, nx = 1, 4, 4
     slots = [np.full((ncomp, ny, nx), float(k + 1)) for k in range(depth)]
     out = {
-        "adc_checkpoint_version": 1,
+        "pops_checkpoint_version": 1,
         "program_hash": "deadbeef" * 8,  # a 64-hex IR hash shape
         "history_names": np.array([hname]),
         "history_depth_" + hname: depth,
@@ -87,7 +87,7 @@ def test_npz_key_scheme_roundtrips(_t):
     assert out["program_hash"] != ("cafe" * 16), "a different hash must compare unequal"
 
     # Back-compat: a checkpoint WITHOUT the new keys carries neither program_hash nor history_names.
-    legacy = {"adc_checkpoint_version": 1, "t": 0.0, "macro_step": 0}
+    legacy = {"pops_checkpoint_version": 1, "t": 0.0, "macro_step": 0}
     with tempfile.TemporaryDirectory() as tmp:
         path = os.path.join(tmp, "legacy.npz")
         with open(path, "wb") as f:
@@ -112,20 +112,20 @@ def _passive_source_model(dsl, name):
     return m
 
 
-def _build_system(adc, np, n):
+def _build_system(pops, np, n):
     """A fresh n x n periodic System with the compiled passive-source block added; (sim, has_engine)."""
-    sim = adc.System(n=n, L=1.0, periodic=True)
+    sim = pops.System(n=n, L=1.0, periodic=True)
     if not hasattr(sim, "install_program") or not hasattr(sim, "history_names"):
         return None, None
-    from adc import dsl
+    from pops import dsl
     try:
         compiled_model = _passive_source_model(dsl, "ckpt_block").compile(backend="production")
     except RuntimeError as exc:  # no compiler / no Kokkos visible
         print("-- skipped: model compile could not build the .so: %s --" % str(exc)[:160])
         return None, None
     sim.add_equation("blk", compiled_model,
-                     spatial=adc.FiniteVolume(limiter="none", riemann="rusanov"),
-                     time=adc.Explicit(method="euler"))
+                     spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                     time=pops.Explicit(method="euler"))
     return sim, dsl
 
 
@@ -135,13 +135,13 @@ def _rho0(np, n):
     return 1.0 + 0.3 * np.sin(2 * np.pi * X) * np.cos(2 * np.pi * Y)
 
 
-def _compile_program(adc, dsl, t, builder, prog_name, model_name):
+def _compile_program(pops, dsl, t, builder, prog_name, model_name):
     """compile_problem for the program built by @p builder (e.g. t.std.adams_bashforth2). Returns the
     handle or None if the toolchain is absent."""
     P = t.Program(prog_name)
     builder(P, "blk")
     try:
-        return adc.compile_problem(model=_passive_source_model(dsl, model_name), time=P)
+        return pops.compile_problem(model=_passive_source_model(dsl, model_name), time=P)
     except RuntimeError as exc:  # no compiler / no Kokkos visible / .so compile failed
         print("-- skipped: compile_problem could not build the .so: %s --" % str(exc)[:160])
         return None
@@ -152,18 +152,18 @@ def _run_section_b(t):
     try:
         import numpy as np
 
-        import adc
-    except Exception as exc:  # noqa: BLE001 -- numpy / _adc unavailable
-        print("-- (B) skipped: adc/numpy unavailable: %s --" % exc)
+        import pops
+    except Exception as exc:  # noqa: BLE001 -- numpy / _pops unavailable
+        print("-- (B) skipped: pops/numpy unavailable: %s --" % exc)
         return None
 
     n = 16
-    sim_cont, dsl = _build_system(adc, np, n)
+    sim_cont, dsl = _build_system(pops, np, n)
     if sim_cont is None:
-        print("-- (B) skipped: _adc lacks the install_program/history bindings (rebuild _adc) --")
+        print("-- (B) skipped: _pops lacks the install_program/history bindings (rebuild _pops) --")
         return None
 
-    compiled = _compile_program(adc, dsl, t, t.std.adams_bashforth2, "ab2_ckpt", "ab2_prog_b")
+    compiled = _compile_program(pops, dsl, t, t.std.adams_bashforth2, "ab2_ckpt", "ab2_prog_b")
     if compiled is None:
         return None
 
@@ -178,7 +178,7 @@ def _run_section_b(t):
     state_a = np.array(sim_cont.get_state("blk"))[0]
 
     # (2) RUN N/2, CHECKPOINT.
-    sim1, _ = _build_system(adc, np, n)
+    sim1, _ = _build_system(pops, np, n)
     sim1.set_state("blk", np.stack([rho0]))
     sim1.install_program(compiled.so_path)
     for _ in range(half):
@@ -187,7 +187,7 @@ def _run_section_b(t):
         ckpt = sim1.checkpoint(os.path.join(tmp, "ab2"))
 
         # (3) FRESH system, re-add block, re-install the SAME program, RESTART, run N/2 more -> B.
-        sim2, _ = _build_system(adc, np, n)
+        sim2, _ = _build_system(pops, np, n)
         sim2.install_program(compiled.so_path)  # the hash guard needs the program installed first
         sim2.restart(ckpt)
         assert sim2.macro_step() == half, \
@@ -238,19 +238,19 @@ def _run_section_c(t):
     try:
         import numpy as np
 
-        import adc
+        import pops
     except Exception as exc:  # noqa: BLE001
-        print("-- (C) skipped: adc/numpy unavailable: %s --" % exc)
+        print("-- (C) skipped: pops/numpy unavailable: %s --" % exc)
         return None
 
     n = 8
-    sim, dsl = _build_system(adc, np, n)
+    sim, dsl = _build_system(pops, np, n)
     if sim is None:
-        print("-- (C) skipped: _adc lacks the install_program/history bindings (rebuild _adc) --")
+        print("-- (C) skipped: _pops lacks the install_program/history bindings (rebuild _pops) --")
         return None
 
-    ab2 = _compile_program(adc, dsl, t, t.std.adams_bashforth2, "ab2_c", "ab2_prog_c")
-    fe = _compile_program(adc, dsl, t, t.std.forward_euler, "fe_c", "fe_prog_c")
+    ab2 = _compile_program(pops, dsl, t, t.std.adams_bashforth2, "ab2_c", "ab2_prog_c")
+    fe = _compile_program(pops, dsl, t, t.std.forward_euler, "fe_c", "fe_prog_c")
     if ab2 is None or fe is None:
         return None
     assert ab2.program_hash != fe.program_hash, \
@@ -264,7 +264,7 @@ def _run_section_c(t):
         ckpt = sim.checkpoint(os.path.join(tmp, "ab2_for_mismatch"))
 
         # A fresh system that installs the WRONG (Forward Euler) program, then restarts the AB2 ckpt.
-        sim2, _ = _build_system(adc, np, n)
+        sim2, _ = _build_system(pops, np, n)
         sim2.install_program(fe.so_path)
         try:
             sim2.restart(ckpt)
@@ -278,7 +278,7 @@ def _run_section_c(t):
 
 
 def _run():
-    t = _adc_time()
+    t = _pops_time()
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:
         fn(t)

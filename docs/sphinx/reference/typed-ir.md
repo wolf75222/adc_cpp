@@ -1,4 +1,4 @@
-# Typed operator-first IR (`adc.model`)
+# Typed operator-first IR (`pops.model`)
 
 The typed IR is the single internal contract the board facade ({doc}`board-like-dsl`)
 and the operator-first builder ({doc}`operator-modules`) both lower to. It carries no

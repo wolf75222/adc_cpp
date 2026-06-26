@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Classic RK4 as a compiled multi-stage time Program (epic ADC-399 / ADC-407).
 
-Writes the four-stage RK4 scheme with ``adc.time.Program`` (three intermediate stage states + a
+Writes the four-stage RK4 scheme with ``pops.time.Program`` (three intermediate stage states + a
 linear-combination commit), compiles it to a ``problem.so``, installs it, advances one step
 C++-side, and checks it against an offline stage-by-stage reference built from the same runtime
 primitives. There is NO special RK4 C++ class -- the scheme is just IR lowered by the codegen.
@@ -10,7 +10,7 @@ Run::
 
     python examples/time_programs/rk4_program.py
 
-Requires a compiler + a visible Kokkos (``ADC_KOKKOS_ROOT``); prints a skip notice and exits 0
+Requires a compiler + a visible Kokkos (``POPS_KOKKOS_ROOT``); prints a skip notice and exits 0
 otherwise. cf. docs/sphinx/reference/time-program.md.
 """
 import sys
@@ -18,26 +18,26 @@ import sys
 try:
     import numpy as np
 
-    import adc
-    from adc import time as adctime
+    import pops
+    from pops import time as adctime
 except Exception as exc:  # noqa: BLE001
-    print("skip rk4_program (adc/numpy unavailable: %s)" % exc)
+    print("skip rk4_program (pops/numpy unavailable: %s)" % exc)
     sys.exit(0)
 
 
 def gas_model():
-    return adc.Model(state=adc.FluidState("isothermal", cs2=0.5),
-                     transport=adc.IsothermalFlux(),
-                     source=adc.NoSource(),
-                     elliptic=adc.BackgroundDensity(alpha=1.0, n0=0.0))
+    return pops.Model(state=pops.FluidState("isothermal", cs2=0.5),
+                     transport=pops.IsothermalFlux(),
+                     source=pops.NoSource(),
+                     elliptic=pops.BackgroundDensity(alpha=1.0, n0=0.0))
 
 
 def build_system():
     n = 48
-    sim = adc.System(n=n, L=1.0, periodic=True)
+    sim = pops.System(n=n, L=1.0, periodic=True)
     sim.add_block("plasma", gas_model(),
-                  spatial=adc.FiniteVolume(limiter="none", riemann="rusanov"),
-                  time=adc.Explicit(method="euler"))
+                  spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                  time=pops.Explicit(method="euler"))
     sim.set_poisson("charge_density", "geometric_mg")
     x = (np.arange(n) + 0.5) / n
     X, Y = np.meshgrid(x, x, indexing="ij")
@@ -69,12 +69,12 @@ def offline_rhs(ref, U):
 
 
 def main():
-    if not hasattr(adc.System(n=8, L=1.0, periodic=True), "install_program"):
-        print("skip rk4_program (_adc lacks install_program; rebuild _adc)")
+    if not hasattr(pops.System(n=8, L=1.0, periodic=True), "install_program"):
+        print("skip rk4_program (_pops lacks install_program; rebuild _pops)")
         return 0
     dt = 2e-3
     try:
-        compiled = adc.compile_problem(model=gas_model(), time=rk4_program())
+        compiled = pops.compile_problem(model=gas_model(), time=rk4_program())
     except RuntimeError as exc:
         print("skip rk4_program (compile_problem could not build the .so: %s)" % str(exc)[:160])
         return 0

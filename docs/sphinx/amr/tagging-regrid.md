@@ -36,14 +36,14 @@ Detailed algorithm: [ALGORITHMS.md](https://github.com/wolf75222/adc_cpp/blob/ma
 the union of tags).
 
 ```python
-sim = adc.AmrSystem(n=128, L=1.0, periodic=True)
-sim.add_block("electrons", model=elec, spatial=adc.Spatial(minmod=True), time=adc.Explicit())
-sim.add_block("ions",      model=ions, spatial=adc.Spatial(minmod=True), time=adc.Explicit())
+sim = pops.AmrSystem(n=128, L=1.0, periodic=True)
+sim.add_block("electrons", model=elec, spatial=pops.Spatial(minmod=True), time=pops.Explicit())
+sim.add_block("ions",      model=ions, spatial=pops.Spatial(minmod=True), time=pops.Explicit())
 sim.set_refinement(0.05)         # union des tags de densite (electrons OU ions)
 sim.set_phi_refinement(0.5)      # + |grad phi| (multi-blocs ; bord d'anneau)
 ```
 
 > The regrid cadence (`regrid_every`) is tuned via the `AmrSystemConfig`:
-> `sim = adc.AmrSystem(adc.AmrSystemConfig())` then `config.regrid_every = 20`, or by passing
+> `sim = pops.AmrSystem(pops.AmrSystemConfig())` then `config.regrid_every = 20`, or by passing
 > `regrid_every=20` to the constructor (config kwargs). With a density threshold at its default
 > value (no tag), the grid stays unchanged.

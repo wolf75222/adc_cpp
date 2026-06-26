@@ -19,19 +19,19 @@ A guard (`same_layout_or_throw`) verifies at construction that all blocks share
 exactly the same layout per level (boxes, order, distribution, `dx`/`dy`): this is the
 precondition of the single aux and the single Poisson. Detail: [ARCHITECTURE.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/ARCHITECTURE.md)
 section 8, [AMR_MULTIBLOCK_DESIGN.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/AMR_MULTIBLOCK_DESIGN.md) sections 1-2, and the core
-`include/adc/runtime/amr_system.hpp`.
+`include/pops/runtime/amr_system.hpp`.
 
 ```python
 import numpy as np
-import adc
+import pops
 
 n, L = 96, 1.0
 ne0 = np.ones((n, n))                 # densite initiale (n, n), row-major
 
-sim = adc.AmrSystem(n=n, L=L, periodic=True)
-model = adc.Model(state=adc.Scalar(), transport=adc.ExB(B0=1.0),
-                  source=adc.NoSource(), elliptic=adc.BackgroundDensity(alpha=1.0, n0=0.0))
-sim.add_block("ne", model=model, spatial=adc.Spatial(minmod=True), time=adc.Explicit())
+sim = pops.AmrSystem(n=n, L=L, periodic=True)
+model = pops.Model(state=pops.Scalar(), transport=pops.ExB(B0=1.0),
+                  source=pops.NoSource(), elliptic=pops.BackgroundDensity(alpha=1.0, n0=0.0))
+sim.add_block("ne", model=model, spatial=pops.Spatial(minmod=True), time=pops.Explicit())
 sim.set_refinement(0.05)              # raffine la ou la densite depasse le seuil
 sim.set_poisson(rhs="charge_density", solver="geometric_mg")
 sim.set_density("ne", ne0)
@@ -43,6 +43,6 @@ print("patchs fins :", sim.n_patches(), "| masse :", sim.mass("ne"))
 rho = sim.density("ne")               # densite grossiere (n, n)
 ```
 
-`adc.AmrSystem(n=, L=, periodic=)` is a shortcut: you can also pass an
-`adc.AmrSystemConfig` (fields `n`, `L`, `periodic`, `regrid_every`, `distribute_coarse`,
+`pops.AmrSystem(n=, L=, periodic=)` is a shortcut: you can also pass an
+`pops.AmrSystemConfig` (fields `n`, `L`, `periodic`, `regrid_every`, `distribute_coarse`,
 `coarse_max_grid`) if you want to tune the regrid cadence or the distribution of the coarse.

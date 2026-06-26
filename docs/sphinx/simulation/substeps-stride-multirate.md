@@ -13,8 +13,8 @@ species require the same `dt`).
   "into the future"). Default 1.
 
 ```python
-sim.add_block("a", model=m, time=adc.Explicit(stride=1))   # every macro-step
-sim.add_block("b", model=m, time=adc.Explicit(stride=3))   # advances once every 3 (end of window)
+sim.add_block("a", model=m, time=pops.Explicit(stride=1))   # every macro-step
+sim.add_block("b", model=m, time=pops.Explicit(stride=3))   # advances once every 3 (end of window)
 ```
 
 Between two catch-ups, the held block contributes to the right-hand side of the system Poisson with its

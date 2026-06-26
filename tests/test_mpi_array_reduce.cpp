@@ -5,13 +5,13 @@
 // resultat doit etre le MEME quel que soit N (invariance au nombre de rangs). En serie
 // (np=1) l'operation est l'identite.
 
-#include <adc/parallel/comm.hpp>
+#include <pops/parallel/comm.hpp>
 
 #include <cmath>
 #include <cstdio>
 #include <vector>
 
-using namespace adc;
+using namespace pops;
 
 int main(int argc, char** argv) {
   comm_init(&argc, &argv);

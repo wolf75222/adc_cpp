@@ -4,7 +4,7 @@ One-shot dead-code pass for `adc_cpp`, in the spirit of "remove all unnecessary 
 **young** repository : a tooled pass, not a manual hunt. Linear tracking : **ADC-123** (milestone
 *Code quality and hardened CI*). This is **not** a permanent CI job -- CodeQL and clang-tidy already
 occupy the static-analysis niche ; the `unusedFunction` whole-program check is the one thing neither
-`-Wunused` (already on via `ADC_ENABLE_WARNINGS`) nor clang-tidy sees, so it is run on demand and
+`-Wunused` (already on via `POPS_ENABLE_WARNINGS`) nor clang-tidy sees, so it is run on demand and
 recorded here.
 
 ## Command
@@ -15,7 +15,7 @@ cppcheck --enable=unusedFunction --project=build/compile_commands.json \
 ```
 
 `unusedFunction` is a whole-program check, so it must run single-threaded (cppcheck disables it under
-`-j > 1`). The compile database is the tests build (`ADC_BUILD_TESTS=ON`).
+`-j > 1`). The compile database is the tests build (`POPS_BUILD_TESTS=ON`).
 
 ## Result : zero confirmed-dead functions
 
@@ -53,8 +53,8 @@ same-named symbol). None is confirmed-dead internal code :
 
 | Function | Header | Why kept |
 | --- | --- | --- |
-| `var_names_meta<Model>` | `core/variables.hpp` | **dlsym / codegen entry point.** Emitted into the optional `extern "C" adc_compiled_var_names` symbol (macro at `variables.hpp:143`) and read by `runtime/native_loader.hpp:183` via `dynlib::sym(...)` (test `python/tests/test_dsl_abi_metadata.py`). Invisible to a static call-graph -- exactly the "DSL entry points resolved by dlsym" false-positive class. |
-| `roles_meta<Model>` | `core/variables.hpp` | Same compiled-model ABI path (`adc_compiled_roles`). |
+| `var_names_meta<Model>` | `core/variables.hpp` | **dlsym / codegen entry point.** Emitted into the optional `extern "C" pops_compiled_var_names` symbol (macro at `variables.hpp:143`) and read by `runtime/native_loader.hpp:183` via `dynlib::sym(...)` (test `python/tests/test_dsl_abi_metadata.py`). Invisible to a static call-graph -- exactly the "DSL entry points resolved by dlsym" false-positive class. |
+| `roles_meta<Model>` | `core/variables.hpp` | Same compiled-model ABI path (`pops_compiled_roles`). |
 | `theta_face` | `mesh/geometry.hpp` | Completes the `r_cell` / `r_face` / `theta_cell` / `theta_face` accessor set (the other three are used) ; removing one breaks a coherent, documented API surface. |
 | `sound_speed` | `physics/euler.hpp` | Lone uncalled accessor on the otherwise-live public `Euler` model (its sibling `pressure` is used widely). Standard physics-model API completeness -- same class as `theta_face`. The only tree matches are a Python DSL local variable and the `c = sqrt(theta)` concept in docs, not C++ callers. |
 | `arena_stats` | `core/allocator.hpp` | Public diagnostic accessor over `ManagedArena::instance().stats()` ; introspection API, kept by the "when in doubt" rule. |

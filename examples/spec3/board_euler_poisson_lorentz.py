@@ -1,13 +1,13 @@
 """Spec 3 board-like model authoring: 2D isothermal Euler + Poisson + Lorentz.
 
 Writes the model the way it appears on the blackboard and prints the operator-first
-IR (adc.model.Module) it lowers to. No compilation: this demonstrates layer 1
+IR (pops.model.Module) it lowers to. No compilation: this demonstrates layer 1
 (authoring) and the lowering to layer 2 (the typed Module).
 
 Run: python3 examples/spec3/board_euler_poisson_lorentz.py
 """
-from adc.physics import Model
-from adc.math import sqrt, grad, div, laplacian, ddt
+from pops.physics import Model
+from pops.math import sqrt, grad, div, laplacian, ddt
 
 
 def build():

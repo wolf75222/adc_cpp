@@ -5,15 +5,15 @@ capabilities, requirements and a body identity. It is deterministic for an ident
 invalidated by an operator body / signature / capability / space change, so a compiled artifact
 keyed on it is rebuilt when the operator spec changes. The dsl codegen sensitivity to a formula
 change stays with the existing dsl.Model._model_hash; module_hash adds the operator-spec layer.
-Pure Python; skips if adc is not importable.
+Pure Python; skips if pops is not importable.
 """
 import sys
 
 try:
-    from adc import model
-    from adc import dsl
-except Exception as exc:  # adc not importable here -> skip, never fake
-    print("skip test_module_hash (adc unavailable: %s)" % exc)
+    from pops import model
+    from pops import dsl
+except Exception as exc:  # pops not importable here -> skip, never fake
+    print("skip test_module_hash (pops unavailable: %s)" % exc)
     sys.exit(0)
 
 

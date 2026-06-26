@@ -12,7 +12,7 @@ import shutil
 import subprocess
 import tempfile
 
-from adc import dsl
+from pops import dsl
 
 INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "include"))
 
@@ -32,7 +32,7 @@ def main():
     m.set_source([bz * nn])  # S = B_z * n
     src = m.emit_cpp_source(name="GenBzSrc")
     assert "static constexpr int n_aux = 4;" in src, "n_aux=4 absent de la source B_z"
-    assert "const adc::Real B_z = a.B_z;" in src, "lecture a.B_z absente"
+    assert "const pops::Real B_z = a.B_z;" in src, "lecture a.B_z absente"
     print("OK  emit_cpp_source(B_z) declare n_aux = 4")
 
     # (3) retro-compat : une source qui ne lit que grad n'emet PAS de n_aux.
@@ -44,7 +44,7 @@ def main():
     assert "n_aux" not in src2, "n_aux ne doit pas etre emis pour un modele de base"
     print("OK  emit_cpp_source(base) sans n_aux (bit-identique)")
 
-    # (4) validation : un nom aux inconnu est rejete (doit etre une composante de adc::Aux).
+    # (4) validation : un nom aux inconnu est rejete (doit etre une composante de pops::Aux).
     try:
         dsl.aux_n_aux(["n_e"])  # nom absent de la disposition canonique
         raise AssertionError("aux_n_aux aurait du lever ValueError sur un nom inconnu")
@@ -52,22 +52,22 @@ def main():
         pass
     print("OK  aux_n_aux rejette un nom aux inconnu")
 
-    # (5) compile-check : la brique B_z compile et lit bien B_z (sur les vrais en-tetes adc).
+    # (5) compile-check : la brique B_z compile et lit bien B_z (sur les vrais en-tetes pops).
     cxx = shutil.which("c++") or shutil.which("g++") or shutil.which("clang++")
     if not cxx or not os.path.isdir(INCLUDE):
-        print("skip  compilateur ou en-tetes adc absents -> compile-check sautee (%s)" % INCLUDE)
+        print("skip  compilateur ou en-tetes pops absents -> compile-check sautee (%s)" % INCLUDE)
         print("test_dsl_aux_naux : OK (forme seulement)")
         return
 
     harness = (
-        "#include <adc/core/state/state.hpp>\n"
-        "#include <adc/core/foundation/types.hpp>\n"
+        "#include <pops/core/state/state.hpp>\n"
+        "#include <pops/core/foundation/types.hpp>\n"
         + src
         + "#include <cstdio>\n"
-        "static_assert(adc_generated::GenBzSrc::n_aux == 4, \"n_aux propage\");\n"
+        "static_assert(pops_generated::GenBzSrc::n_aux == 4, \"n_aux propage\");\n"
         "int main() {\n"
-        "  adc_generated::GenBzSrc g; adc::StateVec<1> u{}; u[0] = 2.0;\n"
-        "  adc::Aux a{}; a.B_z = 0.5;\n"
+        "  pops_generated::GenBzSrc g; pops::StateVec<1> u{}; u[0] = 2.0;\n"
+        "  pops::Aux a{}; a.B_z = 0.5;\n"
         "  auto s = g.apply(u, a);\n"
         "  printf(\"%.17g\\n\", s[0]);\n"
         "  return 0;\n"

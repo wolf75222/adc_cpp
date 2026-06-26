@@ -1,7 +1,7 @@
 # Running adc_cpp on a supercomputer (Spack)
 
 Generic guide to compile and run adc_cpp (header-only C++23 lib +
-Python module `_adc`) on any cluster via Spack, at maximum
+Python module `_pops`) on any cluster via Spack, at maximum
 performance. Optional backends: Kokkos (CPU OpenMP / GPU CUDA),
 MPI (OpenMPI), parallel HDF5.
 
@@ -70,7 +70,7 @@ spack location -i hdf5
 ```
 
 `spack location -i <spec>` prints the install prefix of an already
-installed package; it is used for `-DKokkos_ROOT`, `ADC_KOKKOS_ROOT`, etc.
+installed package; it is used for `-DKokkos_ROOT`, `POPS_KOKKOS_ROOT`, etc.
 
 ## 3. Target the microarchitecture (perf)
 
@@ -108,7 +108,7 @@ spack install kokkos +openmp target=zen4 %gcc@13
 ## 4. Compile adc_cpp
 
 Configure on the login node if CMake/Ninja are missing on the compute nodes;
-the binaries will still be launched by sbatch. The ADC_* options are also
+the binaries will still be launched by sbatch. The POPS_* options are also
 accepted as environment variables.
 
 Core + tests, CPU:
@@ -117,9 +117,9 @@ Core + tests, CPU:
 export KOKKOS_ROOT=$(spack location -i kokkos)
 cmake -S . -B build-cpu -G Ninja \
   -DCMAKE_BUILD_TYPE=Release \
-  -DADC_USE_KOKKOS=ON -DKokkos_ROOT=$KOKKOS_ROOT \
-  -DADC_USE_MPI=ON \
-  -DADC_USE_HDF5=ON
+  -DPOPS_USE_KOKKOS=ON -DKokkos_ROOT=$KOKKOS_ROOT \
+  -DPOPS_USE_MPI=ON \
+  -DPOPS_USE_HDF5=ON
 cmake --build build-cpu -j
 ctest --test-dir build-cpu
 ```
@@ -131,23 +131,23 @@ export KOKKOS_ROOT=$(spack location -i kokkos)   # build +cuda +wrapper
 cmake -S . -B build-gpu -G Ninja \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_CXX_COMPILER=$KOKKOS_ROOT/bin/nvcc_wrapper \
-  -DADC_USE_KOKKOS=ON -DKokkos_ROOT=$KOKKOS_ROOT \
-  -DADC_USE_MPI=ON
+  -DPOPS_USE_KOKKOS=ON -DKokkos_ROOT=$KOKKOS_ROOT \
+  -DPOPS_USE_MPI=ON
 cmake --build build-gpu -j
 ```
 
-Python module `_adc` (scikit-build-core via pip):
+Python module `_pops` (scikit-build-core via pip):
 
 ```sh
-export ADC_USE_KOKKOS=ON
+export POPS_USE_KOKKOS=ON
 export Kokkos_ROOT=$(spack location -i kokkos)
-export ADC_USE_MPI=ON
+export POPS_USE_MPI=ON
 # GPU : ajouter
 # export CMAKE_CXX_COMPILER=$Kokkos_ROOT/bin/nvcc_wrapper
 pip install .                       # dans un venv ou conda env
 ```
 
-The build compiler is baked into `_adc` (the DSL calls it again at runtime,
+The build compiler is baked into `_pops` (the DSL calls it again at runtime,
 see section 5): it must remain accessible on the nodes. Keep the compiler's
 `spack load` (or its module) in the sbatch script.
 
@@ -157,18 +157,18 @@ The module compiles `.so` files at runtime. To export on the nodes:
 
 ```sh
 # parite loader / module : meme Kokkos que celui du build
-export ADC_KOKKOS_ROOT=$(spack location -i kokkos)
+export POPS_KOKKOS_ROOT=$(spack location -i kokkos)
 
 # cache des .so sur le scratch (rapide, partage entre jobs si meme micro-archi)
-export ADC_CACHE_DIR=$SCRATCH/adc_dsl_cache
+export POPS_CACHE_DIR=$SCRATCH/pops_dsl_cache
 
 # flags d'optimisation des .so DSL (defaut "-O3 -DNDEBUG")
-export ADC_DSL_OPTFLAGS="-O3 -DNDEBUG"
+export POPS_DSL_OPTFLAGS="-O3 -DNDEBUG"
 ```
 
-`-march=native` is possible in `ADC_DSL_OPTFLAGS` to gain a few %,
+`-march=native` is possible in `POPS_DSL_OPTFLAGS` to gain a few %,
 but the `.so` cache is then NOT shareable across microarchitectures:
-use a separate `ADC_CACHE_DIR` per node type, or do without it if the
+use a separate `POPS_CACHE_DIR` per node type, or do without it if the
 nodes are heterogeneous.
 
 ## 6. Launch at max perf (sbatch)
@@ -186,8 +186,8 @@ nodes are heterogeneous.
 . ~/spack/share/spack/setup-env.sh   # ou module load spack
 spack load gcc@13 kokkos openmpi     # meme stack que le build
 
-export ADC_KOKKOS_ROOT=$(spack location -i kokkos)
-export ADC_CACHE_DIR=$SCRATCH/adc_dsl_cache
+export POPS_KOKKOS_ROOT=$(spack location -i kokkos)
+export POPS_CACHE_DIR=$SCRATCH/pops_dsl_cache
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 export OMP_PROC_BIND=spread
 export OMP_PLACES=threads
@@ -195,7 +195,7 @@ export OMP_PLACES=threads
 srun --cpu-bind=cores python run_case.py
 ```
 
-In Python, `adc.set_threads(n)` sets `OMP_NUM_THREADS` and `KOKKOS_NUM_THREADS`
+In Python, `pops.set_threads(n)` sets `OMP_NUM_THREADS` and `KOKKOS_NUM_THREADS`
 consistently; the NUMA placement (`OMP_PROC_BIND` / `OMP_PLACES`)
 still has to be set in the environment as above.
 
@@ -213,8 +213,8 @@ still has to be set in the environment as above.
 . ~/spack/share/spack/setup-env.sh
 spack load gcc@13 kokkos openmpi     # kokkos +cuda +wrapper
 
-export ADC_KOKKOS_ROOT=$(spack location -i kokkos)
-export ADC_CACHE_DIR=$SCRATCH/adc_dsl_cache
+export POPS_KOKKOS_ROOT=$(spack location -i kokkos)
+export POPS_CACHE_DIR=$SCRATCH/pops_dsl_cache
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 export OMP_PROC_BIND=spread
 export OMP_PLACES=threads

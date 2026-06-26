@@ -29,14 +29,14 @@
 // (recette device-clean #64/#97), jamais une lambda etendue cross-TU. Le test compile donc partout
 // (CPU + Kokkos Serial/OpenMP/Cuda), comme test_amr_coupled_source_role_strict et add_compiled_model #16/#18.
 
-#include <adc/coupling/source/coupled_source_program.hpp>  // CsOp (opcodes du bytecode P5)
-#include <adc/physics/bricks/bricks.hpp>                   // CompositeModel
-#include <adc/physics/bricks/elliptic.hpp>                 // ChargeDensity
-#include <adc/physics/bricks/hyperbolic.hpp>               // ExBVelocity
-#include <adc/physics/bricks/source.hpp>                   // NoSource
-#include <adc/runtime/builders/compiled/amr_dsl_block.hpp>            // add_compiled_model(AmrSystem&, ...)
-#include <adc/runtime/amr_system.hpp>               // facade AmrSystem
-#include <adc/runtime/config/model_spec.hpp>  // ModelSpec (bloc natif, melange compile + natif)
+#include <pops/coupling/source/coupled_source_program.hpp>  // CsOp (opcodes du bytecode P5)
+#include <pops/physics/bricks/bricks.hpp>                   // CompositeModel
+#include <pops/physics/bricks/elliptic.hpp>                 // ChargeDensity
+#include <pops/physics/bricks/hyperbolic.hpp>               // ExBVelocity
+#include <pops/physics/bricks/source.hpp>                   // NoSource
+#include <pops/runtime/builders/compiled/amr_dsl_block.hpp>            // add_compiled_model(AmrSystem&, ...)
+#include <pops/runtime/amr_system.hpp>               // facade AmrSystem
+#include <pops/runtime/config/model_spec.hpp>  // ModelSpec (bloc natif, melange compile + natif)
 
 #include <cmath>
 #include <cstdio>
@@ -45,11 +45,11 @@
 #include <utility>
 #include <vector>
 
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
 #include <Kokkos_Core.hpp>
 #endif
 
-using namespace adc;
+using namespace pops;
 
 // Modele ExB scalaire (1 var) a charge q, CONNU A LA COMPILATION (type concret, pas de dispatch). q
 // (signe inclus) distingue ions (+1) / electrons (-1) ; q=0 -> bloc neutre (pas de contribution Poisson).
@@ -78,7 +78,7 @@ static ModelSpec exb_spec(double q, double B0) {
 struct StiffMomentumRelax {
   Real inv_eps = Real(0);
   template <class State>
-  ADC_HD State apply(const State& u, const Aux&) const {
+  POPS_HD State apply(const State& u, const Aux&) const {
     State s{};
     if (State::size() > 1)
       s[1] = -inv_eps * u[1];  // -mx / eps
@@ -165,7 +165,7 @@ static double maxabs(const std::vector<double>& v) {
 
 // Enregistre une source ionisation-like CONSERVATIVE entre deux blocs nommes sur le role density :
 // S = k * n_a * n_b ; gain +S sur @p block_gain, perte -S (gain + Neg) sur @p block_loss, MEME cellule.
-// Bytecode postfixe construit a la main, EXACTEMENT comme adc.dsl.CoupledSource.add_pair (cf.
+// Bytecode postfixe construit a la main, EXACTEMENT comme pops.dsl.CoupledSource.add_pair (cf.
 // test_amr_multiblock_coupled_source). Conserve n_a + n_b par cellule a ~machine.
 static void register_ionization(AmrSystem& sim, const std::string& block_a,
                                 const std::string& block_b, const std::string& block_gain,
@@ -185,7 +185,7 @@ static void register_ionization(AmrSystem& sim, const std::string& block_a,
   std::vector<int> prog_args = {0, 1, 0, 2, 0, 0, 1, 0, 2, 0, 0};
   std::vector<int> prog_lens = {5, 6};
   // ADC-214 : description bytecode regroupee dans le POD CoupledSourceProgram (appel auto-documente).
-  adc::CoupledSourceProgram prog;
+  pops::CoupledSourceProgram prog;
   prog.in_blocks = in_blocks;
   prog.in_roles = in_roles;
   prog.consts = consts;
@@ -198,7 +198,7 @@ static void register_ionization(AmrSystem& sim, const std::string& block_a,
 }
 
 int main(int argc, char** argv) {
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   Kokkos::ScopeGuard guard(argc, argv);
 #else
   (void)argc;

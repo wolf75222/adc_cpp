@@ -13,7 +13,7 @@ CETTE BATTERIE tourne en MONO-RANG (pas de harnais MPI cote pytest). Elle verrou
   (a) EQUIVALENCE parallel=True == parallel=False (np=1) : les deux fichiers, relus CHAMP A CHAMP,
       portent les memes etats/phi/attributs (le chemin parallele ecrit des datasets CONTIGUS, le
       serie des datasets gzip : meme VALEURS, pas forcement meme octets HDF5). SKIP si h5py absent OU
-      h5py sans MPI (messages distincts) OU module _adc sans accesseurs locaux (build anterieur).
+      h5py sans MPI (messages distincts) OU module _pops sans accesseurs locaux (build anterieur).
   (b) ERREUR CLAIRE si h5py present mais SANS support MPI : parallel=True leve un RuntimeError avec
       remede (installer h5py compile MPI, ou parallel=False) -- jamais d'ecriture silencieuse.
   (c) REGRESSION : format='hdf5' par defaut (parallel=False) inchange -- relu, l'etat == state_global.
@@ -27,7 +27,7 @@ sur le rang 0, l'egalite champ a champ avec un dump npz gather-rang-0 du MEME et
 """
 import numpy as np
 
-import adc
+import pops
 
 
 class _Skip(Exception):
@@ -70,14 +70,14 @@ pytest = _SkipModule()
 
 
 def _build(n=16):
-    sim = adc.System(n=n, L=1.0, periodic=True)
+    sim = pops.System(n=n, L=1.0, periodic=True)
     sim.set_poisson(rhs="charge_density", solver="geometric_mg", bc="periodic")
     sim.add_block("ions",
-                  adc.Model(state=adc.FluidState("isothermal", cs2=0.5),
-                            transport=adc.IsothermalFlux(),
-                            source=adc.PotentialForce(charge=1.0),
-                            elliptic=adc.ChargeDensity(charge=1.0)),
-                  spatial=adc.FiniteVolume(limiter="minmod"), time=adc.Explicit())
+                  pops.Model(state=pops.FluidState("isothermal", cs2=0.5),
+                            transport=pops.IsothermalFlux(),
+                            source=pops.PotentialForce(charge=1.0),
+                            elliptic=pops.ChargeDensity(charge=1.0)),
+                  spatial=pops.FiniteVolume(limiter="minmod"), time=pops.Explicit())
     x = (np.arange(n) + 0.5) / n
     X, Y = np.meshgrid(x, x, indexing="xy")
     sim.set_density("ions", (1.0 + 0.4 * np.exp(-50.0 * ((X - 0.4) ** 2 + (Y - 0.5) ** 2))).ravel())
@@ -134,7 +134,7 @@ def test_parallel_equals_serial_mono_rank(tmp_path):
     for _ in range(3):
         sim.step(2e-3)
     if not hasattr(sim._s, "local_boxes"):
-        pytest.skip("module _adc sans local_boxes/local_state (build anterieur a ADC-66) : "
+        pytest.skip("module _pops sans local_boxes/local_state (build anterieur a ADC-66) : "
                     "reconstruire adc_cpp pour exercer le chemin parallele")
     p_ser = sim.write(str(tmp_path / "ser"), format="hdf5", parallel=False)
     p_par = sim.write(str(tmp_path / "par"), format="hdf5", parallel=True)
@@ -207,7 +207,7 @@ def manual_np_check():  # pragma: no cover -- lance a la main sous mpirun -n>1 (
     sim = _build(n=32)
     for _ in range(5):
         sim.step(2e-3)
-    out = os.path.join(tempfile.gettempdir(), "adc_hdf5_par_check")
+    out = os.path.join(tempfile.gettempdir(), "pops_hdf5_par_check")
     path = sim.write(out, format="hdf5", parallel=True)
     nv, ny, nx = sim._s.n_vars("ions"), sim._s.ny(), sim._s.nx()
     ref_state = np.asarray(sim.state_global("ions"), dtype=np.float64).reshape(nv, ny, nx)

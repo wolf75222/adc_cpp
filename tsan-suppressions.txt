@@ -1,13 +1,13 @@
 # ThreadSanitizer suppressions -- adc_cpp quality `tsan` job (.github/workflows/quality.yml, ADC-165).
 #
-# A suppression HIDES a diagnostic, so each entry below is justified -- and a race inside include/adc/
+# A suppression HIDES a diagnostic, so each entry below is justified -- and a race inside include/pops/
 # must NEVER be added here (that would be a real bug to fix, not to mask). Kokkos and the LLVM OpenMP
 # runtime (libomp) are LINKED but built WITHOUT -fsanitize=thread: TSan cannot see their internal
 # synchronization (lock-free thread pools, atomics, OMPT-less barriers) and reports benign races
-# inside them. Those are runtime-internal, not adc defects.
+# inside them. Those are runtime-internal, not pops defects.
 #
 # This file is SEEDED. The first weekly run triages signal vs noise (issue ADC-165): every
-# confirmed-benign source gets an entry here with a one-line rationale, and any CONFIRMED race in adc
+# confirmed-benign source gets an entry here with a one-line rationale, and any CONFIRMED race in pops
 # becomes a dedicated High-priority issue instead. Wiring in Archer (the LLVM OMPT race tool, via
 # OMP_TOOL_LIBRARIES) would later model libomp's happens-before and let most libomp entries be dropped.
 #

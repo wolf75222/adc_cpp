@@ -1,6 +1,6 @@
 # Header provenance (relocated by ADC-333)
 
-The generic solver core under `include/adc/**` keeps the mathematical contract,
+The generic solver core under `include/pops/**` keeps the mathematical contract,
 invariants, preconditions, and maintainer warnings. The case/paper/hardware
 narration that used to color those headers (the diocotron reproduction of the
 reference paper, the ROMEO/GH200 runs, cross-repo `adc_cases` tickets) lives here
@@ -79,7 +79,7 @@ the now-merged surface:
   constraint is imposed only at t = 0. Originated as work item "R0" of the magnetic
   Euler-Poisson reproduction (arXiv:2510.11808); the mechanism stays in the header,
   only the case label was dropped.
-- `runtime/system/system_field_solver.hpp` env-gated `ADC_TRACE_SOLVE_FIELDS` stderr trace: a CUDA
+- `runtime/system/system_field_solver.hpp` env-gated `POPS_TRACE_SOLVE_FIELDS` stderr trace: a CUDA
   device-crash diagnostic (the `adc_cases` #93 solve_fields segfault, see "Device
   codegen" above).
 - `runtime/amr_system.hpp::set_conservative_state` + `coupling/amr_coupler_mp.hpp`

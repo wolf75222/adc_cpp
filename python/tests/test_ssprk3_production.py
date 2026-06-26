@@ -2,8 +2,8 @@
 """SSPRK3 expose sur le chemin de PRODUCTION (loader natif .so), pas seulement add_block.
 
 Avant ce chantier, le schema RK explicite n'etait selectionnable que sur le chemin natif
-add_block (modele compose adc.Model) : le chemin compile/production (add_native_block ->
-adc_install_native -> add_compiled_model<ProdModel>) ne marshalait que "explicit"|"imex" et
+add_block (modele compose pops.Model) : le chemin compile/production (add_native_block ->
+pops_install_native -> add_compiled_model<ProdModel>) ne marshalait que "explicit"|"imex" et
 RETOMBAIT SILENCIEUSEMENT sur SSPRK2 -- add_native_block rejetait meme "ssprk3". Le cas hoffart
 (arXiv:2510.11808), qui compile en backend="production", restait donc bloque en SSPRK2.
 
@@ -29,7 +29,7 @@ import tempfile
 
 import numpy as np
 
-import adc
+import pops
 from test_dsl_coupled import build_euler_poisson, GAMMA, INCLUDE
 
 fails = 0
@@ -52,10 +52,10 @@ def err_msg(fn):
 
 def _native_spec():
     """Le MEME modele euler_poisson, version NATIVE composee par briques (reference de parite)."""
-    return adc.Model(state=adc.FluidState("compressible", gamma=GAMMA),
-                     transport=adc.CompressibleFlux(),
-                     source=adc.GravityForce(),
-                     elliptic=adc.GravityCoupling(sign=-1.0, four_pi_G=1.0, rho0=1.0))
+    return pops.Model(state=pops.FluidState("compressible", gamma=GAMMA),
+                     transport=pops.CompressibleFlux(),
+                     source=pops.GravityForce(),
+                     elliptic=pops.GravityCoupling(sign=-1.0, four_pi_G=1.0, rho0=1.0))
 
 
 def _initial_state(n):
@@ -69,7 +69,7 @@ def _initial_state(n):
 
 # --- (1) GARDE-FOU amont : ssprk3 ACCEPTE par add_native_block (echec au dlopen, pas un rejet) -----
 print("== (1) add_native_block(time='ssprk3') : accepte (dlopen fail), 'rk4' rejete ==")
-ss = adc.System(n=16)._s  # facade compilee brute, pour viser add_native_block directement
+ss = pops.System(n=16)._s  # facade compilee brute, pour viser add_native_block directement
 msg_ok = err_msg(lambda: ss.add_native_block("x", "/inexistant.so", limiter="minmod",
                                              riemann="rusanov", recon="conservative", time="ssprk3"))
 chk(msg_ok != "" and "dlopen" in msg_ok and "ssprk3' | 'imex'" not in msg_ok and "explicit' | 'imex'"
@@ -80,10 +80,10 @@ msg_bad = err_msg(lambda: ss.add_native_block("x", "/inexistant.so", limiter="mi
 chk(msg_bad != "" and ("explicit'" in msg_bad and "imex'" in msg_bad),
     "time='rk4' (inconnu) reste rejete par la garde amont (pas de dlopen)")
 
-# --- (2)/(3) PARITE + NON-TRIVIALITE (necessite un compilateur + en-tetes adc) ---------------------
+# --- (2)/(3) PARITE + NON-TRIVIALITE (necessite un compilateur + en-tetes pops) ---------------------
 cxx = shutil.which("c++") or shutil.which("g++") or shutil.which("clang++")
 if not cxx or not os.path.isdir(INCLUDE):
-    print("skip  (2)/(3) : compilateur ou en-tetes adc absents")
+    print("skip  (2)/(3) : compilateur ou en-tetes pops absents")
     print("test_ssprk3_production : OK (garde amont verte, parite non compilee)"
           if fails == 0 else f"{fails} ECHEC(S)")
     sys.exit(0 if fails == 0 else 1)
@@ -98,7 +98,7 @@ try:
     so = e.compile(os.path.join(tmp, "euler_poisson_native.so"), INCLUDE, backend="production")
 
     def build_prod(method):
-        s = adc.System(n=n, L=L, periodic=True)
+        s = pops.System(n=n, L=L, periodic=True)
         s._s.add_native_block("gas", so, limiter="minmod", riemann="rusanov", recon="conservative",
                               time=method, gamma=GAMMA, substeps=1, evolve=True)
         s.set_poisson(rhs="charge_density", solver="geometric_mg")
@@ -106,9 +106,9 @@ try:
         return s
 
     def build_ref_ssprk3():
-        s = adc.System(n=n, L=L, periodic=True)
-        s.add_block("gas", spec, spatial=adc.Spatial(minmod=True, flux="rusanov", recon="conservative"),
-                    time=adc.Explicit(method="ssprk3"))
+        s = pops.System(n=n, L=L, periodic=True)
+        s.add_block("gas", spec, spatial=pops.Spatial(minmod=True, flux="rusanov", recon="conservative"),
+                    time=pops.Explicit(method="ssprk3"))
         s.set_poisson(rhs="charge_density", solver="geometric_mg")
         s.set_state("gas", Uflat)
         return s

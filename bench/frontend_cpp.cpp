@@ -10,28 +10,28 @@
 //   - le decoupage du TEMPS UTILISATEUR cold-cache en etages (model_build / addblock / state_init /
 //     first_step / warmup / run_loop / diag) -- import et dsl_compile sont N/A en C++ (= 0) ;
 //   - les percentiles de la boucle chaude (median / p10 / p90 / cv) sur echantillons par pas ;
-//   - une sortie JSONL (schema "adc_perf_v1") agregee rang 0, consommee par perf/plot_frontend.py ;
+//   - une sortie JSONL (schema "pops_perf_v1") agregee rang 0, consommee par perf/plot_frontend.py ;
 //   - un bascule Poisson (--poisson on|off) : off = transport pur (signal frontend propre, defaut) ;
 //     on = solve elliptique inerte (charge=0) a chaque pas, regime MG-domine (idiome two_euler).
 //
 // Compile/lance avec le MEME backend que la lib (Kokkos Serial / OpenMP / Cuda) et sous MPI (np>1)
 // sans changement, via bench/run_frontend.sh. ZERO optimisation : on ne fait que MESURER.
 
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/layout/distribution_mapping.hpp>
-#include <adc/mesh/boundary/fill_boundary.hpp>
-#include <adc/mesh/execution/for_each.hpp>
-#include <adc/mesh/geometry/geometry.hpp>
-#include <adc/mesh/storage/mf_arith.hpp>
-#include <adc/mesh/storage/multifab.hpp>
-#include <adc/mesh/boundary/physical_bc.hpp>
-#include <adc/numerics/elliptic/mg/geometric_mg.hpp>
-#include <adc/numerics/spatial_operator.hpp>
-#include <adc/parallel/comm.hpp>
-#include <adc/physics/bricks/bricks.hpp>  // CompositeModel, NoSource, ChargeDensity, kAuxBaseComps
-#include <adc/physics/fluids/euler.hpp>   // Euler (brique hyperbolique compressible 4 var)
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/layout/distribution_mapping.hpp>
+#include <pops/mesh/boundary/fill_boundary.hpp>
+#include <pops/mesh/execution/for_each.hpp>
+#include <pops/mesh/geometry/geometry.hpp>
+#include <pops/mesh/storage/mf_arith.hpp>
+#include <pops/mesh/storage/multifab.hpp>
+#include <pops/mesh/boundary/physical_bc.hpp>
+#include <pops/numerics/elliptic/mg/geometric_mg.hpp>
+#include <pops/numerics/spatial_operator.hpp>
+#include <pops/parallel/comm.hpp>
+#include <pops/physics/bricks/bricks.hpp>  // CompositeModel, NoSource, ChargeDensity, kAuxBaseComps
+#include <pops/physics/fluids/euler.hpp>   // Euler (brique hyperbolique compressible 4 var)
 
-#include "common.hpp"  // adc::bench::{timed, PhaseTimers, percentile, eat} (briques de mesure partagees)
+#include "common.hpp"  // pops::bench::{timed, PhaseTimers, percentile, eat} (briques de mesure partagees)
 
 #include <algorithm>
 #include <chrono>
@@ -43,11 +43,11 @@
 #include <string>
 #include <vector>
 
-using namespace adc;
-using adc::bench::Clock;        // std::chrono::steady_clock (horloge des harnais)
-using adc::bench::PhaseTimers;  // accumulateur de temps par phase (total() inutilise ici)
-using adc::bench::timed;        // chronometre une phase (device_fence avant/apres)
-using adc::bench::percentile;   // percentile interpole des temps par pas
+using namespace pops;
+using pops::bench::Clock;        // std::chrono::steady_clock (horloge des harnais)
+using pops::bench::PhaseTimers;  // accumulateur de temps par phase (total() inutilise ici)
+using pops::bench::timed;        // chronometre une phase (device_fence avant/apres)
+using pops::bench::percentile;   // percentile interpole des temps par pas
 
 // ====================================================================================================
 // CONTRAT DU CAS SUR -- ces constantes DOIVENT coincider bit-a-bit avec adc_cases/perf/frontend_compare.py
@@ -69,11 +69,11 @@ inline double wmax() { return std::sqrt(kGamma * (kP0 + kDp) / kRho0); }
 inline double dt_for(int n) { return kCflForDt * (kL / n) / wmax(); }
 }  // namespace safecase
 
-#ifndef ADC_BUILD_SHA
-#define ADC_BUILD_SHA "unknown"  // injecte par CMake (-DADC_BUILD_SHA=...) via run_frontend.sh
+#ifndef POPS_BUILD_SHA
+#define POPS_BUILD_SHA "unknown"  // injecte par CMake (-DPOPS_BUILD_SHA=...) via run_frontend.sh
 #endif
-#ifndef ADC_BUILD_BRANCH
-#define ADC_BUILD_BRANCH "unknown"
+#ifndef POPS_BUILD_BRANCH
+#define POPS_BUILD_BRANCH "unknown"
 #endif
 
 using SafeEuler = CompositeModel<Euler, NoSource, ChargeDensity>;
@@ -233,7 +233,7 @@ int main(int argc, char** argv) {
   std::string poisson = "off", backend = "serial", machine = "unknown";
   double dt_override = -1.0;
   for (int a = 1; a < argc; ++a) {
-    using adc::bench::eat;  // consomme un argument "--cle valeur" (avance a, convertit selon le type)
+    using pops::bench::eat;  // consomme un argument "--cle valeur" (avance a, convertit selon le type)
     if (eat(argc, argv, a, "--n", n)) continue;
     if (eat(argc, argv, a, "--steps", steps)) continue;
     if (eat(argc, argv, a, "--warmup", warmup)) continue;
@@ -346,10 +346,10 @@ int main(int argc, char** argv) {
            t_diag);
 
   if (my_rank() == 0) {
-    // Une ligne JSON (schema adc_perf_v1) consommee par perf/plot_frontend.py. import/dsl_compile = 0.
+    // Une ligne JSON (schema pops_perf_v1) consommee par perf/plot_frontend.py. import/dsl_compile = 0.
     std::printf(
-        "{\"schema\":\"adc_perf_v1\",\"front\":\"cpp\","
-        "\"adc_cpp_sha\":\"%s\",\"adc_cpp_branch\":\"%s\",\"adc_cases_sha\":null,"
+        "{\"schema\":\"pops_perf_v1\",\"front\":\"cpp\","
+        "\"pops_cpp_sha\":\"%s\",\"pops_cpp_branch\":\"%s\",\"pops_cases_sha\":null,"
         "\"backend\":\"%s\",\"machine\":\"%s\",\"ranks\":%d,\"threads\":%d,\"gpus\":%d,"
         "\"nx\":%d,\"ny\":%d,\"boxes\":1,\"max_grid\":%d,"
         "\"workload\":\"euler_safe\",\"limiter\":\"minmod\",\"flux\":\"rusanov\","
@@ -363,7 +363,7 @@ int main(int argc, char** argv) {
         "\"transport\":%.6e,\"reduction\":%.6e,\"fence\":%.6e,\"alloc_tmp\":%.6e},"
         "\"cells_per_s\":%.6e,"
         "\"invariants\":{\"mass\":%.10e,\"rho_min\":%.6e,\"p_min\":%.6e,\"nan\":%s}}\n",
-        ADC_BUILD_SHA, ADC_BUILD_BRANCH, backend.c_str(), machine.c_str(), n_ranks(),
+        POPS_BUILD_SHA, POPS_BUILD_BRANCH, backend.c_str(), machine.c_str(), n_ranks(),
         std::atoi(std::getenv("OMP_NUM_THREADS") ? std::getenv("OMP_NUM_THREADS") : "1"), 0, n, n, n,
         poisson.c_str(), dt, warmup, steps, t_model_build, t_addblock, t_state_init, t_first_step,
         t_warmup, t_run_loop, t_diag, total_cold, med_max, p10_max, p90_max, cv, poisson_ms,

@@ -5,7 +5,7 @@ repository: adc_cpp is the solver, adc_cases holds the named scenarios. This pag
 
 ## Prerequisites
 
-- The `adc` Python module, built from adc_cpp. See [Installation](../getting-started/installation.md).
+- The `pops` Python module, built from adc_cpp. See [Installation](../getting-started/installation.md).
 - A local clone of adc_cases.
 
 ## Run it

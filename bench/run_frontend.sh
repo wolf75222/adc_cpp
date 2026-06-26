@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Construit + lance le front C++ DIRECT (frontend_cpp) du CAS SUR pour UN backend, et imprime sa
-# ligne JSONL (schema adc_perf_v1). MEMES recettes cmake que run_bench.sh ; le SHA/branche sont
+# ligne JSONL (schema pops_perf_v1). MEMES recettes cmake que run_bench.sh ; le SHA/branche sont
 # injectes a la configuration (le binaire ne lance pas git). ZERO optimisation : on ne fait que MESURER.
 #
 # Usage :
@@ -22,8 +22,8 @@ MACHINE="${MACHINE:-$(hostname -s 2>/dev/null || echo unknown)}"
 SHA="$(git -C "$ROOT" rev-parse HEAD 2>/dev/null || echo unknown)"
 BRANCH="$(git -C "$ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo unknown)"
 
-cfg_common=( -DCMAKE_BUILD_TYPE=Release -DADC_BUILD_TESTS=OFF -DADC_BUILD_BENCH=ON
-             -DADC_BUILD_SHA="$SHA" -DADC_BUILD_BRANCH="$BRANCH" )
+cfg_common=( -DCMAKE_BUILD_TYPE=Release -DPOPS_BUILD_TESTS=OFF -DPOPS_BUILD_BENCH=ON
+             -DPOPS_BUILD_SHA="$SHA" -DPOPS_BUILD_BRANCH="$BRANCH" )
 
 emit() {  # $1 = build dir, $2... = lanceur eventuel (mpirun ...)
   local bdir="$1"; shift
@@ -42,23 +42,23 @@ case "$MODE" in
     emit "$B" ;;
   kokkos-omp)
     KROOT="${2:?Kokkos_ROOT requis}"; B="$ROOT/build-frontend-komp"
-    cmake -S "$ROOT" -B "$B" "${cfg_common[@]}" -DADC_USE_KOKKOS=ON -DKokkos_ROOT="$KROOT" >/dev/null
+    cmake -S "$ROOT" -B "$B" "${cfg_common[@]}" -DPOPS_USE_KOKKOS=ON -DKokkos_ROOT="$KROOT" >/dev/null
     cmake --build "$B" --target frontend_cpp -j 2 >/dev/null
     emit "$B" ;;
   kokkos-cuda)
     KROOT="${2:?Kokkos_ROOT requis}"; B="$ROOT/build-frontend-kcuda"
-    cmake -S "$ROOT" -B "$B" "${cfg_common[@]}" -DADC_USE_KOKKOS=ON -DKokkos_ROOT="$KROOT" \
+    cmake -S "$ROOT" -B "$B" "${cfg_common[@]}" -DPOPS_USE_KOKKOS=ON -DKokkos_ROOT="$KROOT" \
       -DCMAKE_CXX_COMPILER="$KROOT/bin/nvcc_wrapper" >/dev/null
     cmake --build "$B" --target frontend_cpp -j 4 >/dev/null
     emit "$B" ;;
   mpi)
     NP="${2:-2}"; B="$ROOT/build-frontend-mpi"
-    cmake -S "$ROOT" -B "$B" "${cfg_common[@]}" -DADC_USE_MPI=ON >/dev/null
+    cmake -S "$ROOT" -B "$B" "${cfg_common[@]}" -DPOPS_USE_MPI=ON >/dev/null
     cmake --build "$B" --target frontend_cpp -j 2 >/dev/null
     emit "$B" mpirun -np "$NP" ;;
   mpi-cuda)
     KROOT="${2:?Kokkos_ROOT requis}"; NP="${3:-2}"; B="$ROOT/build-frontend-mpicuda"
-    cmake -S "$ROOT" -B "$B" "${cfg_common[@]}" -DADC_USE_MPI=ON -DADC_USE_KOKKOS=ON \
+    cmake -S "$ROOT" -B "$B" "${cfg_common[@]}" -DPOPS_USE_MPI=ON -DPOPS_USE_KOKKOS=ON \
       -DKokkos_ROOT="$KROOT" -DCMAKE_CXX_COMPILER="$KROOT/bin/nvcc_wrapper" >/dev/null
     cmake --build "$B" --target frontend_cpp -j 4 >/dev/null
     emit "$B" mpirun -np "$NP" ;;

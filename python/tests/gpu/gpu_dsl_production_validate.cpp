@@ -1,7 +1,7 @@
 // Validation DEVICE (GH200, Kokkos Cuda) + MPI du CHEMIN NATIF DE PRODUCTION du DSL : le backend
 // "production" (#85, add_native_block / emit_cpp_native_loader) branche un modele genere par le DSL
-// dans le System via le gabarit en-tete adc::add_compiled_model<ProdModel>(System&, ...). C'est
-// EXACTEMENT la fonction qu'inline le loader natif genere (adc_install_native) ; le bloc tourne
+// dans le System via le gabarit en-tete pops::add_compiled_model<ProdModel>(System&, ...). C'est
+// EXACTEMENT la fonction qu'inline le loader natif genere (pops_install_native) ; le bloc tourne
 // ensuite le MEME chemin que add_block (fill_boundary = halos MPI, assemble_rhs<Limiter, Flux> device,
 // SSPRK2 du coeur), ZERO-COPIE, device-clean via les FONCTEURS NOMMES de block_builder.hpp (#64).
 //
@@ -20,7 +20,7 @@
 // On lie python/system.cpp (definitions de System::install_block / grid_context / ensure_aux_width,
 // appelees par add_compiled_model), comme le harness frere phase7_system.cpp et le test CPU
 // tests/test_compiled_model_parity.cpp. Le MEME source compile en exec=Cuda (nvcc_wrapper + Kokkos)
-// et en oracle exec=Serial (g++, ADC_HAS_KOKKOS off). --dump=<prefixe> ecrit U (par cellule, tous les
+// et en oracle exec=Serial (g++, POPS_HAS_KOKKOS off). --dump=<prefixe> ecrit U (par cellule, tous les
 // comp) -> diff binaire Cuda vs Serial : on rapporte dmax_abs par cellule avec TOLERANCE (PAS
 // bit-exact apres quelques pas : les reductions Kokkos reassocient les sommes FP, ecart ~1e-13 attendu).
 //
@@ -33,9 +33,9 @@
 // MPI (la seam MPI fill_boundary + collectifs Poisson tourne ; le multi-GPU par decoupage de domaine
 // est le chemin AMR, couvert ailleurs).
 
-#include <adc/physics/bricks/bricks.hpp>     // CompositeModel + Euler + PotentialForce + ChargeDensity
-#include <adc/runtime/builders/compiled/dsl_block.hpp>  // add_compiled_model<Model> (gabarit natif du chemin production)
-#include <adc/runtime/system.hpp>
+#include <pops/physics/bricks/bricks.hpp>     // CompositeModel + Euler + PotentialForce + ChargeDensity
+#include <pops/runtime/builders/compiled/dsl_block.hpp>  // add_compiled_model<Model> (gabarit natif du chemin production)
+#include <pops/runtime/system.hpp>
 
 #include <cmath>
 #include <cstdio>
@@ -44,23 +44,23 @@
 #include <string>
 #include <vector>
 
-#include <adc/parallel/comm.hpp>  // comm_init, my_rank, n_ranks, all_reduce_max
+#include <pops/parallel/comm.hpp>  // comm_init, my_rank, n_ranks, all_reduce_max
 
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
 #include <Kokkos_Core.hpp>
 #endif
 
-using namespace adc;
+using namespace pops;
 
 // Modele genere par le DSL pour un euler_poisson couple : transport compressible (4 var : rho, rho u,
 // rho v, E ; pression de gaz parfait -> HLLC disponible) + force du potentiel (q/m) rho E (E = -grad
 // phi, lue dans aux) + densite de charge q rho au second membre du Poisson. C'est la forme exacte d'un
-// CompositeModel<Hyp, Src, Ell> qu'emet _emit_bricks (cf. python/adc/dsl.py).
+// CompositeModel<Hyp, Src, Ell> qu'emet _emit_bricks (cf. python/pops/dsl.py).
 using ProdModel = CompositeModel<Euler, PotentialForce, ChargeDensity>;
 
 int main(int argc, char** argv) {
   comm_init(&argc, &argv);
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   // L'allocateur unifie (kokkos_malloc<SharedSpace>) exige Kokkos initialise AVANT la 1ere allocation
   // (le ctor de System alloue l'aux) : ScopeGuard (RAII) avant toute construction de System.
   Kokkos::ScopeGuard guard(argc, argv);
@@ -75,7 +75,7 @@ int main(int argc, char** argv) {
     if (std::strncmp(argv[k], "--dump=", 7) == 0)
       dump_prefix = argv[k] + 7;
 
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   const char* space = Kokkos::DefaultExecutionSpace::name();
 #else
   const char* space = "Serial(host)";
@@ -88,10 +88,10 @@ int main(int argc, char** argv) {
       ++fails;
     }
   };
-  // Trace d'etape OPTIONNELLE (ADC_DSLPROD_TRACE=1) : ecrit sur stderr, flush immediat, pour localiser
+  // Trace d'etape OPTIONNELLE (POPS_DSLPROD_TRACE=1) : ecrit sur stderr, flush immediat, pour localiser
   // un eventuel crash device entre construction / add_compiled_model / solve_fields / step. Inerte par
   // defaut (aucun effet sur les sorties machine-parsables). Utile au diagnostic GH200.
-  const bool trace = (me == 0) && std::getenv("ADC_DSLPROD_TRACE");
+  const bool trace = (me == 0) && std::getenv("POPS_DSLPROD_TRACE");
   auto step_mark = [&](const char* w) {
     if (trace) {
       std::fprintf(stderr, "[trace] %s\n", w);
@@ -122,9 +122,9 @@ int main(int argc, char** argv) {
       ProdModel{Euler{Real(gamma)}, PotentialForce{Real(qom)}, ChargeDensity{Real(qcharge)}},
       "minmod", "hllc", "primitive", "explicit", /*gamma=*/gamma);
   step_mark("apres add_compiled_model");
-  // Solveur Poisson : geometric_mg par defaut (tout cas) ; ADC_DSLPROD_SOLVER=fft pour le FFT
+  // Solveur Poisson : geometric_mg par defaut (tout cas) ; POPS_DSLPROD_SOLVER=fft pour le FFT
   // periodique (n = 2^k) -- utile au diagnostic device. n = 64 satisfait les deux.
-  const char* solver_env = std::getenv("ADC_DSLPROD_SOLVER");
+  const char* solver_env = std::getenv("POPS_DSLPROD_SOLVER");
   const std::string solver = solver_env ? solver_env : "geometric_mg";
   sim.set_poisson("charge_density", solver);
   step_mark("apres set_poisson");
@@ -162,7 +162,7 @@ int main(int argc, char** argv) {
   }
   step_mark("apres tous les step");
 
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   Kokkos::
       fence();  // ceinture avant la lecture hote (get_state / potential fencent deja en interne)
 #endif

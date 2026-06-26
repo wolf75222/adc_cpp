@@ -41,32 +41,32 @@
 // write_state est en fait no-op sur un rang vide, mais on garde la garde owns). set_potential et
 // set_clock sont MPI-safe (no-op sur les rangs vides). step() / step_cfl() sont collectifs.
 
-#include <adc/physics/composition/composite.hpp>
-#include <adc/physics/fluids/euler.hpp>      // Euler (bloc fluide a 4 composantes, etat conservatif riche)
-#include <adc/physics/bricks/source.hpp>     // NoSource
-#include <adc/runtime/builders/compiled/dsl_block.hpp>  // add_compiled_model
-#include <adc/runtime/system.hpp>
+#include <pops/physics/composition/composite.hpp>
+#include <pops/physics/fluids/euler.hpp>      // Euler (bloc fluide a 4 composantes, etat conservatif riche)
+#include <pops/physics/bricks/source.hpp>     // NoSource
+#include <pops/runtime/builders/compiled/dsl_block.hpp>  // add_compiled_model
+#include <pops/runtime/system.hpp>
 
-#include <adc/parallel/comm.hpp>
+#include <pops/parallel/comm.hpp>
 
 #include <cmath>
 #include <cstdio>
 #include <vector>
 
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
 #include <Kokkos_Core.hpp>
 #endif
-#ifdef ADC_HAS_MPI
+#ifdef POPS_HAS_MPI
 #include <mpi.h>
 #endif
 
-using namespace adc;
+using namespace pops;
 
 // Brique elliptique de CHARGE : alimente le second membre du Poisson (charge q n = rho = comp 0),
 // pour que potential_global() renvoie un potentiel non trivial. Identique a test_mpi_system_solve_fields.
 struct ChargeEll {
   template <class State>
-  ADC_HD Real rhs(const State& u) const {
+  POPS_HD Real rhs(const State& u) const {
     return u[0];
   }
 };
@@ -75,7 +75,7 @@ using GasModel = CompositeModel<Euler, NoSource, ChargeEll>;  // Euler + charge 
 
 int main(int argc, char** argv) {
   comm_init(&argc, &argv);
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   Kokkos::ScopeGuard guard(argc, argv);
 #endif
   const int me = my_rank(), np = n_ranks();
@@ -217,7 +217,7 @@ int main(int argc, char** argv) {
     std::printf("[rank %d/%d] np=%d  mass=%.12f  |phi|gathered=%zu  OK gather+restart\n", me, np,
                 np, m_sys, pG.size());
 
-#ifdef ADC_HAS_MPI
+#ifdef POPS_HAS_MPI
   if (np > 1) {
     long g = 0;
     MPI_Allreduce(&fails, &g, 1, MPI_LONG, MPI_SUM, MPI_COMM_WORLD);

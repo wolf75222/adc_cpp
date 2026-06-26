@@ -20,7 +20,7 @@ After cleanup, each document has an exclusive scope:
 | `DSL_MODEL_DESIGN.md` (or future Sphinx) | Python user API: facade `dsl.Model`, `CompositeModel`, `add_equation`, status by phase |
 | `GPU_RUNTIME_PORT.md` | GH200 validation log: phases, numeric results, fixed bugs, perf caveats |
 | `PAPER_ROADMAP.md` | Science: Hoffart target, O5 sweep, ring-edge blocker, baskets 1-4 |
-| `COUPLER_HIERARCHY.md` | Exhaustive reference of the couplers in `include/adc/coupling/` |
+| `COUPLER_HIERARCHY.md` | Exhaustive reference of the couplers in `include/pops/coupling/` |
 | `SCHUR_CONDENSATION_DESIGN.md` | Spec of the Schur source stage (design only, PR0-PR8) |
 | `AMR_MULTIBLOCK_DESIGN.md` | Spec of the Phase 1 multi-block AMR (design only, PR i-viii) |
 | `BACKEND_COVERAGE.md` (to create) | Backend matrix: which path (add_block/aot/production/amr), which GPU/MPI/AMR, which limit |
@@ -57,7 +57,7 @@ The README is 373 lines and contains:
 - (h) Section "Using the core" (lines 215-228): CMake snippet + PhysicalModel contract. To
   keep in brief (it is the hook), but the detailed description (module table) is
   in ARCHITECTURE.md.
-- (i) Section "Python module adc" (lines 230-302): very long. The essentials (add_block,
+- (i) Section "Python module pops" (lines 230-302): very long. The essentials (add_block,
   add_equation, AmrSystem example) stay in the README; the detail of each adder and the
   advanced/legacy paths go in DSL_MODEL_DESIGN.md.
 - (j) Section "Ecosystem" (lines 304-312): KEEP here (this is navigation).
@@ -195,7 +195,7 @@ anchors, the full definition is here). OK as is.
 | Current limits (AmrSystem mono-block, fft refused with MPI, AmrSystem.potential() IN PROGRESS) | README + DSL_MODEL_DESIGN 0bis | DSL_MODEL_DESIGN 0bis only |
 | Python add_block multi-species example | README + DSL_MODEL_DESIGN | README (brief) + DSL_MODEL_DESIGN (detail) |
 | GH200 validation status (phases 1-11, numbers) | README "Validation" + GPU_RUNTIME_PORT | GPU_RUNTIME_PORT only |
-| CMake backends (ADC_USE_KOKKOS, ADC_USE_MPI...) | README + ARCHITECTURE | README (CMake snippet, 6 lines); ARCHITECTURE section 9 (detail) |
+| CMake backends (POPS_USE_KOKKOS, POPS_USE_MPI...) | README + ARCHITECTURE | README (CMake snippet, 6 lines); ARCHITECTURE section 9 (detail) |
 | Seam for_each_cell + device_fence | README + ARCHITECTURE + ALGORITHMS | ARCHITECTURE section 4 + ALGORITHMS section 20 (1 link) |
 | Backend capability matrix (GPU/MPI/AMR per path) | DSL_MODEL_DESIGN section 5 | DSL_MODEL_DESIGN section 5 AND BACKEND_COVERAGE.md (to create) |
 | Status of the GPU/MPI production paths | README + PAPER_ROADMAP + DSL_MODEL_DESIGN + GPU_RUNTIME_PORT | GPU_RUNTIME_PORT only, with links in the others |
@@ -227,7 +227,7 @@ lines (vs 373 today), i.e. a reduction of 60-65%.
 5. Multi-species section: SHORTENED to 5-6 lines + link to ARCHITECTURE.md section 5.
 6. Backends section: SHORTENED to CMake snippet (4 lines) + link to ARCHITECTURE.md section 9.
 7. "Using the core": FetchContent snippet (6 lines). KEEP.
-8. "Python module adc": SHORTENED to the minimal example add_block/set_poisson/step_cfl (12 lines)
+8. "Python module pops": SHORTENED to the minimal example add_block/set_poisson/step_cfl (12 lines)
    + brief description of AmrSystem + link to DSL_MODEL_DESIGN.md and ARCHITECTURE.md.
 9. "Ecosystem": KEEP (navigation, 6-line table).
 10. "Build and tests": KEEP (snippet + CMake options table, ~15 lines).
@@ -254,7 +254,7 @@ lines (vs 373 today), i.e. a reduction of 60-65%.
 5. Systemes multi-especes         (6 lignes + lien ARCHITECTURE)
 6. Backends CMake                 (6 lignes + lien ARCHITECTURE)
 7. Utiliser le coeur (FetchContent) (8 lignes)
-8. Module Python adc (exemple)    (15 lignes, lien DSL_MODEL_DESIGN)
+8. Module Python pops (exemple)    (15 lignes, lien DSL_MODEL_DESIGN)
 9. Ecosysteme                     (10 lignes)
 10. Build et tests                (15 lignes)
 11. Organisation du depot         (8 lignes, lien ARCHITECTURE section 13)

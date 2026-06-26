@@ -1,4 +1,4 @@
-"""Phase 2b grille polaire : chemin POLAIRE complet a travers adc.System(mesh=adc.PolarMesh(...)).
+"""Phase 2b grille polaire : chemin POLAIRE complet a travers pops.System(mesh=pops.PolarMesh(...)).
 
 Valide le LIVRABLE Python : un System polaire se construit (anneau global r x theta), recoit un bloc
 ExB scalaire + un Poisson polaire, une densite annulaire, puis avance par step() ET step_cfl() en
@@ -17,7 +17,7 @@ import math
 
 import numpy as np
 
-import adc
+import pops
 
 
 def _annular_density(nr, nth, rmin, rmax):
@@ -42,12 +42,12 @@ def _flat(field):
 
 def test_polar_system_step_and_cfl_conserve_mass():
     rmin, rmax, nr, nth = 0.30, 1.00, 48, 48
-    sim = adc.System(mesh=adc.PolarMesh(r_min=rmin, r_max=rmax, nr=nr, ntheta=nth))
+    sim = pops.System(mesh=pops.PolarMesh(r_min=rmin, r_max=rmax, nr=nr, ntheta=nth))
     sim.add_block(
         "ne",
-        model=adc.Model(state=adc.Scalar(), transport=adc.ExB(B0=1.0),
-                        source=adc.NoSource(), elliptic=adc.ChargeDensity(charge=1.0)),
-        spatial=adc.Spatial(minmod=True), time=adc.Explicit())
+        model=pops.Model(state=pops.Scalar(), transport=pops.ExB(B0=1.0),
+                        source=pops.NoSource(), elliptic=pops.ChargeDensity(charge=1.0)),
+        spatial=pops.Spatial(minmod=True), time=pops.Explicit())
     sim.set_poisson(rhs="charge_density", solver="polar", bc="dirichlet")
     sim.set_density("ne", _annular_density(nr, nth, rmin, rmax))
 
@@ -84,19 +84,19 @@ def test_polar_rejects_nr_below_3():
     # REFUSE explicitement, aux DEUX niveaux. (1) PolarMesh leve a la construction du maillage.
     raised = False
     try:
-        adc.PolarMesh(r_min=0.3, r_max=1.0, nr=2, ntheta=8)
+        pops.PolarMesh(r_min=0.3, r_max=1.0, nr=2, ntheta=8)
     except ValueError:
         raised = True
     assert raised, "PolarMesh(nr=2) doit lever (nr >= 3 requis)"
 
     # (2) Un appelant qui construit le SystemConfig a la main (contourne PolarMesh) doit aussi etre
     # protege par check_geometry cote C++.
-    cfg = adc.SystemConfig()
+    cfg = pops.SystemConfig()
     cfg.geometry = "polar"
     cfg.r_min, cfg.r_max, cfg.nr, cfg.ntheta = 0.3, 1.0, 2, 8
     raised = False
     try:
-        adc.System(config=cfg)
+        pops.System(config=cfg)
     except Exception:
         raised = True
     assert raised, "System(geometry='polar', nr=2) doit lever cote C++ (check_geometry)"

@@ -3,8 +3,8 @@ build keye sur le modele. PUR-PYTHON / ergonomie : aucune numerique nouvelle, me
 
 On verifie :
 (1) PUR-PYTHON (aucun compilateur requis) :
-    - adc_include() auto-detecte le dossier d'en-tetes (ici via ADC_INCLUDE, sinon le paquet) ;
-    - adc_cache_dir() respecte ADC_CACHE_DIR et cree le dossier ;
+    - pops_include() auto-detecte le dossier d'en-tetes (ici via POPS_INCLUDE, sinon le paquet) ;
+    - pops_cache_dir() respecte POPS_CACHE_DIR et cree le dossier ;
     - la cle de cache (model_hash + abi_key + backend/target/name) DIFFERE quand le modele change
       (param, formule, backend), et est STABLE pour un modele identique.
 (2) BOUT EN BOUT (saute sans compilateur / en-tetes) :
@@ -24,8 +24,8 @@ import time
 
 import numpy as np
 
-import adc
-from adc import dsl
+import pops
+from pops import dsl
 
 INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "include"))
 GAMMA = 1.6667  # gamma NON STANDARD (5/3)
@@ -63,22 +63,22 @@ def initial_state(n):
 
 def pure_python_checks():
     """(1) Auto-detection + cle de cache : aucun compilateur requis."""
-    # adc_cache_dir respecte ADC_CACHE_DIR (override) et cree le dossier
+    # pops_cache_dir respecte POPS_CACHE_DIR (override) et cree le dossier
     cache = tempfile.mkdtemp()
-    old = os.environ.get("ADC_CACHE_DIR")
-    os.environ["ADC_CACHE_DIR"] = cache
+    old = os.environ.get("POPS_CACHE_DIR")
+    os.environ["POPS_CACHE_DIR"] = cache
     try:
-        assert os.path.normpath(dsl.adc_cache_dir()) == os.path.normpath(cache), \
-            "adc_cache_dir doit honorer ADC_CACHE_DIR"
-        print("OK  adc_cache_dir() honore ADC_CACHE_DIR")
+        assert os.path.normpath(dsl.pops_cache_dir()) == os.path.normpath(cache), \
+            "pops_cache_dir doit honorer POPS_CACHE_DIR"
+        print("OK  pops_cache_dir() honore POPS_CACHE_DIR")
 
-        # adc_include : si ADC_INCLUDE pointe sur un include valide, il est retenu en priorite
+        # pops_include : si POPS_INCLUDE pointe sur un include valide, il est retenu en priorite
         if os.path.isdir(INCLUDE):
-            os.environ["ADC_INCLUDE"] = INCLUDE
-            assert os.path.normpath(dsl.adc_include()) == os.path.normpath(INCLUDE), \
-                "adc_include doit honorer ADC_INCLUDE"
-            del os.environ["ADC_INCLUDE"]
-            print("OK  adc_include() honore ADC_INCLUDE")
+            os.environ["POPS_INCLUDE"] = INCLUDE
+            assert os.path.normpath(dsl.pops_include()) == os.path.normpath(INCLUDE), \
+                "pops_include doit honorer POPS_INCLUDE"
+            del os.environ["POPS_INCLUDE"]
+            print("OK  pops_include() honore POPS_INCLUDE")
 
         # cle de cache : meme modele -> meme chemin ; param/formule/backend differents -> chemin different
         abi = "fakeabikey"
@@ -115,9 +115,9 @@ def pure_python_checks():
               "target/abi")
     finally:
         if old is None:
-            os.environ.pop("ADC_CACHE_DIR", None)
+            os.environ.pop("POPS_CACHE_DIR", None)
         else:
-            os.environ["ADC_CACHE_DIR"] = old
+            os.environ["POPS_CACHE_DIR"] = old
         shutil.rmtree(cache, ignore_errors=True)
 
 
@@ -126,16 +126,16 @@ def end_to_end_checks():
     forme explicite (retro-compat)."""
     cxx = shutil.which("c++") or shutil.which("g++") or shutil.which("clang++")
     if not cxx or not os.path.isdir(INCLUDE):
-        print("skip  compilateur ou en-tetes adc absents -> bout-en-bout saute")
+        print("skip  compilateur ou en-tetes pops absents -> bout-en-bout saute")
         return
 
     n = 24
     cache = tempfile.mkdtemp()
     explicit = tempfile.mkdtemp()
-    old_cache = os.environ.get("ADC_CACHE_DIR")
-    old_inc = os.environ.get("ADC_INCLUDE")
-    os.environ["ADC_CACHE_DIR"] = cache
-    os.environ["ADC_INCLUDE"] = INCLUDE  # rend l'auto-detection robuste meme hors paquet installe
+    old_cache = os.environ.get("POPS_CACHE_DIR")
+    old_inc = os.environ.get("POPS_INCLUDE")
+    os.environ["POPS_CACHE_DIR"] = cache
+    os.environ["POPS_INCLUDE"] = INCLUDE  # rend l'auto-detection robuste meme hors paquet installe
     try:
         for backend, exp_adder in (("aot", "add_compiled_block"), ("production", "add_native_block")):
             m = build_euler("euler_%s" % backend)
@@ -152,8 +152,8 @@ def end_to_end_checks():
                   % (backend, cm.adder, os.path.basename(cm.so_path)))
 
             # (b) branchable via add_equation et tourne
-            s = adc.System(n=n, periodic=True)
-            s.add_equation("gas", cm, spatial=adc.FiniteVolume(limiter="minmod", riemann="hllc",
+            s = pops.System(n=n, periodic=True)
+            s.add_equation("gas", cm, spatial=pops.FiniteVolume(limiter="minmod", riemann="hllc",
                                                                variables="primitive"))
             s.set_poisson(rhs="charge_density", solver="geometric_mg")
             s.set_state("gas", initial_state(n))
@@ -184,15 +184,15 @@ def end_to_end_checks():
         ex_path = os.path.join(explicit, "explicit.so")
         cm_ex = m.compile(ex_path, INCLUDE, backend="aot")
         assert cm_ex.so_path == ex_path and os.path.exists(ex_path), "so_path explicite casse"
-        s = adc.System(n=n, periodic=True)
-        s.add_equation("gas", cm_ex, spatial=adc.FiniteVolume(limiter="minmod", riemann="hllc",
+        s = pops.System(n=n, periodic=True)
+        s.add_equation("gas", cm_ex, spatial=pops.FiniteVolume(limiter="minmod", riemann="hllc",
                                                               variables="primitive"))
         s.set_poisson(rhs="charge_density", solver="geometric_mg")
         s.set_state("gas", initial_state(n))
         assert s.run(t_end=0.02, cfl=0.4) > 0, "run via so_path explicite instable"
         print("OK  retro-compat : compile(so_path, include, ...) explicite marche toujours")
     finally:
-        for k, v in (("ADC_CACHE_DIR", old_cache), ("ADC_INCLUDE", old_inc)):
+        for k, v in (("POPS_CACHE_DIR", old_cache), ("POPS_INCLUDE", old_inc)):
             if v is None:
                 os.environ.pop(k, None)
             else:

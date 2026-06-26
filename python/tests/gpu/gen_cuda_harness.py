@@ -1,5 +1,5 @@
 """Genere un harnais CUDA : la brique EulerGen GENEREE tourne dans un kernel __global__ sur le GPU,
-et on compare son flux a adc::Euler calcule sur l'hote. Placeholder __BRICK__ (pas de % pour ne pas
+et on compare son flux a pops::Euler calcule sur l'hote. Placeholder __BRICK__ (pas de % pour ne pas
 heurter les printf)."""
 import sys
 sys.path.insert(0, "python/tests")
@@ -7,8 +7,8 @@ from test_dsl_brick import build_euler_brick
 
 brick = build_euler_brick().emit_cpp_brick(name="EulerGen")  # CSE active par defaut
 
-HARNESS = r"""// harnais CUDA : brique generee sur GPU (H100) vs adc::Euler sur hote.
-#include <adc/physics/fluids/euler.hpp>
+HARNESS = r"""// harnais CUDA : brique generee sur GPU (H100) vs pops::Euler sur hote.
+#include <pops/physics/fluids/euler.hpp>
 __BRICK__
 #include <cstdio>
 #include <cmath>
@@ -16,10 +16,10 @@ __BRICK__
 __global__ void kflux(const double* U, double* Fx, double* Fy, int n) {
   int t = blockIdx.x * blockDim.x + threadIdx.x;
   if (t >= n) return;
-  adc::StateVec<4> u{};
+  pops::StateVec<4> u{};
   for (int i = 0; i < 4; ++i) u[i] = U[t * 4 + i];
-  adc::Aux a{};
-  adc_generated::EulerGen gen;          // brique GENEREE, executee sur le device
+  pops::Aux a{};
+  pops_generated::EulerGen gen;          // brique GENEREE, executee sur le device
   auto fx = gen.flux(u, a, 0);
   auto fy = gen.flux(u, a, 1);
   for (int i = 0; i < 4; ++i) { Fx[t * 4 + i] = fx[i]; Fy[t * 4 + i] = fy[i]; }
@@ -39,10 +39,10 @@ int main() {
   cudaMemcpy(hFx, dFx, sizeof(hU), cudaMemcpyDeviceToHost);
   cudaMemcpy(hFy, dFy, sizeof(hU), cudaMemcpyDeviceToHost);
 
-  adc::Euler ref; ref.gamma = 1.4; adc::Aux a{};
+  pops::Euler ref; ref.gamma = 1.4; pops::Aux a{};
   double md = 0.0;
   for (int t = 0; t < n; ++t) {
-    adc::StateVec<4> u{};
+    pops::StateVec<4> u{};
     for (int i = 0; i < 4; ++i) u[i] = hU[t * 4 + i];
     auto rx = ref.flux(u, a, 0); auto ry = ref.flux(u, a, 1);
     for (int i = 0; i < 4; ++i) {
@@ -51,7 +51,7 @@ int main() {
     }
   }
   cudaDeviceProp p; cudaGetDeviceProperties(&p, 0);
-  printf("device=%s  maxdiff(GPU EulerGen vs hote adc::Euler)=%.3e\n", p.name, md);
+  printf("device=%s  maxdiff(GPU EulerGen vs hote pops::Euler)=%.3e\n", p.name, md);
   return md < 1e-12 ? 0 : 1;
 }
 """

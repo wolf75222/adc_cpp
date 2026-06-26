@@ -7,8 +7,8 @@ Program IRs are identical -- the board notation is sugar, not a new IR.
 
 Run: python3 examples/spec3/board_time_predictor_corrector.py
 """
-from adc.time import Program
-from adc.math import unknown
+from pops.time import Program
+from pops.math import unknown
 
 
 def _ir(P):

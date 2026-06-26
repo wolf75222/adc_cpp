@@ -1,8 +1,8 @@
 // ADC-359 flux subdivision of the compressible (Euler) single-block compiled AMR seam: only the hllc
 // flux's build_amr_compiled leaves. See amr_compiled_compressible.cpp (the riemann dispatcher).
-#include <adc/runtime/builders/block/amr_block_seam.hpp>
+#include <pops/runtime/builders/block/amr_block_seam.hpp>
 
-namespace adc::detail {
+namespace pops::detail {
 
 AmrCompiledHooks build_amr_compiled_compressible_hllc(const ModelSpec& spec,
                                                       const std::string& limiter,
@@ -13,4 +13,4 @@ AmrCompiledHooks build_amr_compiled_compressible_hllc(const ModelSpec& spec,
                                      });
 }
 
-}  // namespace adc::detail
+}  // namespace pops::detail

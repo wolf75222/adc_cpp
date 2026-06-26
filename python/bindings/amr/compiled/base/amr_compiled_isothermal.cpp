@@ -1,7 +1,7 @@
 // ADC-335 (P0-B): single-block AMR seam (AmrCouplerMP) for the isothermal transport. See amr_block_seam.hpp.
-#include <adc/runtime/builders/block/amr_block_seam.hpp>
+#include <pops/runtime/builders/block/amr_block_seam.hpp>
 
-namespace adc::detail {
+namespace pops::detail {
 
 AmrCompiledHooks build_amr_compiled_isothermal(const ModelSpec& spec, const std::string& limiter,
                                                const std::string& riemann,
@@ -10,4 +10,4 @@ AmrCompiledHooks build_amr_compiled_isothermal(const ModelSpec& spec, const std:
                                 limiter, riemann, bp);
 }
 
-}  // namespace adc::detail
+}  // namespace pops::detail

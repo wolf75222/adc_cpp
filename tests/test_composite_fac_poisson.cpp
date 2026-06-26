@@ -1,5 +1,5 @@
 // Solveur Poisson COMPOSITE FAC 2 niveaux (CompositeFacPoisson) : test MMS / convergence.
-// Cf. include/adc/numerics/elliptic/composite_fac_poisson.hpp.
+// Cf. include/pops/numerics/elliptic/composite_fac_poisson.hpp.
 //
 // On resout Lap phi = f sur un domaine [0,1]^2 carre, Dirichlet phi = 0 au bord, avec une solution
 // MANUFACTUREE u_exact = sin(3 pi x) sin(3 pi y) (nulle au bord), f = Lap u = -18 pi^2 u. On compare,
@@ -14,21 +14,21 @@
 //
 // Serie (Kokkos OFF). Le grossier est mono-box replique ; la FAC mono-rang est validee ici.
 
-#include <adc/numerics/elliptic/mg/composite_fac_poisson.hpp>
+#include <pops/numerics/elliptic/mg/composite_fac_poisson.hpp>
 
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/layout/distribution_mapping.hpp>
-#include <adc/mesh/execution/for_each.hpp>
-#include <adc/mesh/geometry/geometry.hpp>
-#include <adc/mesh/storage/multifab.hpp>
-#include <adc/mesh/boundary/physical_bc.hpp>
-#include <adc/numerics/elliptic/mg/geometric_mg.hpp>
-#include <adc/parallel/comm.hpp>
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/layout/distribution_mapping.hpp>
+#include <pops/mesh/execution/for_each.hpp>
+#include <pops/mesh/geometry/geometry.hpp>
+#include <pops/mesh/storage/multifab.hpp>
+#include <pops/mesh/boundary/physical_bc.hpp>
+#include <pops/numerics/elliptic/mg/geometric_mg.hpp>
+#include <pops/parallel/comm.hpp>
 
 #include <cmath>
 #include <cstdio>
 
-using namespace adc;
+using namespace pops;
 static constexpr double kPi = 3.14159265358979323846;
 
 static double u_exact(double x, double y) {

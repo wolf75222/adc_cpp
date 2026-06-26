@@ -19,7 +19,7 @@ Run::
 
     python examples/time_programs/predictor_corrector_poisson_lorentz.py
 
-Requires a compiler + a visible Kokkos (``ADC_KOKKOS_ROOT``); prints a skip notice and exits 0
+Requires a compiler + a visible Kokkos (``POPS_KOKKOS_ROOT``); prints a skip notice and exits 0
 otherwise. cf. docs/sphinx/reference/time-program.md.
 """
 import sys
@@ -27,11 +27,11 @@ import sys
 try:
     import numpy as np
 
-    import adc
-    from adc import dsl
-    from adc import time as adctime
+    import pops
+    from pops import dsl
+    from pops import time as adctime
 except Exception as exc:  # noqa: BLE001
-    print("skip predictor_corrector_poisson_lorentz (adc/numpy unavailable: %s)" % exc)
+    print("skip predictor_corrector_poisson_lorentz (pops/numpy unavailable: %s)" % exc)
     sys.exit(0)
 
 N = 16
@@ -106,11 +106,11 @@ def predictor_corrector_program(name="predictor_corrector_poisson_lorentz"):
 def make_sim(model):
     """A System carrying ONE block (the given DSL model, production backend) + shared Poisson + B_z.
     Returns (sim, U0) with U0 the initial conservative state (n_vars, N, N)."""
-    sim = adc.System(n=N, L=1.0, periodic=True)
+    sim = pops.System(n=N, L=1.0, periodic=True)
     compiled = model.compile(backend="production")
     sim.add_equation("plasma", compiled,
-                     spatial=adc.FiniteVolume(limiter="none", riemann="rusanov"),
-                     time=adc.Explicit(method="euler"))
+                     spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                     time=pops.Explicit(method="euler"))
     sim.set_poisson("charge_density", "geometric_mg")
     sim.set_magnetic_field(BZ * np.ones(N * N))  # constant B_z over the grid
     x = (np.arange(N) + 0.5) / N
@@ -145,11 +145,11 @@ def analytic_lorentz_apply(U):
 
 
 def main():
-    if not hasattr(adc.System(n=8, L=1.0, periodic=True), "install_program"):
-        print("skip predictor_corrector_poisson_lorentz (_adc lacks install_program; rebuild _adc)")
+    if not hasattr(pops.System(n=8, L=1.0, periodic=True), "install_program"):
+        print("skip predictor_corrector_poisson_lorentz (_pops lacks install_program; rebuild _pops)")
         return 0
     try:
-        compiled = adc.compile_problem(model=named_source_model("pc_prog"),
+        compiled = pops.compile_problem(model=named_source_model("pc_prog"),
                                        time=predictor_corrector_program())
         sim, U0 = make_sim(named_source_model("pc_block"))
         ref = make_sim(default_source_model("pc_ref_block"))[0]

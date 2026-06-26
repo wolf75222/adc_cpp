@@ -24,21 +24,21 @@
 // COLLECTIVES (all_reduce dans dot / max_wave_speed_mf, halos) sur ce decoupage mono-box, fidele a
 // System (lui-meme mono-box). On mesure le pas de System tel quel, pas un cas a charge repartie.
 
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/layout/distribution_mapping.hpp>
-#include <adc/mesh/boundary/fill_boundary.hpp>
-#include <adc/mesh/execution/for_each.hpp>
-#include <adc/mesh/geometry/geometry.hpp>
-#include <adc/mesh/storage/mf_arith.hpp>
-#include <adc/mesh/storage/multifab.hpp>
-#include <adc/mesh/boundary/physical_bc.hpp>
-#include <adc/numerics/elliptic/mg/geometric_mg.hpp>
-#include <adc/numerics/elliptic/poisson/poisson_fft_solver.hpp>
-#include <adc/numerics/spatial_operator.hpp>
-#include <adc/parallel/comm.hpp>
-#include <adc/physics/bricks/bricks.hpp>  // CompositeModel, ExBVelocity, NoSource, ChargeDensity
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/layout/distribution_mapping.hpp>
+#include <pops/mesh/boundary/fill_boundary.hpp>
+#include <pops/mesh/execution/for_each.hpp>
+#include <pops/mesh/geometry/geometry.hpp>
+#include <pops/mesh/storage/mf_arith.hpp>
+#include <pops/mesh/storage/multifab.hpp>
+#include <pops/mesh/boundary/physical_bc.hpp>
+#include <pops/numerics/elliptic/mg/geometric_mg.hpp>
+#include <pops/numerics/elliptic/poisson/poisson_fft_solver.hpp>
+#include <pops/numerics/spatial_operator.hpp>
+#include <pops/parallel/comm.hpp>
+#include <pops/physics/bricks/bricks.hpp>  // CompositeModel, ExBVelocity, NoSource, ChargeDensity
 
-#include "common.hpp"  // adc::bench::{timed, PhaseTimers, eat} (briques de mesure partagees)
+#include "common.hpp"  // pops::bench::{timed, PhaseTimers, eat} (briques de mesure partagees)
 
 #include <algorithm>
 #include <chrono>
@@ -51,10 +51,10 @@
 #include <type_traits>
 #include <vector>
 
-using namespace adc;
-using adc::bench::Clock;        // std::chrono::steady_clock (horloge des harnais)
-using adc::bench::PhaseTimers;  // accumulateur de temps par phase (poisson/aux/halos/transport/...)
-using adc::bench::timed;        // chronometre une phase (device_fence avant/apres)
+using namespace pops;
+using pops::bench::Clock;        // std::chrono::steady_clock (horloge des harnais)
+using pops::bench::PhaseTimers;  // accumulateur de temps par phase (poisson/aux/halos/transport/...)
+using pops::bench::timed;        // chronometre une phase (device_fence avant/apres)
 static constexpr double kPi = 3.14159265358979323846;
 
 // Modele DIOCOTRON : advection scalaire ExB (n_vars=1) + pas de source + densite de charge q n au
@@ -220,7 +220,7 @@ int main(int argc, char** argv) {
   double cfl = 0.4;
   std::string solver = "geometric_mg", limiter = "minmod", bcmode = "periodic";
   for (int a = 1; a < argc; ++a) {
-    using adc::bench::eat;  // consomme un argument "--cle valeur" (avance a, convertit selon le type)
+    using pops::bench::eat;  // consomme un argument "--cle valeur" (avance a, convertit selon le type)
     if (eat(argc, argv, a, "--n", n)) continue;
     if (eat(argc, argv, a, "--steps", steps)) continue;
     if (eat(argc, argv, a, "--warmup", warmup)) continue;

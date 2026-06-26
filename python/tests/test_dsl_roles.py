@@ -1,7 +1,7 @@
-"""Test des ROLES physiques portes par une brique generee (adc.dsl.emit_cpp_brick).
+"""Test des ROLES physiques portes par une brique generee (pops.dsl.emit_cpp_brick).
 
 Une brique generee DECLARE desormais le SENS de ses composantes (densite, qte de mvt, energie...)
-via adc::VariableSet::roles, et non plus seulement leurs noms. Les couplages inter-especes du System
+via pops::VariableSet::roles, et non plus seulement leurs noms. Les couplages inter-especes du System
 resolvent ainsi une composante par index_of(role) au lieu d'un indice litteral.
 
 Ce test verifie :
@@ -9,8 +9,8 @@ Ce test verifie :
     MomentumY, Energy / Pressure) ; un layout NON STANDARD (qte de mvt avant densite) avec roles=
     explicites emet ces roles dans l'ordre demande ; un modele aux noms inconnus n'emet PAS de roles
     (retro-compat stricte : le 4e champ VariableSet::roles reste absent, fallback indices historiques).
-(2) RESOLUTION (si compilateur + en-tetes adc) : la brique au layout non standard compile, satisfait
-    adc::HyperbolicModel, et index_of(MomentumX/MomentumY/Density/Energy) retrouve la BONNE composante
+(2) RESOLUTION (si compilateur + en-tetes pops) : la brique au layout non standard compile, satisfait
+    pops::HyperbolicModel, et index_of(MomentumX/MomentumY/Density/Energy) retrouve la BONNE composante
     QUELLE QUE SOIT sa position -- c'est exactement ce dont depend la resolution par role des couplages.
 Lance avec python3.
 """
@@ -19,7 +19,7 @@ import shutil
 import subprocess
 import tempfile
 
-from adc import dsl
+from pops import dsl
 
 GAMMA = 1.4
 INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "include"))
@@ -81,17 +81,17 @@ def build_scalar_brick():
 
 
 HARNESS = r"""
-#include <adc/physics/fluids/euler.hpp>
-#include <adc/core/model/physical_model.hpp>
+#include <pops/physics/fluids/euler.hpp>
+#include <pops/core/model/physical_model.hpp>
 %s
 #include <cstdio>
 
-using R = adc::VariableRole;
+using R = pops::VariableRole;
 
-static_assert(adc::HyperbolicModel<adc_generated::ShufGen>, "brique non standard non conforme au concept");
+static_assert(pops::HyperbolicModel<pops_generated::ShufGen>, "brique non standard non conforme au concept");
 
 int main() {
-  const adc::VariableSet c = adc_generated::ShufGen::conservative_vars();
+  const pops::VariableSet c = pops_generated::ShufGen::conservative_vars();
   // layout = [my, E, mx, rho] : index_of(role) doit retrouver la composante par son SENS.
   if (c.index_of(R::MomentumY) != 0) { printf("FAIL MomentumY=%%d\n", c.index_of(R::MomentumY)); return 1; }
   if (c.index_of(R::Energy)    != 1) { printf("FAIL Energy=%%d\n",    c.index_of(R::Energy));    return 1; }
@@ -107,26 +107,26 @@ int main() {
 def main():
     # (1) FORME : roles emis pour Euler standard ----------------------------------------------
     euler = build_euler_brick().emit_cpp_brick(name="EulerGen")
-    assert ("conservative_vars() { return {adc::VariableKind::Conservative, "
-            '{"rho", "rho_u", "rho_v", "E"}, 4, {adc::VariableRole::Density, '
-            "adc::VariableRole::MomentumX, adc::VariableRole::MomentumY, "
-            "adc::VariableRole::Energy}}; }") in euler, "roles conservatifs Euler absents/incorrects"
-    assert ("primitive_vars() { return {adc::VariableKind::Primitive, "
-            '{"rho", "u", "v", "p"}, 4, {adc::VariableRole::Density, '
-            "adc::VariableRole::VelocityX, adc::VariableRole::VelocityY, "
-            "adc::VariableRole::Pressure}}; }") in euler, "roles primitifs Euler absents/incorrects"
+    assert ("conservative_vars() { return {pops::VariableKind::Conservative, "
+            '{"rho", "rho_u", "rho_v", "E"}, 4, {pops::VariableRole::Density, '
+            "pops::VariableRole::MomentumX, pops::VariableRole::MomentumY, "
+            "pops::VariableRole::Energy}}; }") in euler, "roles conservatifs Euler absents/incorrects"
+    assert ("primitive_vars() { return {pops::VariableKind::Primitive, "
+            '{"rho", "u", "v", "p"}, 4, {pops::VariableRole::Density, '
+            "pops::VariableRole::VelocityX, pops::VariableRole::VelocityY, "
+            "pops::VariableRole::Pressure}}; }") in euler, "roles primitifs Euler absents/incorrects"
     print("OK  Euler (noms standards) : roles canoniques emis (Density/Momentum/Energy/Pressure)")
 
     # layout non standard : roles dans l'ordre demande
     shuf = build_shuffled_brick().emit_cpp_brick(name="ShufGen")
-    assert ("{adc::VariableRole::MomentumY, adc::VariableRole::Energy, "
-            "adc::VariableRole::MomentumX, adc::VariableRole::Density}") in shuf, \
+    assert ("{pops::VariableRole::MomentumY, pops::VariableRole::Energy, "
+            "pops::VariableRole::MomentumX, pops::VariableRole::Density}") in shuf, \
         "roles du layout non standard incorrects"
     print("OK  layout non standard : roles explicites emis dans l'ordre du layout")
 
     # retro-compat stricte : noms inconnus -> AUCUN champ roles (init 3 champs comme avant)
     scal = build_scalar_brick().emit_cpp_brick(name="ScalGen")
-    assert ('conservative_vars() { return {adc::VariableKind::Conservative, {"q"}, 1}; }') in scal, \
+    assert ('conservative_vars() { return {pops::VariableKind::Conservative, {"q"}, 1}; }') in scal, \
         "modele a roles Custom devrait emettre l'init historique 3 champs (retro-compat)"
     assert "VariableRole" not in scal, "modele a roles Custom ne doit emettre aucun role"
     print("OK  noms inconnus : aucun role emis (retro-compat bit-exacte, fallback indices)")
@@ -134,7 +134,7 @@ def main():
     # (2) RESOLUTION par role a travers le C++ (si compilateur dispo) --------------------------
     cxx = shutil.which("c++") or shutil.which("g++") or shutil.which("clang++")
     if not cxx or not os.path.isdir(INCLUDE):
-        print("skip  compilateur ou en-tetes adc absents -> resolution sautee (%s)" % INCLUDE)
+        print("skip  compilateur ou en-tetes pops absents -> resolution sautee (%s)" % INCLUDE)
         print("test_dsl_roles : OK (forme des roles seulement)")
         return
 

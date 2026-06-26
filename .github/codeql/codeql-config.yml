@@ -1,4 +1,4 @@
-name: "adc CodeQL config"
+name: "pops CodeQL config"
 paths-ignore:
   - ".kokkos-install/**"
   - "build*/**"

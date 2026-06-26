@@ -13,7 +13,7 @@
 // grossier appelle alors fill_boundary sur ce MultiFab multi-boite (amr_subcycling.hpp), qui a np>1
 // est un VRAI echange MPI cross-rang des 15 composantes conservees sur tampons SharedHostPinnedSpace
 // (le fix CUDA-IPC #254). Le niveau fin (regrid + reflux conservatif) se repartit AUSSI round-robin.
-// distribute_coarse devient effectif depuis ADC-319 (#140 : les loaders DSL compilent avec ADC_HAS_MPI).
+// distribute_coarse devient effectif depuis ADC-319 (#140 : les loaders DSL compilent avec POPS_HAS_MPI).
 //
 // Topologie / preuve de repartition (ADC-319) : coarse_local_boxes() < coarse_total_boxes() par rang
 // a np>1 prouve que le grossier s'est genuinement decoupe entre rangs (a np=1 ou en mode replique,
@@ -43,10 +43,10 @@
 // mass()/density()/potential() de l'AmrSystem all-reduce en interne (chaque rang detient le champ
 // global reconstruit), donc aucun deadlock.
 
-#include <adc/parallel/comm.hpp>
-#include <adc/physics/composition/composite.hpp>
-#include <adc/runtime/builders/compiled/amr_dsl_block.hpp>  // add_compiled_model(AmrSystem&, ...)
-#include <adc/runtime/amr_system.hpp>
+#include <pops/parallel/comm.hpp>
+#include <pops/physics/composition/composite.hpp>
+#include <pops/runtime/builders/compiled/amr_dsl_block.hpp>  // add_compiled_model(AmrSystem&, ...)
+#include <pops/runtime/amr_system.hpp>
 
 #include "hyqmom15_brick.hpp"
 
@@ -59,7 +59,7 @@
 #include <string>
 #include <vector>
 
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
 #include <Kokkos_Core.hpp>
 #endif
 
@@ -91,7 +91,7 @@ struct Result {
 template <class Model>
 static Result run_mode(const std::vector<double>& U0, int n, bool distribute, int nsteps,
                        double dt, int regrid_every, double refine_thr, int coarse_max_grid) {
-  adc::AmrSystemConfig cfg;
+  pops::AmrSystemConfig cfg;
   cfg.n = n;
   cfg.L = 1.0;
   cfg.periodic = true;
@@ -101,12 +101,12 @@ static Result run_mode(const std::vector<double>& U0, int n, bool distribute, in
   // (cf. AmrSystemConfig + amrmpi_integrated : 2x2 converge en autant de cycles que le mono-box).
   cfg.coarse_max_grid = distribute ? (coarse_max_grid > 0 ? coarse_max_grid : n / 2) : 0;
 
-  adc::AmrSystem sys(cfg);
+  pops::AmrSystem sys(cfg);
   // composite emis par la DSL (flux + vitesses exactes par real_eig_minmax / source Lorentz / rhs de
   // Poisson), branche par le SEAM DE COMPILATION add_compiled_model -- bloc UNIQUE => chemin
   // mono-bloc AmrCouplerMP<Model> (jamais la facade AmrSystemCoupler). Memes schemas que le driver
   // System (diocotron_gpu.cpp) : limiteur none, riemann hll exact, recon conservative, explicite.
-  adc::add_compiled_model(sys, "mom", Model{}, "none", "hll", "conservative", "explicit");
+  pops::add_compiled_model(sys, "mom", Model{}, "none", "hll", "conservative", "explicit");
   sys.set_poisson("charge_density", "geometric_mg");
   sys.set_refinement(refine_thr);  // raffine le grossier ou M00 > seuil -> patchs fins distribues
   sys.set_conservative_state("mom", U0);  // sema les 15 moments (prolonge a la grille fine au build)
@@ -114,7 +114,7 @@ static Result run_mode(const std::vector<double>& U0, int n, bool distribute, in
   Result R;
   R.m0 = sys.mass();  // build paresseux (regrid initial : decoupe + repartit le grossier ET le fin)
   for (int s = 0; s < nsteps; ++s) sys.step(dt);
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   Kokkos::fence();  // capture le travail device async avant les lectures hote
 #endif
 
@@ -141,9 +141,9 @@ static Result run_mode(const std::vector<double>& U0, int n, bool distribute, in
 // Imprime (rang 0) la ligne machine-parsable consommee par diocotron_amr_mpi.sbatch + les
 // diagnostics de repartition. cmax cross-rang : max insensible a l'ordre -> identique a tous les rangs.
 static void emit(const char* tag, int np, int n, const Result& R) {
-  const double xmax = adc::all_reduce_max(R.cmax), xmin = -adc::all_reduce_max(-R.cmax);
+  const double xmax = pops::all_reduce_max(R.cmax), xmin = -pops::all_reduce_max(-R.cmax);
   const double cmax_spread = xmax - xmin;  // 0 attendu : tous les rangs voient le meme champ global
-  if (adc::my_rank() != 0) return;
+  if (pops::my_rank() != 0) return;
   std::printf("HYQMOMAMR mode=%s np=%d n=%d | mass=%.17e massdrift=%.3e | "
               "csum=%.17e csumsq=%.17e cmax=%.17e | cmax_crossrank_spread=%.3e | "
               "patches=%d clocal=%d ctotal=%d maxabs_phi=%.6e\n",
@@ -154,13 +154,13 @@ static void emit(const char* tag, int np, int n, const Result& R) {
 }
 
 int main(int argc, char** argv) {
-  adc::comm_init(&argc, &argv);  // MPI_Init si ADC_HAS_MPI ; no-op en serie
-#if defined(ADC_HAS_KOKKOS)
+  pops::comm_init(&argc, &argv);  // MPI_Init si POPS_HAS_MPI ; no-op en serie
+#if defined(POPS_HAS_KOKKOS)
   Kokkos::initialize(argc, argv);
 #endif
   int rc = 0;
   {
-    const int me = adc::my_rank(), np = adc::n_ranks();
+    const int me = pops::my_rank(), np = pops::n_ranks();
     const int n = static_cast<int>(arg_d(argc, argv, "--n", 128));
     const int nsteps = static_cast<int>(arg_d(argc, argv, "--steps", 80));
     const double dt = arg_d(argc, argv, "--dt", 4e-4);  // FIXE : sequence de pas identique a tous les np
@@ -219,16 +219,16 @@ int main(int argc, char** argv) {
       Result rep{}, dis{};
       bool ran = true;
       if (n == 128) {
-        using Model = adc::CompositeModel<adc_generated::Hyqmom15Hyp, adc_generated::Hyqmom15Src,
-                                          adc_generated::Hyqmom15Ell128>;
+        using Model = pops::CompositeModel<pops_generated::Hyqmom15Hyp, pops_generated::Hyqmom15Src,
+                                          pops_generated::Hyqmom15Ell128>;
         dis = run_mode<Model>(U0, n, /*distribute=*/true, nsteps, dt, regrid_every, refine_thr,
                               coarse_max_grid);
         if (do_compare)
           rep = run_mode<Model>(U0, n, /*distribute=*/false, nsteps, dt, regrid_every, refine_thr,
                                 coarse_max_grid);
       } else if (n == 256) {
-        using Model = adc::CompositeModel<adc_generated::Hyqmom15Hyp, adc_generated::Hyqmom15Src,
-                                          adc_generated::Hyqmom15Ell256>;
+        using Model = pops::CompositeModel<pops_generated::Hyqmom15Hyp, pops_generated::Hyqmom15Src,
+                                          pops_generated::Hyqmom15Ell256>;
         dis = run_mode<Model>(U0, n, /*distribute=*/true, nsteps, dt, regrid_every, refine_thr,
                               coarse_max_grid);
         if (do_compare)
@@ -250,7 +250,7 @@ int main(int argc, char** argv) {
         if (do_compare && dis.dens.size() == rep.dens.size())
           for (std::size_t k = 0; k < dis.dens.size(); ++k)
             dmax = std::fmax(dmax, std::fabs(dis.dens[k] - rep.dens[k]));
-        const double dmax_g = adc::all_reduce_max(dmax);
+        const double dmax_g = pops::all_reduce_max(dmax);
 
         if (me == 0) {
           if (do_compare)
@@ -283,9 +283,9 @@ int main(int argc, char** argv) {
       }
     }
   }
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   Kokkos::finalize();
 #endif
-  adc::comm_finalize();
+  pops::comm_finalize();
   return rc;
 }

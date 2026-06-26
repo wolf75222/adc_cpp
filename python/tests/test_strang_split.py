@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""Test de la politique temporelle adc.Strang(hyperbolic=Explicit, source=CondensedSchur) : le
+"""Test de la politique temporelle pops.Strang(hyperbolic=Explicit, source=CondensedSchur) : le
 splitting de STRANG GENERIQUE (H(dt/2) ; S(dt) ; H(dt/2), 2e ordre) cable au stepper de systeme via
-set_time_scheme("strang"). Pendant 2e ordre de adc.Split (Lie, 1er ordre) : memes briques (transport
+set_time_scheme("strang"). Pendant 2e ordre de pops.Split (Lie, 1er ordre) : memes briques (transport
 SSPRK + etage source condense), seul l'ordre/la cadence des resolutions de champ changent. cf.
-docs/HOFFART_STEP_SEQUENCE.md, include/adc/runtime/system_stepper.hpp (SystemStepper::step_strang) et
+docs/HOFFART_STEP_SEQUENCE.md, include/pops/runtime/system_stepper.hpp (SystemStepper::step_strang) et
 le test C++ tests/test_strang_splitting.cpp (ordre temporel observe ~2 vs ~1).
 
 On valide :
-  (a) API / opt-in : adc.Strang existe, EST une sous-classe de adc.Split (donc soumise a la meme
+  (a) API / opt-in : pops.Strang existe, EST une sous-classe de pops.Split (donc soumise a la meme
       garde : rejet sur add_block, System ET AmrSystem), expose .scheme == "strang" (Split -> "lie"),
-      est exportee dans adc.__all__. NB : AmrSystem.add_equation SUPPORTE Strang/Lie depuis le chemin
+      est exportee dans pops.__all__. NB : AmrSystem.add_equation SUPPORTE Strang/Lie depuis le chemin
       amr-schur (#265, set_source_stage + set_time_scheme) ; seul add_block continue de rejeter.
-  (b) RUN C++ (si compilateur) : un fluide isotherme magnetise tourne avec time=adc.Strang(...) ;
+  (b) RUN C++ (si compilateur) : un fluide isotherme magnetise tourne avec time=pops.Strang(...) ;
       etat FINI, densite gelee dans la source, quantite de mvt qui EVOLUE (source engagee).
   (c) STRANG != LIE sur le chemin moteur : a setup et dt IDENTIQUES, le run Strang et le run Split
       (Lie) different (deux orchestrations distinctes ; sinon set_time_scheme serait inerte). Le
@@ -25,8 +25,8 @@ import shutil
 
 import numpy as np
 
-import adc
-from adc import dsl
+import pops
+from pops import dsl
 
 INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "include"))
 
@@ -52,7 +52,7 @@ def raises(exc_types, fn, *args, **kw):
 
 def isothermal_magnetized(cs2=1.0):
     """Fluide isotherme 2D (rho, mx, my) magnetise (roles Density/MomentumX/MomentumY, lit B_z). La
-    source LOCALE est nulle : l'etage SOURCE est porte par adc.CondensedSchur (electrostatique + Lorentz)."""
+    source LOCALE est nulle : l'etage SOURCE est porte par pops.CondensedSchur (electrostatique + Lorentz)."""
     m = dsl.Model("iso_mag_strang")
     rho, mx, my = m.conservative_vars("rho", "mx", "my",
                                       roles=["Density", "MomentumX", "MomentumY"])
@@ -81,11 +81,11 @@ def smooth_init(n, L):
 
 def build_sim(compiled, time, n=32, L=1.0, B0=4.0):
     """System non periodique (Dirichlet), un bloc isotherme magnetise, politique temporelle @p time."""
-    sim = adc.System(n=n, L=L, periodic=False)
+    sim = pops.System(n=n, L=L, periodic=False)
     sim.set_poisson(bc="dirichlet")
     sim.set_magnetic_field(B0 * np.ones((n, n)))
     sim.add_equation("ions", model=compiled,
-                     spatial=adc.FiniteVolume(limiter="minmod", riemann="rusanov",
+                     spatial=pops.FiniteVolume(limiter="minmod", riemann="rusanov",
                                               variables="conservative"),
                      time=time)
     rho0, u0, v0 = smooth_init(n, L)
@@ -94,46 +94,46 @@ def build_sim(compiled, time, n=32, L=1.0, B0=4.0):
 
 
 def split_lie(theta=1.0, alpha=3.0):
-    return adc.Split(hyperbolic=adc.Explicit(),
-                     source=adc.CondensedSchur(theta=theta, alpha=alpha))
+    return pops.Split(hyperbolic=pops.Explicit(),
+                     source=pops.CondensedSchur(theta=theta, alpha=alpha))
 
 
 def strang(theta=1.0, alpha=3.0):
-    return adc.Strang(hyperbolic=adc.Explicit(),
-                      source=adc.CondensedSchur(theta=theta, alpha=alpha))
+    return pops.Strang(hyperbolic=pops.Explicit(),
+                      source=pops.CondensedSchur(theta=theta, alpha=alpha))
 
 
 def scalar_native_model():
-    return adc.Model(state=adc.Scalar(), transport=adc.ExB(B0=1.0),
-                     source=adc.NoSource(),
-                     elliptic=adc.BackgroundDensity(alpha=1.0, n0=0.0))
+    return pops.Model(state=pops.Scalar(), transport=pops.ExB(B0=1.0),
+                     source=pops.NoSource(),
+                     elliptic=pops.BackgroundDensity(alpha=1.0, n0=0.0))
 
 
 def check_api():
     """(a) API / opt-in : pas de compilateur requis."""
-    chk("Strang" in adc.__all__, "(a) adc.Strang exporte dans __all__")
-    chk(issubclass(adc.Strang, adc.Split), "(a) adc.Strang sous-classe de adc.Split")
+    chk("Strang" in pops.__all__, "(a) pops.Strang exporte dans __all__")
+    chk(issubclass(pops.Strang, pops.Split), "(a) pops.Strang sous-classe de pops.Split")
     s = strang()
     p = split_lie()
-    chk(getattr(s, "scheme", None) == "strang", "(a) adc.Strang.scheme == 'strang'")
-    chk(getattr(p, "scheme", None) == "lie", "(a) adc.Split.scheme == 'lie'")
-    # adc.Strang herite des memes briques que Split (hyperbolique + source condensee).
-    chk(isinstance(s.source, adc.CondensedSchur) and isinstance(s.hyperbolic, adc.Explicit),
-        "(a) adc.Strang porte hyperbolique Explicit + source CondensedSchur")
+    chk(getattr(s, "scheme", None) == "strang", "(a) pops.Strang.scheme == 'strang'")
+    chk(getattr(p, "scheme", None) == "lie", "(a) pops.Split.scheme == 'lie'")
+    # pops.Strang herite des memes briques que Split (hyperbolique + source condensee).
+    chk(isinstance(s.source, pops.CondensedSchur) and isinstance(s.hyperbolic, pops.Explicit),
+        "(a) pops.Strang porte hyperbolique Explicit + source CondensedSchur")
     # Garde heritee : Strang (etant un Split) est rejete sur add_block, sur System ET sur AmrSystem --
     # l'etage source condense par Schur n'est cable que par add_equation (qui branche set_source_stage),
     # jamais par add_block (qui jouerait le seul transport et PERDRAIT la source en silence). Depuis le
-    # chemin amr-schur (#265), AmrSystem.add_equation(time=adc.Strang(...)) est au contraire SUPPORTE
+    # chemin amr-schur (#265), AmrSystem.add_equation(time=pops.Strang(...)) est au contraire SUPPORTE
     # (cf. test_amr_schur_via_system.py pour la couverture positive sur AMR) : seul add_block rejette.
-    sys_ = adc.System(n=8, L=1.0, periodic=False)
+    sys_ = pops.System(n=8, L=1.0, periodic=False)
     e_blk = raises(TypeError, sys_.add_block, "x", scalar_native_model(), time=strang())
     chk("Split" in str(e_blk) or "Schur" in str(e_blk),
-        "(a) System.add_block(time=adc.Strang(...)) -> rejet (heritage Split)")
-    amr = adc.AmrSystem(n=8, L=1.0, periodic=True)
+        "(a) System.add_block(time=pops.Strang(...)) -> rejet (heritage Split)")
+    amr = pops.AmrSystem(n=8, L=1.0, periodic=True)
     e_amr = raises((TypeError, ValueError), amr.add_block, "x", scalar_native_model(),
                    time=strang())
     chk("Split" in str(e_amr) or "Schur" in str(e_amr),
-        "(a) AmrSystem.add_block(time=adc.Strang(...)) -> rejet (heritage Split)")
+        "(a) AmrSystem.add_block(time=pops.Strang(...)) -> rejet (heritage Split)")
 
 
 def vel_mom(sim):
@@ -147,15 +147,15 @@ def main():
 
     cxx = shutil.which("c++") or shutil.which("g++") or shutil.which("clang++")
     if not cxx or not os.path.isdir(INCLUDE):
-        print("skip  compilateur ou en-tetes adc absents -> test_strang_split saute (%s)" % INCLUDE)
+        print("skip  compilateur ou en-tetes pops absents -> test_strang_split saute (%s)" % INCLUDE)
         if fails:  # ne pas masquer un echec des gardes (a) sans compilateur
             raise SystemExit("test_strang_split : %d verification(s) en echec" % fails)
         print("test_strang_split : OK (rien a compiler)")
         return
 
     n, L, dt = 32, 1.0, 2.0e-3
-    # adc_cpp est Kokkos-only (#263) : le .so AOT inclut les en-tetes adc (multifab/for_each) qui ne
-    # compilent QUE sous ADC_HAS_KOKKOS, donc compile_aot exige un Kokkos installe (ADC_KOKKOS_ROOT).
+    # adc_cpp est Kokkos-only (#263) : le .so AOT inclut les en-tetes pops (multifab/for_each) qui ne
+    # compilent QUE sous POPS_HAS_KOKKOS, donc compile_aot exige un Kokkos installe (POPS_KOKKOS_ROOT).
     # Sans lui, on saute proprement (b)/(c) -- meme convention que test_time_euler.py.
     try:
         compiled = isothermal_magnetized().compile(backend="aot", include=INCLUDE)

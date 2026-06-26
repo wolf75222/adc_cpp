@@ -3,7 +3,7 @@
 # Design: AMR multi-block on a shared hierarchy (multi-species capstone)
 
 DESIGN-ONLY. No implementation. This document is a reasoned SPEC, honest about its
-limits, of the migration of the `adc` AMR from ONE single explicit block toward SEVERAL blocks
+limits, of the migration of the `pops` AMR from ONE single explicit block toward SEVERAL blocks
 (species) on the SAME shared AMR hierarchy, conservatively coupled, modeled on the
 way the mono-level mesh already carries several blocks. It is the capstone: electrons,
 ions and neutrals on the SAME levels/patches, a single coarse Poisson whose right-hand side
@@ -19,7 +19,7 @@ fields, refinement by the union of the criteria, never one hierarchy per species
 The code has been read directly. Two facts structure everything that follows.
 
 FACT 1: the multi-block AMR ENGINE ALREADY EXISTS, at the C++ template level, under the name
-`AmrSystemCoupler` (`include/adc/coupling/system/amr_system_coupler.hpp`). It carries:
+`AmrSystemCoupler` (`include/pops/coupling/system/amr_system_coupler.hpp`). It carries:
 - a hierarchy SHARED per block (`std::vector<std::vector<AmrLevelMP>> block_levels_`).
   The ctor checks at assembly the layout consistency between blocks. CAUTION (owner correction):
   the old check compared ONLY the NUMBER of levels and the NUMBER of boxes per level
@@ -42,7 +42,7 @@ of RECOGNITION and COMPLETION, not of creation ex nihilo. It is good news to say
 frankly: the Phase 1 target is closer than it seems.
 
 FACT 2: the RUNTIME FACADE (the one exposed to Python) remains MONO-BLOCK. `AmrSystem`
-(`include/adc/runtime/amr_system.hpp`, impl `python/bindings/amr/amr_system.cpp`) explicitly REFUSES a
+(`include/pops/runtime/amr_system.hpp`, impl `python/bindings/amr/amr_system.cpp`) explicitly REFUSES a
 2nd block:
 ```
 // python/bindings/amr/amr_system.cpp:129-130
@@ -50,9 +50,9 @@ if (p_->has_block || p_->has_compiled)
   throw std::runtime_error("AmrSystem : un seul bloc (AMR mono-modele)");
 // idem set_compiled_block, ligne 152-153
 ```
-It wraps a single `AmrCouplerMP<Model>` (`include/adc/coupling/amr/amr_coupler_mp.hpp`),
+It wraps a single `AmrCouplerMP<Model>` (`include/pops/coupling/amr/amr_coupler_mp.hpp`),
 materialized by `detail::dispatch_amr_compiled` / `build_amr_compiled`
-(`include/adc/runtime/builders/compiled/amr_dsl_block.hpp`). The multi-block `AmrSystemCoupler` is NOT wired
+(`include/pops/runtime/builders/compiled/amr_dsl_block.hpp`). The multi-block `AmrSystemCoupler` is NOT wired
 to this facade.
 
 The TWO real gaps for the Phase 1 target are therefore:
@@ -148,9 +148,9 @@ they promote is indicated.
 
 ### 2.1 The compile-time block layer (exists)
 
-- `EquationBlock<Model, Spatial, Time>` (`include/adc/core/model/equation_block.hpp`): carries
+- `EquationBlock<Model, Spatial, Time>` (`include/pops/core/model/equation_block.hpp`): carries
   `Model`, `Spatial` (limiter + flux), `Time` (policy), `MultiFab* state`, `BCRec bc`.
-- `CoupledSystem<Blocks...>` (`include/adc/core/model/coupled_system.hpp`): tuple of blocks with
+- `CoupledSystem<Blocks...>` (`include/pops/core/model/coupled_system.hpp`): tuple of blocks with
   `n_blocks`, `block<I>()`, `for_each_block(f)`. It is the compile-time "registry".
 - `AmrLevelMP { MultiFab U; const MultiFab* aux; Real dx, dy; }`
   (`amr_reflux_mf.hpp`, lines 791-795): a level of the multi-patch hierarchy.
@@ -158,7 +158,7 @@ they promote is indicated.
   bool coarse_replicated; bool recon_prim; bool imex; }` (`amr_reflux_mf.hpp`, lines
   1012-1019): the hierarchy as a named OBJECT. It is the grain of the future `AmrHierarchyLayout`
   (cf. 2.2).
-- `AmrLevelStack<Level>` (`include/adc/coupling/amr/amr_level_storage.hpp`): holds the stack of
+- `AmrLevelStack<Level>` (`include/pops/coupling/amr/amr_level_storage.hpp`): holds the stack of
   levels AND the parallel aux stack, with the ADDRESS INVARIANT (aux dimensioned once,
   `reattach_aux(k)` replaces in place). It is the storage brick that makes the rewiring
   `levels[k].aux = &aux_[k]` safe.
@@ -218,7 +218,7 @@ added. C++ signatures that fit the existing types are given.
 
 - `AmrFieldSolver`: the SYSTEM Poisson with a SUMMED right-hand side, co-located. It is
   `solve_fields` of `AmrSystemCoupler` (lines 177-206) wired on `ChargeDensityRhs`
-  (`include/adc/coupling/base/elliptic_rhs.hpp`, lines 117-133), which REQUIRES one `SpeciesCharge` per
+  (`include/pops/coupling/base/elliptic_rhs.hpp`, lines 117-133), which REQUIRES one `SpeciesCharge` per
   block (`species.size() != System::n_blocks` -> error), sums `q_s n_s` via
   `add_scaled_component`, then injects the aux coarse->fine (`coupler_inject_aux_mb`) a single
   time. Co-located by construction: `rhs` is on `block_levels_[0][k].U.box_array()`, the
@@ -226,7 +226,7 @@ added. C++ signatures that fit the existing types are given.
 
 - `AmrScheduler`: honors `treatment` / `substeps` / `stride` / `evolve` per block. It is
   `AmrSystemCoupler::step` (lines 211-250) plus the stride semantics of
-  `advance_subcycled` (`include/adc/numerics/time/schemes/scheduler.hpp`) and of runtime `System`
+  `advance_subcycled` (`include/pops/numerics/time/schemes/scheduler.hpp`) and of runtime `System`
   (`stride_due`, `python/bindings/system/base/system.cpp:327`). The target contract (cf. 4.iv):
   - `Explicit` -> AMR transport by `advance_amr<Limiter,NumericalFlux>`;
   - `IMEX` -> explicit transport (`SourceFreeModel<Model>`) + implicit source by the
@@ -240,14 +240,14 @@ added. C++ signatures that fit the existing types are given.
 - `AmrCouplingRegistry`: the inter-species coupled sources applied level by level,
   cell by cell, exactly opposite contributions. It is `coupled_source_step`
   (lines 266-283) wired on a `CoupledSource` (concept `CoupledSourceFor`,
-  `include/adc/coupling/source/coupled_source.hpp`). The production device kernel is
-  `CoupledSourceKernel` (`include/adc/coupling/source/coupled_source_program.hpp`, P5 #131): POD
+  `include/pops/coupling/source/coupled_source.hpp`). The production device kernel is
+  `CoupledSourceKernel` (`include/pops/coupling/source/coupled_source_program.hpp`, P5 #131): POD
   captured by value, ADDITIVE writes `out[t](i,j,c) += dt*S_t`; two opposite terms
   (`+k n_e n_g` on ion, `-k n_e n_g` on neutral) conserve the pair mass exactly there.
 
 - `AmrRegridPolicy`: the union of the tags + rebuild + prolong/restrict of ALL the blocks. It is the
   MISSING PIECE (cf. 5). The mono-block brick exists: `amr_regrid_finest`
-  (`include/adc/coupling/amr/amr_regrid_coupler.hpp`); a multi-block orchestrator is needed that
+  (`include/pops/coupling/amr/amr_regrid_coupler.hpp`); a multi-block orchestrator is needed that
   tags the UNION then rebuilds the mesh ONCE for all.
 
 ### 2.2.1 Layout safeguard `same_layout_or_throw` (DELIVERED, MINIMAL first step)
@@ -289,7 +289,7 @@ LATER step, NOT this one.
 `AmrSystemCoupler` already mixes "assemble" (Poisson + aux) and "advance" (step + reflux), as
 its own comment notes (lines 371-375: alias `AmrSystemDriver`). The Assembler/Driver
 split is done on the mono-level side (`SystemAssembler` / `SystemDriver`,
-`include/adc/coupling/system/system_coupler.hpp`). The `AmrRuntime` engine formalizes the same separation
+`include/pops/coupling/system/system_coupler.hpp`). The `AmrRuntime` engine formalizes the same separation
 on the AMR side, but it is a COSMETIC refinement and deferred: the unified class is already validated.
 The priority remains the RUNTIME FACADE and the REGRID, not the pretty split.
 
@@ -349,16 +349,16 @@ conservation blocker. The order is strict: each PR leaves the tree green.
 
 ### PR (i) -- Introduce `AmrBlock` + registry, NO change of physics
 WRITE-SET:
-- `include/adc/coupling/system/amr_system_coupler.hpp`: extract `AmrHierarchyLayout` (promotion of the
+- `include/pops/coupling/system/amr_system_coupler.hpp`: extract `AmrHierarchyLayout` (promotion of the
   `BoxArray`/`DistributionMapping`/`dx` already imposed identical), have each block carry an
   `AmrBlock` (name + levels + cons/prim VariableSet). No new behavior.
-- `include/adc/coupling/amr/amr_level_storage.hpp`: reused as is (address invariant).
+- `include/pops/coupling/amr/amr_level_storage.hpp`: reused as is (address invariant).
 ACCEPTANCE: a 1 explicit block case (`test_amr_compiled_model.cpp` style) runs identical.
 BIT-IDENTITY: the `step` does not change body -> `maxdiff == 0` vs current head on this case.
 
 ### PR (ii) -- Two explicit blocks, DIFFERENT schemes, without coupled source
 WRITE-SET:
-- `include/adc/coupling/system/amr_system_coupler.hpp`: already N-blocks; add a test instantiating
+- `include/pops/coupling/system/amr_system_coupler.hpp`: already N-blocks; add a test instantiating
   `CoupledSystem<BlockA, BlockB>` where `BlockA::Spatial != BlockB::Spatial` (e.g. Minmod/Rusanov
   vs VanLeer/HLLC) on the SAME 2-level hierarchy.
 - `tests/CMakeLists.txt` + `tests/test_amr_system_twoblock.cpp` (new test).
@@ -369,7 +369,7 @@ each block has its `FluxRegister`).
 
 ### PR (iii) -- SYSTEM Poisson with a SUMMED right-hand side (co-located)
 WRITE-SET:
-- `include/adc/coupling/base/elliptic_rhs.hpp`: `ChargeDensityRhs` (already there); verify the guard
+- `include/pops/coupling/base/elliptic_rhs.hpp`: `ChargeDensityRhs` (already there); verify the guard
   `species.size() == n_blocks`.
 - test: two species of opposite charges, `lap phi = q_i n_i + q_e n_e`, compared to a Poisson
   mono-level assembled by hand.
@@ -379,7 +379,7 @@ CONSERVATION: the total charge integrated on the coarse stays the expected sum.
 
 ### PR (iv) -- substeps / stride / evolve + step_cfl substeps-aware
 WRITE-SET:
-- `include/adc/coupling/system/amr_system_coupler.hpp`: add `step_cfl(cfl)` modeled on
+- `include/pops/coupling/system/amr_system_coupler.hpp`: add `step_cfl(cfl)` modeled on
   `System::step_cfl` (`python/bindings/system/base/system.cpp:1663-1693`), substeps-aware:
   `dt <= cfl * h * substeps_b / (stride_b * w_b)`, min over the evolving blocks; a block
   `evolve=false` does NOT constrain the step but stays in the Poisson RHS.
@@ -400,26 +400,26 @@ alone then multiplied by M would violate the CFL by a factor M (explicit note of
 
 ### PR (v) -- Multi-block production DSL (INSTALL of a NAMED block)
 WRITE-SET:
-- `include/adc/runtime/builders/compiled/amr_dsl_block.hpp`: `add_compiled_model(AmrSystem&, name, Model{}, ...)`
+- `include/pops/runtime/builders/compiled/amr_dsl_block.hpp`: `add_compiled_model(AmrSystem&, name, Model{}, ...)`
   must INSTALL A NAMED BLOCK (and not replace the unique block) -> symmetric of
-  `add_compiled_model(System&)` (`include/adc/runtime/builders/compiled/dsl_block.hpp` + `block_builder.hpp`).
-- `include/adc/runtime/amr_system.hpp` + `python/bindings/amr/amr_system.cpp`: `set_compiled_block` /
+  `add_compiled_model(System&)` (`include/pops/runtime/builders/compiled/dsl_block.hpp` + `block_builder.hpp`).
+- `include/pops/runtime/amr_system.hpp` + `python/bindings/amr/amr_system.cpp`: `set_compiled_block` /
   `add_native_block` stop throwing at the 2nd call (cf. 3) and stack a spec.
 - `python/bindings/core/bindings.cpp`: expose the 2nd `add_block` (already wired, `bindings.cpp:239`), validate
   `dsl.Model(...).compile(target="amr_system", backend="production")` for TWO blocks.
 ACCEPTANCE: `test_dsl_production_amr.py` extended to two native compiled blocks on the same
-hierarchy; ABI key verified (`adc_native_abi_key`, `amr_system.cpp:218-235`).
+hierarchy; ABI key verified (`pops_native_abi_key`, `amr_system.cpp:218-235`).
 BLOCKER: NAMED device-clean functors (cf. `BlockRhsEval`/`AdvanceExplicit` of
 `block_builder.hpp` and `ForEachBlockProbe` of `coupled_system.hpp:59-63`); no extended
 lambda cross-TU (harness #64/#97).
 
 ### PR (vi) -- Coupled sources on AMR (same cell, opposite contributions)
 WRITE-SET:
-- `include/adc/coupling/system/amr_system_coupler.hpp`: `coupled_source_step` (already there) wired on the
+- `include/pops/coupling/system/amr_system_coupler.hpp`: `coupled_source_step` (already there) wired on the
   named couplings (ionization/collision/exchange) AND on `CoupledSourceKernel`
   (`coupled_source_program.hpp`).
-- `python/bindings/amr/amr_system.cpp` + `bindings.cpp`: `sim.add_coupling(adc.Ionization(...))` modeled on
-  `System::add_ionization` / `add_coupled_source` (`include/adc/runtime/system.hpp:266-329`).
+- `python/bindings/amr/amr_system.cpp` + `bindings.cpp`: `sim.add_coupling(pops.Ionization(...))` modeled on
+  `System::add_ionization` / `add_coupled_source` (`include/pops/runtime/system.hpp:266-329`).
 ACCEPTANCE: ionization `+k n_e n_g` / `-k n_e n_g` on 3 co-located blocks, level by
 level, on all the patches.
 DOUBLE-COUNTING PITFALL (owner correction, point 5). `coupled_source_step` applies the source
@@ -442,7 +442,7 @@ or after sync) conserved to the tolerance, to rule out the double counting of th
 
 ### PR (vii) -- Local IMEX on AMR
 WRITE-SET:
-- `include/adc/coupling/system/amr_system_coupler.hpp`: the IMEX callback reuses
+- `include/pops/coupling/system/amr_system_coupler.hpp`: the IMEX callback reuses
   `mf_apply_source_treatment(m, U, aux, dt, /*imex=*/true)` (`amr_reflux_mf.hpp:75-82`) ->
   `backward_euler_source` (named device functor `BackwardEulerSourceKernel`). The source stays
   cell-local, snapshotted, OUTSIDE reflux.
@@ -452,7 +452,7 @@ conservation at the coarse-fine interfaces intact (Gap2 property).
 
 ### PR (viii) -- ONLY then: Schur / true global implicit / paper repro
 WRITE-SET: out of scope for Phase 1. Relies on `CondensedSchurSourceStepper`
-(`include/adc/coupling/schur/source/condensed_schur_source_stepper.hpp`) and `schur_condensation.hpp`. The
+(`include/pops/coupling/schur/source/condensed_schur_source_stepper.hpp`) and `schur_condensation.hpp`. The
 `treatment == Implicit` stays REJECTED by the `AmrScheduler` until a true global stepper
 exists.
 
@@ -466,7 +466,7 @@ in multi-block would make one believe in a nonexistent dynamic AMR. The refusal 
 runtime registry (point 3), not in the first layout step.
 
 It is the central missing piece. The mono-block brick is `amr_regrid_finest`
-(`include/adc/coupling/amr/amr_regrid_coupler.hpp`): tag of the parent -> `grow_tags` -> `all_reduce_or`
+(`include/pops/coupling/amr/amr_regrid_coupler.hpp`): tag of the parent -> `grow_tags` -> `all_reduce_or`
 if coarse distributed -> `berger_rigoutsos` -> clamp nesting -> new fine `BoxArray` ->
 carry-over of the fine data + parent interp -> realloc aux. It operates on ONE block.
 
@@ -474,7 +474,7 @@ MULTI-BLOCK ALGORITHM (to write, `AmrRegridPolicy` / `AmrSystemCoupler::regrid`)
 
 1. `solve_fields()` once (aux up to date, for the phi gradient criterion).
 2. UNION OF THE TAGS on the parent level: for each block, `tag_cells(block.levels[pk].U,
-   pdom, crit_block)` (`include/adc/amr/regridding/regrid.hpp:30-42`), then logical OR of the `TagBox`:
+   pdom, crit_block)` (`include/pops/amr/regridding/regrid.hpp:30-42`), then logical OR of the `TagBox`:
    ```
    tags = tags_electrons OR tags_ions OR tags_neutrals OR tags_phi OR tags_user
    ```
@@ -556,9 +556,9 @@ not to solve here.
   `CoupledSourceKernel`, `BackwardEulerSourceKernel`). Any new first-instantiation
   from an external TU goes through a NAMED FUNCTOR, never a lambda (harness #64/#97).
 
-- DEVICE CLEANLINESS GH200. RISK (recent lesson): a `Geometry`/`Box2D` accessor NOT `ADC_HD`
+- DEVICE CLEANLINESS GH200. RISK (recent lesson): a `Geometry`/`Box2D` accessor NOT `POPS_HD`
   used in a device kernel silently breaks the device numerics. DE-RISK: every
-  new accessor read in a device kernel MUST be `ADC_HD` (cf.
+  new accessor read in a device kernel MUST be `POPS_HD` (cf.
   `for_each_cell_reduce_sum` in `mass`, `amr_system_coupler.hpp:293-294`). Validate once
   a multi-block production case on GH200 (modeled on `gpu_amrsys_facade_validate.cpp`, which
   already instantiates `CoupledSystem` 2 blocks + AMR 2 levels + Poisson + step).
@@ -595,7 +595,7 @@ absence of a block on a patch.
       mono-block bit-identical (`dmax == 0`). Test `tests/test_amr_layout_guard.cpp`.
 - [x] multi-block RUNTIME FACADE (DELIVERED, runtime registry PR): `AmrSystem` accepts N native blocks
       co-located on ONE shared hierarchy via the type-erased engine `AmrRuntime`
-      (`include/adc/runtime/amr/amr_runtime.hpp`), registry by name of closures
+      (`include/pops/runtime/amr/amr_runtime.hpp`), registry by name of closures
       (advance / add_elliptic_rhs / max_speed / mass / density / potential). SYSTEM Poisson with a
       SUMMED right-hand side co-located (Sum_b elliptic_rhs_b(U_b) = q0 n0 + q1 n1 on the shared
       coarse). Tests `tests/test_amr_system_twoblock.cpp`, `python/tests/test_amr_multiblock.py`.
@@ -638,34 +638,34 @@ absence of a block on a patch.
 
 ## 9. Code references (all verified at this head)
 
-- `include/adc/coupling/system/amr_system_coupler.hpp`: AMR multi-block engine (exists); NO
+- `include/pops/coupling/system/amr_system_coupler.hpp`: AMR multi-block engine (exists); NO
   regrid.
-- `include/adc/coupling/amr/amr_coupler_mp.hpp`: MONO-BLOCK AMR coupler + `regrid` (delegates to
+- `include/pops/coupling/amr/amr_coupler_mp.hpp`: MONO-BLOCK AMR coupler + `regrid` (delegates to
   `amr_regrid_finest`).
-- `include/adc/coupling/amr/amr_regrid_coupler.hpp`: `amr_regrid_finest` (Berger-Rigoutsos, finest
+- `include/pops/coupling/amr/amr_regrid_coupler.hpp`: `amr_regrid_finest` (Berger-Rigoutsos, finest
   level).
-- `include/adc/coupling/base/elliptic_rhs.hpp`: `ChargeDensityRhs` (sum `Sum_s q_s n_s`,
+- `include/pops/coupling/base/elliptic_rhs.hpp`: `ChargeDensityRhs` (sum `Sum_s q_s n_s`,
   one `SpeciesCharge` per block).
-- `include/adc/coupling/source/coupled_source.hpp`: concept `CoupledSourceFor`, `NoCoupledSource`.
-- `include/adc/coupling/source/coupled_source_program.hpp`: `CoupledSourceKernel` (P5 #131, POD
+- `include/pops/coupling/source/coupled_source.hpp`: concept `CoupledSourceFor`, `NoCoupledSource`.
+- `include/pops/coupling/source/coupled_source_program.hpp`: `CoupledSourceKernel` (P5 #131, POD
   device-clean, opposite additive writes).
-- `include/adc/coupling/amr/amr_level_storage.hpp`: `AmrLevelStack` (aux address invariant).
-- `include/adc/core/model/coupled_system.hpp`: `CoupledSystem<Blocks...>`, `for_each_block`,
+- `include/pops/coupling/amr/amr_level_storage.hpp`: `AmrLevelStack` (aux address invariant).
+- `include/pops/core/model/coupled_system.hpp`: `CoupledSystem<Blocks...>`, `for_each_block`,
   `ForEachBlockProbe` (named device-clean functor).
-- `include/adc/core/model/equation_block.hpp`: `EquationBlock<Model, Spatial, Time>`.
-- `include/adc/numerics/time/amr/reflux/amr_reflux_mf.hpp`: `AmrLevelMP`, `LevelHierarchy`, `advance_amr`,
+- `include/pops/core/model/equation_block.hpp`: `EquationBlock<Model, Spatial, Time>`.
+- `include/pops/numerics/time/amr/reflux/amr_reflux_mf.hpp`: `AmrLevelMP`, `LevelHierarchy`, `advance_amr`,
   `FluxRegister`, `CoverageMask`, `CoarseFineInterface`, `mf_apply_source_treatment`,
   `mf_average_down_mb`.
-- `include/adc/numerics/time/schemes/scheduler.hpp`: `advance_subcycled`, `block_substeps_v`,
+- `include/pops/numerics/time/schemes/scheduler.hpp`: `advance_subcycled`, `block_substeps_v`,
   `block_stride_v`, `block_time_treatment_v`.
-- `include/adc/coupling/system/system_coupler.hpp`: `SystemAssembler` / `SystemDriver` (mono-level
+- `include/pops/coupling/system/system_coupler.hpp`: `SystemAssembler` / `SystemDriver` (mono-level
   split), `step_cfl` substeps-aware (`cfl*h*substeps/(stride*w)`).
-- `include/adc/runtime/system.hpp` + `python/bindings/system/base/system.cpp`: multi-block RUNTIME facade (model to
+- `include/pops/runtime/system.hpp` + `python/bindings/system/base/system.cpp`: multi-block RUNTIME facade (model to
   imitate), `Species`, `stride_due` (HOLD-THEN-CATCH-UP), `step_cfl` (lines 1663-1693).
-- `include/adc/runtime/amr_system.hpp` + `python/bindings/amr/amr_system.cpp`: MONO-BLOCK AMR RUNTIME facade
+- `include/pops/runtime/amr_system.hpp` + `python/bindings/amr/amr_system.cpp`: MONO-BLOCK AMR RUNTIME facade
   (refusal of the 2nd block, lines 129-130 and 152-153).
-- `include/adc/runtime/builders/compiled/amr_dsl_block.hpp`: `add_compiled_model(AmrSystem&)` (a single block).
-- `include/adc/runtime/builders/block/block_builder.hpp`: `make_block` / `make_max_speed` /
+- `include/pops/runtime/builders/compiled/amr_dsl_block.hpp`: `add_compiled_model(AmrSystem&)` (a single block).
+- `include/pops/runtime/builders/block/block_builder.hpp`: `make_block` / `make_max_speed` /
   `make_poisson_rhs`, named device-clean functors.
 - `docs/COUPLER_HIERARCHY.md`, `docs/SCHUR_CONDENSATION_DESIGN.md`, `docs/GPU_RUNTIME_PORT.md`
   (device-clean harness), `docs/PAPER_ROADMAP.md`.

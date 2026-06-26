@@ -10,20 +10,20 @@
 // variable) : le patch fin doit REDUIRE l'erreur (phi et grad phi), comme dans le cas scalaire -- la
 // machinerie FAC (ghost C-F bilineaire + flux C-F harmonique two-way) tient avec un coefficient variable.
 
-#include <adc/numerics/elliptic/mg/composite_fac_poisson.hpp>
+#include <pops/numerics/elliptic/mg/composite_fac_poisson.hpp>
 
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/layout/distribution_mapping.hpp>
-#include <adc/mesh/geometry/geometry.hpp>
-#include <adc/mesh/storage/multifab.hpp>
-#include <adc/mesh/boundary/physical_bc.hpp>
-#include <adc/numerics/elliptic/mg/geometric_mg.hpp>
-#include <adc/parallel/comm.hpp>
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/layout/distribution_mapping.hpp>
+#include <pops/mesh/geometry/geometry.hpp>
+#include <pops/mesh/storage/multifab.hpp>
+#include <pops/mesh/boundary/physical_bc.hpp>
+#include <pops/numerics/elliptic/mg/geometric_mg.hpp>
+#include <pops/parallel/comm.hpp>
 
 #include <cmath>
 #include <cstdio>
 
-using namespace adc;
+using namespace pops;
 static constexpr double kPi = 3.14159265358979323846;
 
 static double u_exact(double x, double y) {

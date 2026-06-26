@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """Forward Euler as a compiled time Program (epic ADC-399).
 
-Writes a one-step Forward-Euler algorithm with ``adc.time.Program``, compiles it to a ``problem.so``
-with ``adc.compile_problem``, installs it on a System, and advances one step entirely C++-side via
-``sim.step`` -- then checks it reproduces the native ``adc.Explicit("euler")`` one-step
+Writes a one-step Forward-Euler algorithm with ``pops.time.Program``, compiles it to a ``problem.so``
+with ``pops.compile_problem``, installs it on a System, and advances one step entirely C++-side via
+``sim.step`` -- then checks it reproduces the native ``pops.Explicit("euler")`` one-step
 ``U0 + dt * rhs`` to machine precision.
 
 Run::
 
     python examples/time_programs/forward_euler_program.py
 
-Requires a C++ compiler and a visible Kokkos (``ADC_KOKKOS_ROOT``); prints a skip notice and exits 0
+Requires a C++ compiler and a visible Kokkos (``POPS_KOKKOS_ROOT``); prints a skip notice and exits 0
 otherwise (so it is safe in a docs/CI smoke run). cf. docs/sphinx/reference/time-program.md.
 """
 import sys
@@ -18,20 +18,20 @@ import sys
 try:
     import numpy as np
 
-    import adc
-    from adc import time as adctime
-except Exception as exc:  # noqa: BLE001  -- adc/numpy unavailable in this interpreter
-    print("skip forward_euler_program (adc/numpy unavailable: %s)" % exc)
+    import pops
+    from pops import time as adctime
+except Exception as exc:  # noqa: BLE001  -- pops/numpy unavailable in this interpreter
+    print("skip forward_euler_program (pops/numpy unavailable: %s)" % exc)
     sys.exit(0)
 
 
 def euler_model():
     """A pure-transport isothermal block (no source); the inert elliptic + set_poisson make the
     program's solve_fields well-defined."""
-    return adc.Model(state=adc.FluidState("isothermal", cs2=0.5),
-                     transport=adc.IsothermalFlux(),
-                     source=adc.NoSource(),
-                     elliptic=adc.BackgroundDensity(alpha=1.0, n0=0.0))
+    return pops.Model(state=pops.FluidState("isothermal", cs2=0.5),
+                     transport=pops.IsothermalFlux(),
+                     source=pops.NoSource(),
+                     elliptic=pops.BackgroundDensity(alpha=1.0, n0=0.0))
 
 
 def forward_euler_program():
@@ -47,10 +47,10 @@ def forward_euler_program():
 
 def build_system():
     n = 48
-    sim = adc.System(n=n, L=1.0, periodic=True)
+    sim = pops.System(n=n, L=1.0, periodic=True)
     sim.add_block("plasma", euler_model(),
-                  spatial=adc.FiniteVolume(limiter="none", riemann="rusanov"),
-                  time=adc.Explicit(method="euler"))
+                  spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                  time=pops.Explicit(method="euler"))
     sim.set_poisson("charge_density", "geometric_mg")
     x = (np.arange(n) + 0.5) / n
     X, Y = np.meshgrid(x, x, indexing="ij")
@@ -60,8 +60,8 @@ def build_system():
 
 
 def main():
-    if not hasattr(adc.System(n=8, L=1.0, periodic=True), "install_program"):
-        print("skip forward_euler_program (_adc lacks the install_program binding; rebuild _adc)")
+    if not hasattr(pops.System(n=8, L=1.0, periodic=True), "install_program"):
+        print("skip forward_euler_program (_pops lacks the install_program binding; rebuild _pops)")
         return 0
 
     dt = 2e-3
@@ -74,7 +74,7 @@ def main():
 
     # Compiled time-program path.
     try:
-        compiled = adc.compile_problem(model=euler_model(), time=forward_euler_program())
+        compiled = pops.compile_problem(model=euler_model(), time=forward_euler_program())
     except RuntimeError as exc:  # no compiler / no Kokkos visible / compile failed
         print("skip forward_euler_program (compile_problem could not build the .so: %s)"
               % str(exc)[:160])

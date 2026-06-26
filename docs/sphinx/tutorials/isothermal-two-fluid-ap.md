@@ -6,7 +6,7 @@ through `ctypes`, so it is a good example of a custom case built on the adc_cpp 
 
 ## Prerequisites
 
-- The `adc` Python module, built from adc_cpp. See [Installation](../getting-started/installation.md).
+- The `pops` Python module, built from adc_cpp. See [Installation](../getting-started/installation.md).
 - A local clone of adc_cases. A C++ compiler is needed because the case compiles its own kernel.
 
 ## Run it

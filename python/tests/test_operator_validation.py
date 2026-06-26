@@ -1,18 +1,18 @@
 """Spec 2 (S2-12 / ADC-448): operator-first Program type diagnostics.
 
-When states are tagged with their adc.model.StateSpace (P.state(block, space=U)) and rates/operators
+When states are tagged with their pops.model.StateSpace (P.state(block, space=U)) and rates/operators
 flow from P.call, the Program type-checks the composition: a value over one StateSpace cannot feed an
 operator typed for another, a Rate(U) cannot be combined with a State(V), and an L: U -> U cannot
 drive a solve over State(V). Untagged (legacy) programs skip the checks, so Spec 1 is unaffected.
-Pure Python; skips if adc is not importable.
+Pure Python; skips if pops is not importable.
 """
 import sys
 
 try:
-    from adc import dsl, model
-    from adc import time as adctime
-except Exception as exc:  # adc not importable here -> skip, never fake
-    print("skip test_operator_validation (adc unavailable: %s)" % exc)
+    from pops import dsl, model
+    from pops import time as adctime
+except Exception as exc:  # pops not importable here -> skip, never fake
+    print("skip test_operator_validation (pops unavailable: %s)" % exc)
     sys.exit(0)
 
 

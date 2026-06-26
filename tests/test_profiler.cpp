@@ -2,17 +2,17 @@
 // ADC-459). Exercises the data structure directly (no step needed): record/aggregate, RAII scope
 // timing + nesting, the disabled no-op path, counters, and the report contents.
 
-#include <adc/runtime/program/profiler.hpp>
+#include <pops/runtime/program/profiler.hpp>
 
-#include "test_harness.hpp"  // adc::test::Checker (shared counter + assertion)
+#include "test_harness.hpp"  // pops::test::Checker (shared counter + assertion)
 
 #include <chrono>
 #include <cmath>
 #include <cstdio>
 #include <string>
 
-using adc::runtime::program::Profiler;
-using adc::runtime::program::ProfileScope;
+using pops::runtime::program::Profiler;
+using pops::runtime::program::ProfileScope;
 
 namespace {
 
@@ -28,7 +28,7 @@ void busy_us(int micros) {
 }  // namespace
 
 int main() {
-  adc::test::Checker chk;
+  pops::test::Checker chk;
 
   // --- record() aggregates count / total / min / max ---
   {

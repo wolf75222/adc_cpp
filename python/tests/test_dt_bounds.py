@@ -27,8 +27,8 @@ import tempfile
 
 import numpy as np
 
-import adc
-from adc import dsl
+import pops
+from pops import dsl
 
 fails = 0
 INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "include"))
@@ -42,10 +42,10 @@ def chk(cond, label):
 
 
 def iso_model():
-    return adc.Model(state=adc.FluidState("isothermal", cs2=0.5),
-                     transport=adc.IsothermalFlux(),
-                     source=adc.PotentialForce(charge=1.0),
-                     elliptic=adc.ChargeDensity(charge=1.0))
+    return pops.Model(state=pops.FluidState("isothermal", cs2=0.5),
+                     transport=pops.IsothermalFlux(),
+                     source=pops.PotentialForce(charge=1.0),
+                     elliptic=pops.ChargeDensity(charge=1.0))
 
 
 def gaussian(n):
@@ -55,9 +55,9 @@ def gaussian(n):
 
 
 def build(n=24):
-    sim = adc.System(n=n, L=1.0, periodic=True)
-    sim.add_block("ions", iso_model(), spatial=adc.FiniteVolume(limiter="minmod"),
-                  time=adc.Explicit())
+    sim = pops.System(n=n, L=1.0, periodic=True)
+    sim.add_block("ions", iso_model(), spatial=pops.FiniteVolume(limiter="minmod"),
+                  time=pops.Explicit())
     sim.set_poisson(rhs="charge_density", solver="geometric_mg", bc="periodic")
     sim.set_density("ions", gaussian(n).ravel())
     return sim
@@ -100,11 +100,11 @@ print("== (C1) AMR mono-bloc : transport + borne globale + last_dt_bound ==")
 
 
 def build_amr(n=24):
-    amr = adc.AmrSystem(n=n, L=1.0, periodic=True, regrid_every=0)
+    amr = pops.AmrSystem(n=n, L=1.0, periodic=True, regrid_every=0)
     amr.set_poisson(rhs="charge_density", solver="geometric_mg", bc="periodic")
     amr.set_refinement(1e30)  # mono-niveau : le sujet est la POLITIQUE DE PAS, pas le raffinement
-    amr.add_block("ions", iso_model(), spatial=adc.FiniteVolume(limiter="minmod"),
-                  time=adc.Explicit())
+    amr.add_block("ions", iso_model(), spatial=pops.FiniteVolume(limiter="minmod"),
+                  time=pops.Explicit())
     amr.set_density("ions", gaussian(n).ravel())
     return amr
 
@@ -125,8 +125,8 @@ chk(amr2.last_dt_bound() == "global:cap_amr",
 
 print("== (C2) AMR multi-blocs : borne globale via AmrRuntime ==")
 amr3 = build_amr()
-amr3.add_block("e2", iso_model(), spatial=adc.FiniteVolume(limiter="minmod"),
-               time=adc.Explicit())  # 2e bloc -> moteur multi-blocs (AmrRuntime)
+amr3.add_block("e2", iso_model(), spatial=pops.FiniteVolume(limiter="minmod"),
+               time=pops.Explicit())  # 2e bloc -> moteur multi-blocs (AmrRuntime)
 amr3.set_density("e2", gaussian(24).ravel())
 amr3.add_dt_bound("cap_multi", lambda: cap_amr)
 dta3 = amr3.step_cfl(0.4)
@@ -137,7 +137,7 @@ chk(amr3.last_dt_bound() == "global:cap_multi",
 # --- (B) DSL stability_speed / stability_dt (avec compilateur) ---------------------
 cxx = shutil.which("c++") or shutil.which("g++") or shutil.which("clang++")
 if not cxx or not os.path.isdir(INCLUDE):
-    print("skip  (B) : compilateur ou en-tetes adc absents")
+    print("skip  (B) : compilateur ou en-tetes pops absents")
     if fails:
         print(f"FAIL test_dt_bounds : {fails} echec(s)")
         sys.exit(1)
@@ -165,9 +165,9 @@ def scalar_model(name, stab_speed=None, stab_dt=None, src_freq=None):
 
 
 def build_dsl(cm, n=16):
-    sim = adc.System(n=n, L=1.0, periodic=True)
-    sim.add_equation("s", model=cm, spatial=adc.FiniteVolume(limiter="minmod"),
-                     time=adc.Explicit())
+    sim = pops.System(n=n, L=1.0, periodic=True)
+    sim.add_equation("s", model=cm, spatial=pops.FiniteVolume(limiter="minmod"),
+                     time=pops.Explicit())
     sim.set_poisson()
     sim.set_density("s", gaussian(n).ravel())
     return sim
@@ -224,11 +224,11 @@ try:
     print("== (B4) AMR mono-bloc DSL : m.stability_dt cablee (vague 2) ==")
     cm_dt_amr = scalar_model("scal_dt_amr", stab_dt=1e-4).compile(
         os.path.join(tmp, "scal_dt_amr.so"), INCLUDE, backend="production", target="amr_system")
-    amr_dsl = adc.AmrSystem(n=16, L=1.0, periodic=True, regrid_every=0)
+    amr_dsl = pops.AmrSystem(n=16, L=1.0, periodic=True, regrid_every=0)
     amr_dsl.set_poisson(rhs="charge_density", solver="geometric_mg", bc="periodic")
     amr_dsl.set_refinement(1e30)
-    amr_dsl.add_equation("s", model=cm_dt_amr, spatial=adc.FiniteVolume(limiter="minmod"),
-                         time=adc.Explicit())
+    amr_dsl.add_equation("s", model=cm_dt_amr, spatial=pops.FiniteVolume(limiter="minmod"),
+                         time=pops.Explicit())
     amr_dsl.set_density("s", gaussian(16).ravel())
     dt_amr = amr_dsl.step_cfl(cfl)
     chk(abs(dt_amr - 1e-4) < 1e-12, f"AMR DSL dt = 1e-4 ({dt_amr:.3e})")

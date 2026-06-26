@@ -1,6 +1,6 @@
 # AMR (adaptive refinement)
 
-`adc.AmrSystem` is the refined counterpart of `adc.System`: one or more blocks (species)
+`pops.AmrSystem` is the refined counterpart of `pops.System`: one or more blocks (species)
 carried on a block-structured AMR hierarchy (with rectangular boxes, AMReX /
 FLASH / SAMRAI style). The mesh is refined where the solution requires it, and only there. This
 page summarizes how to drive the AMR from Python; for design details see
@@ -11,7 +11,7 @@ page summarizes how to drive the AMR from Python; for design details see
 
 The API is identical to that of `System` (same `add_block` / `add_equation` /
 `set_poisson` / `set_density` / `step_cfl`): you refine an existing case by changing
-`adc.System(...)` into `adc.AmrSystem(...)` and adding a refinement criterion. The
+`pops.System(...)` into `pops.AmrSystem(...)` and adding a refinement criterion. The
 A->Z tutorial moreover compares the two paths on the same physics (cf.
 [tutorials/diocotron_tutorial.py](https://github.com/wolf75222/adc_cpp/blob/master/docs/sphinx/tutorials/diocotron_tutorial.py), function
 `uniform_vs_amr`).

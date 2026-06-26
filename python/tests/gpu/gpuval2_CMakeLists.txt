@@ -1,9 +1,9 @@
 # Build des harness de validation device "round 2" (features post-#48 a chemin device).
 # Usage (sur le noeud armgpu, cf. romeo_gpuval2_build.sh) :
 #   cmake -S . -B build -DCMAKE_CXX_COMPILER=<nvcc_wrapper> -DKokkos_ROOT=<kinstall> \
-#         -DADC_INCLUDE=<include> -DCMAKE_BUILD_TYPE=Release
-# Les trois harness sont HEADER-ONLY (assemble_rhs / advance_amr / GeometricMG via for_each ADC_HD).
-# Le MEME source compile aussi en Serial pur (g++ -DADC_HAS_KOKKOS off) pour l'oracle hote.
+#         -DPOPS_INCLUDE=<include> -DCMAKE_BUILD_TYPE=Release
+# Les trois harness sont HEADER-ONLY (assemble_rhs / advance_amr / GeometricMG via for_each POPS_HD).
+# Le MEME source compile aussi en Serial pur (g++ -DPOPS_HAS_KOKKOS off) pour l'oracle hote.
 cmake_minimum_required(VERSION 3.16)
 project(gpuval2 CXX)
 find_package(Kokkos REQUIRED)
@@ -13,29 +13,29 @@ find_package(MPI QUIET COMPONENTS CXX)
 
 # (2)+(3) EPM ecrante (Helmholtz) + anisotrope : header-only.
 add_executable(gpu_epm_validate gpu_epm_validate.cpp)
-target_include_directories(gpu_epm_validate PRIVATE ${ADC_INCLUDE})
-target_compile_definitions(gpu_epm_validate PRIVATE ADC_HAS_KOKKOS)
+target_include_directories(gpu_epm_validate PRIVATE ${POPS_INCLUDE})
+target_compile_definitions(gpu_epm_validate PRIVATE POPS_HAS_KOKKOS)
 target_link_libraries(gpu_epm_validate PRIVATE Kokkos::kokkos)
 
 # (4) B_z par niveau AMR (advance_amr, chemin consomme par AmrSystemCoupler) : header-only.
 add_executable(gpu_amr_bz_validate gpu_amr_bz_validate.cpp)
-target_include_directories(gpu_amr_bz_validate PRIVATE ${ADC_INCLUDE})
-target_compile_definitions(gpu_amr_bz_validate PRIVATE ADC_HAS_KOKKOS)
+target_include_directories(gpu_amr_bz_validate PRIVATE ${POPS_INCLUDE})
+target_compile_definitions(gpu_amr_bz_validate PRIVATE POPS_HAS_KOKKOS)
 target_link_libraries(gpu_amr_bz_validate PRIVATE Kokkos::kokkos)
 
 # (1) T_e via load_aux<5> : assemble_rhs header-only (fonceurs nommes device-robustes), PAS
 # add_compiled_model (lambdas etendues cross-TU -> crash device documente).
 add_executable(gpu_aux_validate gpu_aux_validate.cpp)
-target_include_directories(gpu_aux_validate PRIVATE ${ADC_INCLUDE})
-target_compile_definitions(gpu_aux_validate PRIVATE ADC_HAS_KOKKOS)
+target_include_directories(gpu_aux_validate PRIVATE ${POPS_INCLUDE})
+target_compile_definitions(gpu_aux_validate PRIVATE POPS_HAS_KOKKOS)
 target_link_libraries(gpu_aux_validate PRIVATE Kokkos::kokkos)
 
 # (5) FACADE AmrSystemCoupler entiere (limite device (b)) : instancie le coupleur de systeme sur AMR
 # (CoupledSystem 2 blocs + Poisson de systeme + solve_fields + step). Ne compilait PAS sous nvcc avant
 # le passage de la sonde du concept CoupledSystemLike a un foncteur nomme (detail::ForEachBlockProbe).
 add_executable(gpu_amrsys_facade_validate gpu_amrsys_facade_validate.cpp)
-target_include_directories(gpu_amrsys_facade_validate PRIVATE ${ADC_INCLUDE})
-target_compile_definitions(gpu_amrsys_facade_validate PRIVATE ADC_HAS_KOKKOS)
+target_include_directories(gpu_amrsys_facade_validate PRIVATE ${POPS_INCLUDE})
+target_compile_definitions(gpu_amrsys_facade_validate PRIVATE POPS_HAS_KOKKOS)
 target_link_libraries(gpu_amrsys_facade_validate PRIVATE Kokkos::kokkos)
 
 # (6) CHEMIN NATIF DE PRODUCTION du DSL : add_compiled_model<ProdModel>(System&, ...), la fonction
@@ -44,27 +44,27 @@ target_link_libraries(gpu_amrsys_facade_validate PRIVATE Kokkos::kokkos)
 # on LIE python/system.cpp (definitions de install_block / grid_context / ensure_aux_width), comme le
 # harness phase7_system.cpp et le test CPU tests/test_compiled_model_parity.cpp. system.cpp est cherche
 # d'abord A COTE du harness (layout RSYNC plat des scripts ROMEO, cf. phase7_CMakeLists.txt), sinon
-# dans le depot a python/system.cpp. Le MEME source compile en Serial pur (g++ ADC_HAS_KOKKOS off) pour
-# l'oracle hote. ADC_HAS_MPI (defini par le CMake MPI si MPI:: present) active la seam comm + np=1/2/4.
+# dans le depot a python/system.cpp. Le MEME source compile en Serial pur (g++ POPS_HAS_KOKKOS off) pour
+# l'oracle hote. POPS_HAS_MPI (defini par le CMake MPI si MPI:: present) active la seam comm + np=1/2/4.
 if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/system.cpp")
-  set(ADC_SYSTEM_CPP "${CMAKE_CURRENT_SOURCE_DIR}/system.cpp")
+  set(POPS_SYSTEM_CPP "${CMAKE_CURRENT_SOURCE_DIR}/system.cpp")
 else()
-  set(ADC_SYSTEM_CPP "${CMAKE_CURRENT_SOURCE_DIR}/../../system.cpp")
+  set(POPS_SYSTEM_CPP "${CMAKE_CURRENT_SOURCE_DIR}/../../system.cpp")
 endif()
-add_executable(gpu_dsl_production_validate gpu_dsl_production_validate.cpp ${ADC_SYSTEM_CPP})
-target_include_directories(gpu_dsl_production_validate PRIVATE ${ADC_INCLUDE})
-target_compile_definitions(gpu_dsl_production_validate PRIVATE ADC_HAS_KOKKOS)
+add_executable(gpu_dsl_production_validate gpu_dsl_production_validate.cpp ${POPS_SYSTEM_CPP})
+target_include_directories(gpu_dsl_production_validate PRIVATE ${POPS_INCLUDE})
+target_compile_definitions(gpu_dsl_production_validate PRIVATE POPS_HAS_KOKKOS)
 target_link_libraries(gpu_dsl_production_validate PRIVATE Kokkos::kokkos)
-# MPI OPTIONNEL et EXPLICITE (option -DADC_DSLPROD_MPI=ON) : par defaut OFF -> binaire mono-process
-# (comm.hpp donne des stubs no-op sans ADC_HAS_MPI), ce qui suffit a la PARITE DEVICE (exec=Cuda) vs
+# MPI OPTIONNEL et EXPLICITE (option -DPOPS_DSLPROD_MPI=ON) : par defaut OFF -> binaire mono-process
+# (comm.hpp donne des stubs no-op sans POPS_HAS_MPI), ce qui suffit a la PARITE DEVICE (exec=Cuda) vs
 # Serial (dmax_abs sous tolerance ; PAS bit-exact, reductions Kokkos) sans toucher au MPI_Init (UCX/OFI). Quand on veut le run np=1/2/4, on
-# configure un build SEPARE avec -DADC_DSLPROD_MPI=ON contre le MEME OpenMPI CUDA-aware que les harness
-# MPI freres (spack load openmpi +cuda) -> MPI::MPI_CXX + ADC_HAS_MPI activent la seam comm.hpp.
-option(ADC_DSLPROD_MPI "Lie gpu_dsl_production_validate a MPI (run np=1/2/4)" OFF)
-if(ADC_DSLPROD_MPI)
+# configure un build SEPARE avec -DPOPS_DSLPROD_MPI=ON contre le MEME OpenMPI CUDA-aware que les harness
+# MPI freres (spack load openmpi +cuda) -> MPI::MPI_CXX + POPS_HAS_MPI activent la seam comm.hpp.
+option(POPS_DSLPROD_MPI "Lie gpu_dsl_production_validate a MPI (run np=1/2/4)" OFF)
+if(POPS_DSLPROD_MPI)
   if(NOT TARGET MPI::MPI_CXX)
-    message(FATAL_ERROR "ADC_DSLPROD_MPI=ON mais MPI::MPI_CXX introuvable (charger l'OpenMPI CUDA-aware)")
+    message(FATAL_ERROR "POPS_DSLPROD_MPI=ON mais MPI::MPI_CXX introuvable (charger l'OpenMPI CUDA-aware)")
   endif()
-  target_compile_definitions(gpu_dsl_production_validate PRIVATE ADC_HAS_MPI)
+  target_compile_definitions(gpu_dsl_production_validate PRIVATE POPS_HAS_MPI)
   target_link_libraries(gpu_dsl_production_validate PRIVATE MPI::MPI_CXX)
 endif()

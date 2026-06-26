@@ -18,8 +18,8 @@ import sys
 
 import numpy as np
 
-import adc
-from adc import dsl
+import pops
+from pops import dsl
 
 fails = 0
 
@@ -37,10 +37,10 @@ def rel(a, b):
 
 
 def iso_model(charge=1.0):
-    return adc.Model(state=adc.FluidState("isothermal", cs2=0.5),
-                     transport=adc.IsothermalFlux(),
-                     source=adc.PotentialForce(charge=charge),
-                     elliptic=adc.ChargeDensity(charge=charge))
+    return pops.Model(state=pops.FluidState("isothermal", cs2=0.5),
+                     transport=pops.IsothermalFlux(),
+                     source=pops.PotentialForce(charge=charge),
+                     elliptic=pops.ChargeDensity(charge=charge))
 
 
 def gaussian(n):
@@ -54,10 +54,10 @@ N = 16
 
 
 def make_system():
-    sim = adc.System(n=N, L=1.0, periodic=True)
+    sim = pops.System(n=N, L=1.0, periodic=True)
     sim.set_poisson(rhs="charge_density", solver="geometric_mg", bc="periodic")
-    sim.add_block("a", iso_model(+1.0), spatial=adc.FiniteVolume(limiter="minmod"))
-    sim.add_block("b", iso_model(-1.0), spatial=adc.FiniteVolume(limiter="minmod"))
+    sim.add_block("a", iso_model(+1.0), spatial=pops.FiniteVolume(limiter="minmod"))
+    sim.add_block("b", iso_model(-1.0), spatial=pops.FiniteVolume(limiter="minmod"))
     return sim
 
 
@@ -135,11 +135,11 @@ chk(raised, "compile() leve ValueError sur la frequence-Expr a registre inconnu"
 # --- (e) AMR : frequence-Expr honoree sur le niveau GROSSIER ---------------------------------
 print("== (e) AMR multi-blocs : frequence-Expr mu(U)=k*rho sur le grossier ==")
 KA = 300.0
-amr = adc.AmrSystem(n=N, L=1.0, periodic=True, regrid_every=0)
+amr = pops.AmrSystem(n=N, L=1.0, periodic=True, regrid_every=0)
 amr.set_poisson(rhs="charge_density", solver="geometric_mg", bc="periodic")
 amr.set_refinement(1e30)
-amr.add_block("e1", iso_model(+1.0), spatial=adc.FiniteVolume(limiter="minmod"))
-amr.add_block("e2", iso_model(-1.0), spatial=adc.FiniteVolume(limiter="minmod"))
+amr.add_block("e1", iso_model(+1.0), spatial=pops.FiniteVolume(limiter="minmod"))
+amr.add_block("e2", iso_model(-1.0), spatial=pops.FiniteVolume(limiter="minmod"))
 rho = gaussian(N)
 amr.set_density("e1", rho.ravel())
 amr.set_density("e2", rho.ravel())

@@ -28,22 +28,22 @@ Section B (gated, self-skip): the OFFLINE REFERENCE is the engine's own default 
   - NO REGRESSION: a default-only model (no named field) stepped via a program is byte-identical to the
     same model stepped before this feature (the named code path is inert; asserted on the lowered C++).
 
-Skips cleanly (exit 0) without numpy / _adc / a compiler / a visible Kokkos -- never fakes the engine.
+Skips cleanly (exit 0) without numpy / _pops / a compiler / a visible Kokkos -- never fakes the engine.
 """
 import sys
 
 
-def _adc_mods():
+def _pops_mods():
     try:
-        from adc import dsl
-        from adc import time as adctime
-    except Exception as exc:  # adc not importable here -> skip, never fake
-        print("skip test_time_multielliptic (adc unavailable: %s)" % exc)
+        from pops import dsl
+        from pops import time as adctime
+    except Exception as exc:  # pops not importable here -> skip, never fake
+        print("skip test_time_multielliptic (pops unavailable: %s)" % exc)
         sys.exit(0)
     return dsl, adctime
 
 
-dsl, adctime = _adc_mods()
+dsl, adctime = _pops_mods()
 
 fails = 0
 
@@ -65,7 +65,7 @@ def raises(exc_types, fn):
     return False
 
 
-Q = -1.0  # charge sign (f = q * rho), like adc::ChargeDensity
+Q = -1.0  # charge sign (f = q * rho), like pops::ChargeDensity
 
 
 # --- shared isothermal 2D fluid block (rho, mx, my; default Poisson f = q*rho) ---
@@ -179,7 +179,7 @@ chk(raises(NotImplementedError, _amr_named),
     "a named elliptic field on target='amr_system' raises NotImplementedError (deferred)")
 
 
-# The flat-ABI backends (aot: ADC_DEFINE_COMPILED_BLOCK; jit: extern "C" factory) emit the named RHS
+# The flat-ABI backends (aot: POPS_DEFINE_COMPILED_BLOCK; jit: extern "C" factory) emit the named RHS
 # brick via the shared _emit_bricks but have NO hook to register the field on the System. Reject them
 # loud at the EMIT boundary, not silently (a dropped field would only fail at runtime: "System: unknown
 # named elliptic field"). Mirrors the target='amr_system' guard.
@@ -218,12 +218,12 @@ def _skipB(msg):
 try:
     import numpy as np
 
-    import adc
+    import pops
 except Exception as exc:  # noqa: BLE001
-    _skipB("numpy/_adc unavailable: %s" % exc)
+    _skipB("numpy/_pops unavailable: %s" % exc)
 
-if not hasattr(adc.System(n=8, L=1.0, periodic=True), "install_program"):
-    _skipB("_adc lacks the install_program binding (rebuild _adc)")
+if not hasattr(pops.System(n=8, L=1.0, periodic=True), "install_program"):
+    _skipB("_pops lacks the install_program binding (rebuild _pops)")
 
 N = 16
 DT = 0.005
@@ -239,14 +239,14 @@ def _ic():
 
 
 def make_sim(model):
-    sim = adc.System(n=N, L=1.0, periodic=True)
+    sim = pops.System(n=N, L=1.0, periodic=True)
     try:
         compiled = model.compile(backend="production")
     except RuntimeError as exc:
         _skipB("model compile could not build the .so: %s" % str(exc)[:160])
     sim.add_equation("plasma", compiled,
-                     spatial=adc.FiniteVolume(limiter="none", riemann="rusanov"),
-                     time=adc.Explicit(method="euler"))
+                     spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                     time=pops.Explicit(method="euler"))
     sim.set_poisson("composite", "geometric_mg")  # f = sum of the per-block elliptic bricks
     sim.set_state("plasma", _ic())
     return sim
@@ -254,7 +254,7 @@ def make_sim(model):
 
 def step_program(model, prog):
     try:
-        compiled = adc.compile_problem(model=model, time=prog)
+        compiled = pops.compile_problem(model=model, time=prog)
     except RuntimeError as exc:
         _skipB("compile_problem could not build the .so: %s" % str(exc)[:160])
     sim = make_sim(model)

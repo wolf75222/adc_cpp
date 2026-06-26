@@ -1,6 +1,6 @@
 <div align="center">
 
-# adc_cpp
+# PoPS - Plasma-Oriented PDE Solver
 
 **A model-free C++23 core for coupled hyperbolic-elliptic systems on adaptive (AMR) meshes.**
 
@@ -26,8 +26,8 @@ Reproducible local version (Python facade):
 
 ---
 
-`adc_cpp` is a model-free engine with a library of generic physics bricks
-(`include/adc/physics/`) and Python bindings (`adc`). It names no scenario; it provides generic
+PoPS is a model-free engine with a library of generic physics bricks
+(`include/pops/physics/`) and Python bindings (`pops`). It names no scenario; it provides generic
 bricks composed into a `CompositeModel`. Named scenarios (diocotron, Euler-Poisson, two-fluid)
 live in [`adc_cases`](https://github.com/wolf75222/adc_cases).
 
@@ -58,9 +58,9 @@ The coupling flows through the `aux` channel at each step. The base contract is
 - **CMake >= 3.21**: the build is driven by presets ([CMakePresets.json](CMakePresets.json)).
 - **[Kokkos](https://kokkos.org) 4.2+**: the only on-node backend, required. No need to
   pre-install it; if it is not found, CMake fetches and builds it (FetchContent).
-- **MPI** *(optional, `-DADC_USE_MPI=ON`: halos and distributed FFT)*.
-- **HDF5** parallel *(optional, `-DADC_USE_HDF5=ON`: DataWriter)*.
-- **Python 3.12 + numpy** *(optional, the `adc` bindings; conda env via `scripts/setup_env.sh`)*.
+- **MPI** *(optional, `-DPOPS_USE_MPI=ON`: halos and distributed FFT)*.
+- **HDF5** parallel *(optional, `-DPOPS_USE_HDF5=ON`: DataWriter)*.
+- **Python 3.12 + numpy** *(optional, the `pops` bindings; conda env via `scripts/setup_env.sh`)*.
 
 Per-platform backend coverage and known pitfalls (macOS, CUDA, conda, CI runners):
 [docs/BACKEND_COVERAGE.md](docs/BACKEND_COVERAGE.md).
@@ -90,18 +90,18 @@ cmake --preset mpi      && cmake --build --preset mpi      && ctest --preset mpi
 ```
 
 Each preset writes into its own folder (`build`, `build-kokkos`, `build-mpi`). Backends and
-runtime thread control (`adc.set_threads()`) are covered in the
+runtime thread control (`pops.set_threads()`) are covered in the
 [installation guide](docs/sphinx/getting-started/installation.md).
 
-Python module (`adc`): `scripts/setup_env.sh` creates the conda env and pins the platform
+Python module (`pops`): `scripts/setup_env.sh` creates the conda env and pins the platform
 toolchain, then `scripts/build_python.sh` builds and installs the module in one command (it sizes
-the heavy-TU pool, exports the discovery vars, and ends on `adc.doctor()`); `pip install .`
+the heavy-TU pool, exports the discovery vars, and ends on `pops.doctor()`); `pip install .`
 (scikit-build-core) drives the build directly if you prefer. Backends are selected by environment
-variables (`ADC_USE_MPI`, `Kokkos_ROOT`, ...).
+variables (`POPS_USE_MPI`, `Kokkos_ROOT`, ...).
 
 ```bash
 bash scripts/setup_env.sh      # conda env + toolchain
-bash scripts/build_python.sh   # build + install, then adc.doctor()
+bash scripts/build_python.sh   # build + install, then pops.doctor()
 # or, by hand:  pip install .  # see the installation guide for backends
 ```
 
@@ -112,13 +112,13 @@ Released versions and binaries: the
 
 ### From a C++ project
 
-The core is header-only and consumed via `find_package(adc)` or FetchContent:
+The core is header-only and consumed via `find_package(pops)` or FetchContent:
 
 ```cmake
 include(FetchContent)
 FetchContent_Declare(adc_cpp GIT_REPOSITORY https://github.com/wolf75222/adc_cpp.git)
 FetchContent_MakeAvailable(adc_cpp)   # adc_cpp's own tests are not built for the consumer
-target_link_libraries(my_app PRIVATE adc::adc)
+target_link_libraries(my_app PRIVATE pops::pops)
 ```
 
 Define a type that satisfies the `PhysicalModel` concept, wrap it in a
@@ -126,31 +126,31 @@ Define a type that satisfies the `PhysicalModel` concept, wrap it in a
 
 ### From Python
 
-A model is written in either of two equivalent ways, plugged the same way into `adc.System` /
-`adc.AmrSystem`: composed **bricks** (`adc.Model`, no just-in-time compilation), or symbolic
-**formulas** (`adc.dsl.Model`, translated to C++ and compiled to a `.so`). Both produce
+A model is written in either of two equivalent ways, plugged the same way into `pops.System` /
+`pops.AmrSystem`: composed **bricks** (`pops.Model`, no just-in-time compilation), or symbolic
+**formulas** (`pops.dsl.Model`, translated to C++ and compiled to a `.so`). Both produce
 bit-identical results. Minimal example, the reduced diocotron as bricks (scalar density advected
 by the E x B drift, neutralizing background):
 
 ```python
-import adc
-model = adc.Model(state=adc.Scalar(),
-                  transport=adc.ExB(B0=1.0),
-                  source=adc.NoSource(),
-                  elliptic=adc.BackgroundDensity(alpha=1.0, n0=0.0))
-sim = adc.System(n=96, L=1.0, periodic=True)
-sim.add_block("ne", model=model, spatial=adc.Spatial(minmod=True), time=adc.Explicit())
+import pops
+model = pops.Model(state=pops.Scalar(),
+                  transport=pops.ExB(B0=1.0),
+                  source=pops.NoSource(),
+                  elliptic=pops.BackgroundDensity(alpha=1.0, n0=0.0))
+sim = pops.System(n=96, L=1.0, periodic=True)
+sim.add_block("ne", model=model, spatial=pops.Spatial(minmod=True), time=pops.Explicit())
 sim.set_poisson(rhs="charge_density", solver="geometric_mg")
 sim.set_density("ne", ne0)          # ne0: initial density (2D array)
 sim.step_cfl(0.4)
 sim.write("ne.npz", format="npz")   # save the block states (npz; "vtk" also available)
 ```
 
-A model written as **formulas** (`adc.dsl.Model`, translated to C++ and compiled to a `.so`,
+A model written as **formulas** (`pops.dsl.Model`, translated to C++ and compiled to a `.so`,
 plugged in the same way with `add_equation`). Here an isothermal fluid:
 
 ```python
-from adc import dsl
+from pops import dsl
 m = dsl.Model("flow")
 rho, mx, my = m.conservative_vars("rho", "mx", "my",
                                   roles=["Density", "MomentumX", "MomentumY"])
@@ -164,10 +164,10 @@ m.conservative_from([rho, rho * u, rho * v])
 m.elliptic_rhs(0.0 * rho)                          # no elliptic coupling here
 compiled = m.compile("flow.so")                    # codegen + C++ compile (headers auto-located)
 sim.add_equation("flow", model=compiled,
-                 spatial=adc.FiniteVolume(limiter="minmod"), time=adc.Explicit())
+                 spatial=pops.FiniteVolume(limiter="minmod"), time=pops.Explicit())
 ```
 
-`adc.AmrSystem` composes one or more blocks on a refined hierarchy (`set_refinement`, regrid,
+`pops.AmrSystem` composes one or more blocks on a refined hierarchy (`set_refinement`, regrid,
 conservative reflux, composite FAC elliptic and a Schur-condensed source stage). Step-by-step
 tutorial (bricks and formulas): [getting-started/tutorial](docs/sphinx/getting-started/tutorial.md).
 Reference: [native-bricks](docs/sphinx/reference/native-bricks.md),
@@ -187,14 +187,14 @@ Reference: [native-bricks](docs/sphinx/reference/native-bricks.md),
 
 | Layer | Role | Entry point |
 |---|---|---|
-| `core/` | types, state, `PhysicalModel`, `EquationBlock`, `CoupledSystem` | [physical_model.hpp](include/adc/core/model/physical_model.hpp) |
-| `physics/` | generic bricks composed into a `CompositeModel` | [composite.hpp](include/adc/physics/composition/composite.hpp) |
-| `numerics/` | reconstruction (Minmod / VanLeer / WENO5), flux (Rusanov / HLL / HLLC / Roe) | [reconstruction.hpp](include/adc/numerics/fv/reconstruction.hpp) |
-| `numerics/elliptic/` | `EllipticSolver` concept, geometric multigrid, FFT, composite FAC | [elliptic_solver.hpp](include/adc/numerics/elliptic/interface/elliptic_solver.hpp) |
-| `numerics/time/` | SSP-RK, multirate scheduler, IMEX, splitting, AMR engine | [numerics/time/](include/adc/numerics/time) |
-| `coupling/` | `Coupler`, `SystemCoupler`, `AmrSystemCoupler`, `AmrCouplerMP` | [coupler.hpp](include/adc/coupling/single/coupler.hpp) |
-| `amr/`, `mesh/`, `parallel/` | Berger-Rigoutsos clustering, regrid, MultiFab, MPI comm seam | [amr/](include/adc/amr) |
-| `runtime/` | `System` / `AmrSystem` facades, `model_factory`, DSL, aux channel | [system.hpp](include/adc/runtime/system.hpp) |
+| `core/` | types, state, `PhysicalModel`, `EquationBlock`, `CoupledSystem` | [physical_model.hpp](include/pops/core/model/physical_model.hpp) |
+| `physics/` | generic bricks composed into a `CompositeModel` | [composite.hpp](include/pops/physics/composition/composite.hpp) |
+| `numerics/` | reconstruction (Minmod / VanLeer / WENO5), flux (Rusanov / HLL / HLLC / Roe) | [reconstruction.hpp](include/pops/numerics/fv/reconstruction.hpp) |
+| `numerics/elliptic/` | `EllipticSolver` concept, geometric multigrid, FFT, composite FAC | [elliptic_solver.hpp](include/pops/numerics/elliptic/interface/elliptic_solver.hpp) |
+| `numerics/time/` | SSP-RK, multirate scheduler, IMEX, splitting, AMR engine | [numerics/time/](include/pops/numerics/time) |
+| `coupling/` | `Coupler`, `SystemCoupler`, `AmrSystemCoupler`, `AmrCouplerMP` | [coupler.hpp](include/pops/coupling/single/coupler.hpp) |
+| `amr/`, `mesh/`, `parallel/` | Berger-Rigoutsos clustering, regrid, MultiFab, MPI comm seam | [amr/](include/pops/amr) |
+| `runtime/` | `System` / `AmrSystem` facades, `model_factory`, DSL, aux channel | [system.hpp](include/pops/runtime/system.hpp) |
 
 ### Ecosystem
 
@@ -208,7 +208,7 @@ Reference: [native-bricks](docs/sphinx/reference/native-bricks.md),
 
 ## Versioning
 
-`adc_cpp` follows [Semantic Versioning](https://semver.org). The public API under guarantee and
+PoPS follows [Semantic Versioning](https://semver.org). The public API under guarantee and
 the bump rules are declared in [docs/VERSIONING.md](docs/VERSIONING.md). Available versions and
 their change logs: the [Releases page](https://github.com/wolf75222/adc_cpp/releases) and
 [CHANGELOG.md](CHANGELOG.md). The project is in `0.y.z` initial development: the public API may

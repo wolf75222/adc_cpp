@@ -1,7 +1,7 @@
 """Backend "production" (NATIF) du DSL cote AMR (Plan Ideal etape 5 / DSL Phase D) : un modele ecrit
 en formules est compile en un LOADER .so via compile(backend="production", target="amr_system"), qui
-inline le gabarit en-tete adc::add_compiled_model(AmrSystem&, ...), puis branche dans une AmrSystem
-via AmrSystem.add_native_block (symbole adc_install_native_amr, distinct du chemin System).
+inline le gabarit en-tete pops::add_compiled_model(AmrSystem&, ...), puis branche dans une AmrSystem
+via AmrSystem.add_native_block (symbole pops_install_native_amr, distinct du chemin System).
 
 A la difference du chemin System (grille plate mono-niveau), le bloc est l'UNIQUE modele porte sur la
 hierarchie AMR (AmrCouplerMP<Model> + reflux conservatif + regrid), MEME chemin que AmrSystem.add_block
@@ -11,7 +11,7 @@ add_compiled_model). On verifie :
   1) PARITE STRICTE (transport pur, elliptic_rhs nul => zero bruit FP elliptique) : la densite
      grossiere apres plusieurs pas est BIT-IDENTIQUE (dmax == 0) entre le bloc "production" (loader
      .so -> add_native_block) et le bloc NATIF add_block (ModelSpec CompressibleFlux). C'est la parite
-     attendue : le brique Euler generee a une arithmetique de flux bit-identique a adc::Euler natif, et
+     attendue : le brique Euler generee a une arithmetique de flux bit-identique a pops::Euler natif, et
      les deux empruntent la MEME machinerie AMR (add_compiled_model(AmrSystem&)).
   2) PARITE FORTE (euler_poisson couple) : memes masse / n_patches / densite a la precision machine
      (< 1e-12), comme le test C++ test_amr_compiled_model.cpp (le solve elliptique MG accumule un bruit
@@ -22,10 +22,10 @@ add_compiled_model). On verifie :
      (WENO5-Z, 3 ghosts) est en revanche CABLE sur AMR (rusanov) : on prouve sa PARITE STRICTE
      (densite production == add_block, dmax == 0) et qu'il DIFFERE de minmod (reconstruction active).
   4) GARDE-FOUS de compilation : compile(target="amr_system") exige backend="production" ; un
-     CompiledModel target="system" est refuse par AmrSystem.add_equation (loader sans adc_install_native_amr).
-  5) GARDE-FOU ABI : un loader AMR a cle adc_native_abi_key falsifiee est rejete par add_native_block.
+     CompiledModel target="system" est refuse par AmrSystem.add_equation (loader sans pops_install_native_amr).
+  5) GARDE-FOU ABI : un loader AMR a cle pops_native_abi_key falsifiee est rejete par add_native_block.
 
-S'auto-saute (exit 0) sans compilateur C++ ou en-tetes adc (comme test_dsl_production).
+S'auto-saute (exit 0) sans compilateur C++ ou en-tetes pops (comme test_dsl_production).
 """
 import os
 import shutil
@@ -34,8 +34,8 @@ import tempfile
 
 import numpy as np
 
-import adc
-from adc import dsl
+import pops
+from pops import dsl
 
 GAMMA = 1.4
 INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "include"))
@@ -88,12 +88,12 @@ def _bubble(n):
 
 
 def _amr(n, L, branch, refine=1.2):
-    cfg = adc.AmrSystemConfig()
+    cfg = pops.AmrSystemConfig()
     cfg.n = n
     cfg.L = L
     cfg.periodic = True
     cfg.regrid_every = 4
-    s = adc.AmrSystem(cfg)
+    s = pops.AmrSystem(cfg)
     branch(s)
     s.set_refinement(refine)
     s.set_density("gas", _bubble(n))
@@ -103,7 +103,7 @@ def _amr(n, L, branch, refine=1.2):
 def main():
     cxx = shutil.which("c++") or shutil.which("g++") or shutil.which("clang++")
     if not cxx or not os.path.isdir(INCLUDE):
-        print("skip  compilateur ou en-tetes adc absents")
+        print("skip  compilateur ou en-tetes pops absents")
         print("test_dsl_production_amr : OK (rien a compiler)")
         return
 
@@ -118,16 +118,16 @@ def main():
         assert isinstance(cm_t, dsl.CompiledModel)
         assert cm_t.adder == "add_native_block" and cm_t.target == "amr_system"
         assert cm_t.caps.get("amr") is True, "production caps amr=True (Phase D)"
-        spec_t = adc.Model(state=adc.FluidState("compressible", gamma=GAMMA),
-                           transport=adc.CompressibleFlux(), source=adc.NoSource(),
-                           elliptic=adc.BackgroundDensity(alpha=0.0, n0=0.0))
+        spec_t = pops.Model(state=pops.FluidState("compressible", gamma=GAMMA),
+                           transport=pops.CompressibleFlux(), source=pops.NoSource(),
+                           elliptic=pops.BackgroundDensity(alpha=0.0, n0=0.0))
 
         A = _amr(n, L, lambda s: s._s.add_native_block(
             "gas", so_t, limiter="minmod", riemann="rusanov", recon="conservative",
             time="explicit", gamma=GAMMA, substeps=1))
         B = _amr(n, L, lambda s: s.add_block(
-            "gas", spec_t, spatial=adc.Spatial(minmod=True, flux="rusanov", recon="conservative"),
-            time=adc.Explicit()))
+            "gas", spec_t, spatial=pops.Spatial(minmod=True, flux="rusanov", recon="conservative"),
+            time=pops.Explicit()))
         assert A.n_patches() == B.n_patches(), "n_patches initial production != add_block"
         dt = 2e-4
         for _ in range(12):
@@ -148,9 +148,9 @@ def main():
         cm_p = ep.compile(os.path.join(tmp, "euler_poisson_amr.so"), INCLUDE,
                           backend="production", target="amr_system")
         so_p = cm_p.so_path
-        spec_p = adc.Model(state=adc.FluidState("compressible", gamma=GAMMA),
-                           transport=adc.CompressibleFlux(), source=adc.GravityForce(),
-                           elliptic=adc.GravityCoupling(sign=-1.0, four_pi_G=1.0, rho0=1.0))
+        spec_p = pops.Model(state=pops.FluidState("compressible", gamma=GAMMA),
+                           transport=pops.CompressibleFlux(), source=pops.GravityForce(),
+                           elliptic=pops.GravityCoupling(sign=-1.0, four_pi_G=1.0, rho0=1.0))
 
         def poisson(s):
             s.set_poisson("charge_density", "geometric_mg")
@@ -159,8 +159,8 @@ def main():
             "gas", so_p, limiter="minmod", riemann="rusanov", recon="conservative",
             time="explicit", gamma=GAMMA, substeps=1), poisson(s)))
         D = _amr(n, L, lambda s: (s.add_block(
-            "gas", spec_p, spatial=adc.Spatial(minmod=True, flux="rusanov", recon="conservative"),
-            time=adc.Explicit()), poisson(s)))
+            "gas", spec_p, spatial=pops.Spatial(minmod=True, flux="rusanov", recon="conservative"),
+            time=pops.Explicit()), poisson(s)))
         assert C.n_patches() == D.n_patches()
         m0c, m0d = C.mass(), D.mass()
         assert abs(m0c - m0d) < 1e-12 * (abs(m0d) + 1.0), "masse initiale production != add_block"
@@ -184,11 +184,11 @@ def main():
             """add_equation(riemann, recon) BIT-IDENTIQUE a add_block (dmax==0)."""
             R = _amr(n, L, lambda s: s.add_equation(
                 "gas", cm_t,
-                spatial=adc.FiniteVolume(limiter="minmod", riemann=riem, variables=recon)))
+                spatial=pops.FiniteVolume(limiter="minmod", riemann=riem, variables=recon)))
             S = _amr(n, L, lambda s: s.add_block(
                 "gas", spec_t,
-                spatial=adc.Spatial(minmod=True, flux=riem, recon=recon),
-                time=adc.Explicit()))
+                spatial=pops.Spatial(minmod=True, flux=riem, recon=recon),
+                time=pops.Explicit()))
             for _ in range(12):
                 R.step(dt)
                 S.step(dt)
@@ -225,9 +225,9 @@ def main():
         assert "p" not in cm_iso.prim_names, "modele isotherme ne devrait pas avoir 'p'"
         raised = False
         try:
-            s_nop = adc.AmrSystem(n=n, L=L, periodic=True)
+            s_nop = pops.AmrSystem(n=n, L=L, periodic=True)
             s_nop.add_equation("gas", cm_iso,
-                               spatial=adc.Spatial(minmod=True, flux="hllc"))
+                               spatial=pops.Spatial(minmod=True, flux="hllc"))
         except ValueError as ex:
             raised = True
             assert "hllc" in str(ex).lower()
@@ -241,8 +241,8 @@ def main():
             "gas", so_t, limiter="weno5", riemann="rusanov", recon="conservative",
             time="explicit", gamma=GAMMA, substeps=1))
         Bw = _amr(n, L, lambda s: s.add_block(
-            "gas", spec_t, spatial=adc.Spatial(weno5=True, flux="rusanov", recon="conservative"),
-            time=adc.Explicit()))
+            "gas", spec_t, spatial=pops.Spatial(weno5=True, flux="rusanov", recon="conservative"),
+            time=pops.Explicit()))
         assert Aw.n_patches() == Bw.n_patches(), "weno5 : n_patches initial production != add_block"
         for _ in range(12):
             Aw.step(dt)
@@ -258,9 +258,9 @@ def main():
         assert float(np.max(np.abs(daw - da))) > 1e-9, "weno5 == minmod (reconstruction inactive)"
         # WENO5 via la facade add_equation (pas seulement le binding bas niveau) : meme chemin nominal.
         # Reutilise cm_t (transport pur) : pas de Poisson, tourne sans set_poisson.
-        Gw = adc.AmrSystem(n=n, L=L, periodic=True)
+        Gw = pops.AmrSystem(n=n, L=L, periodic=True)
         Gw.add_equation("gas", cm_t,
-                        spatial=adc.Spatial(weno5=True, flux="rusanov", recon="conservative"))
+                        spatial=pops.Spatial(weno5=True, flux="rusanov", recon="conservative"))
         Gw.set_refinement(1.2)
         Gw.set_density("gas", _bubble(n))
         for _ in range(4):
@@ -270,10 +270,10 @@ def main():
               "add_equation(weno5) tourne" % dmaxw)
 
         # add_equation chemin nominal (rusanov + conservatif) accepte et tourne :
-        E = adc.AmrSystem(n=n, L=L, periodic=True)
+        E = pops.AmrSystem(n=n, L=L, periodic=True)
         E.set_poisson("charge_density", "geometric_mg")
         E.add_equation("gas", cm_t,
-                       spatial=adc.Spatial(minmod=True, flux="rusanov", recon="conservative"))
+                       spatial=pops.Spatial(minmod=True, flux="rusanov", recon="conservative"))
         E.set_refinement(1.2)
         E.set_density("gas", _bubble(n))
         for _ in range(4):
@@ -292,20 +292,20 @@ def main():
 
         sys_cm = ep.compile(os.path.join(tmp, "ep_sys_cm.so"), INCLUDE,
                             backend="production", target="system")  # target System par defaut
-        s = adc.AmrSystem(n=n, L=L, periodic=True)
+        s = pops.AmrSystem(n=n, L=L, periodic=True)
         raised = False
         try:
             s.add_equation("gas", sys_cm,
-                           spatial=adc.Spatial(minmod=True, flux="rusanov", recon="conservative"))
+                           spatial=pops.Spatial(minmod=True, flux="rusanov", recon="conservative"))
         except ValueError as ex:
             raised = True
             assert "target='system'" in str(ex) or "amr_system" in str(ex)
         assert raised, "AmrSystem.add_equation a accepte un CompiledModel target='system'"
         print("OK  (4) compile(target=) garde-fous + CompiledModel target='system' refuse sur AMR")
 
-        # --- (5) GARDE-FOU ABI : loader AMR a cle adc_native_abi_key falsifiee -> rejet ---
+        # --- (5) GARDE-FOU ABI : loader AMR a cle pops_native_abi_key falsifiee -> rejet ---
         bad_abi = _compile_wrong_abi(ep, os.path.join(tmp, "ep_amr_wrongabi.so"), cxx)
-        s = adc.AmrSystem(n=n, L=L, periodic=True)
+        s = pops.AmrSystem(n=n, L=L, periodic=True)
         raised = False
         try:
             s._s.add_native_block("gas", bad_abi, limiter="minmod", riemann="rusanov",
@@ -322,19 +322,19 @@ def main():
 
 
 def _compile_wrong_abi(model, dst_so, cxx):
-    """Compile le MEME loader natif AMR mais avec une signature d'en-tetes FAUSSE (-DADC_HEADER_SIG
+    """Compile le MEME loader natif AMR mais avec une signature d'en-tetes FAUSSE (-DPOPS_HEADER_SIG
     bidon) : le .so est valide mais sa cle d'ABI differe de celle du module -> rejet d'add_native_block.
     On regenere (pas de patch binaire : sur macOS ARM cela invaliderait la signature et tuerait le
     process). Renvoie le chemin du .so."""
-    from adc.dsl import adc_loader_build_flags
+    from pops.dsl import pops_loader_build_flags
     # model est une facade dsl.Model : le HyperbolicModel backing (_m) porte emit_cpp_native_loader.
     src = model._m.emit_cpp_native_loader(target="amr_system")
-    # adc_cpp est Kokkos-only : le loader inclut les en-tetes adc -> Kokkos + (macOS) -undefined
-    # dynamic_lookup via adc_loader_build_flags. SIGNATURE D'EN-TETES FAUSSE conservee (le .so compile
+    # adc_cpp est Kokkos-only : le loader inclut les en-tetes pops -> Kokkos + (macOS) -undefined
+    # dynamic_lookup via pops_loader_build_flags. SIGNATURE D'EN-TETES FAUSSE conservee (le .so compile
     # mais doit etre REJETE a l'ABI par add_native_block).
-    cc, kflags_c, kflags_l = adc_loader_build_flags(cxx)
+    cc, kflags_c, kflags_l = pops_loader_build_flags(cxx)
     flags = ["-shared", "-fPIC", "-std=c++20", "-O2",
-             "-DADC_HEADER_SIG=\"deadbeef_signature_volontairement_fausse\"", *kflags_c]
+             "-DPOPS_HEADER_SIG=\"deadbeef_signature_volontairement_fausse\"", *kflags_c]
     with tempfile.TemporaryDirectory() as t:
         cpp = os.path.join(t, "wrong_amr.cpp")
         with open(cpp, "w") as f:

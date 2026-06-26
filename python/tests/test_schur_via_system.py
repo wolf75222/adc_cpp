@@ -9,11 +9,11 @@ DSL compile (AOT) et se saute sans compilateur C++. Ce test comble le manque en
 utilisant UNIQUEMENT des briques NATIVES (ModelSpec) : aucune compilation .so a
 la volee, aucune dependance au compilateur C++, CI-safe.
 
-MODELE NATIF : adc.FluidState(isothermal) + adc.IsothermalFlux() expose les roles
+MODELE NATIF : pops.FluidState(isothermal) + pops.IsothermalFlux() expose les roles
 Density / MomentumX / MomentumY -- exactement ceux requis par set_source_stage.
 Le chemin est :
-  adc.System.add_equation (time=adc.Split(source=adc.CondensedSchur(...)))
-    -> adc.System.add_equation (time=time.hyperbolic = adc.Explicit())   # transport
+  pops.System.add_equation (time=pops.Split(source=pops.CondensedSchur(...)))
+    -> pops.System.add_equation (time=time.hyperbolic = pops.Explicit())   # transport
       -> _s.add_block (ModelSpec -> dispatch_model -> IsothermalFlux)
     -> _s.set_source_stage (name, kind, theta, alpha)                    # etage Schur
   sim.step(dt)
@@ -31,7 +31,7 @@ Validations :
      par la condensation Schur : rho est intouchee dans le sous-systeme source).
   D) Stabilite sous source RAIDE (dt > 1/omega_cyclotron, source explicite
      exploserait) : l'etage implicite (theta=1) garde ||v|| finie et bornee.
-  E) Defaut INCHANGE : un bloc identique en adc.Explicit pur (sans Split) produit
+  E) Defaut INCHANGE : un bloc identique en pops.Explicit pur (sans Split) produit
      un resultat DIFFERENT de Split (l'etage source fait quelque chose), mais le
      bloc Explicit lui-meme reste deterministe (bit-identique sur deux runs).
 """
@@ -40,9 +40,9 @@ import sys
 import numpy as np
 
 try:
-    import adc
+    import pops
 except ImportError as e:
-    print("skip  module adc absent (PYTHONPATH ?) : %s" % e)
+    print("skip  module pops absent (PYTHONPATH ?) : %s" % e)
     sys.exit(0)
 
 
@@ -58,11 +58,11 @@ def iso_fluid_model(cs2=1.0, alpha=1.0):
     exige ces trois roles, Energy est optionnel).
     Background density alpha*(n - 0) comme second membre du Poisson de systeme.
     """
-    return adc.Model(
-        state=adc.FluidState(kind="isothermal", cs2=cs2),
-        transport=adc.IsothermalFlux(),
-        source=adc.NoSource(),
-        elliptic=adc.BackgroundDensity(alpha=alpha, n0=0.0),
+    return pops.Model(
+        state=pops.FluidState(kind="isothermal", cs2=cs2),
+        transport=pops.IsothermalFlux(),
+        source=pops.NoSource(),
+        elliptic=pops.BackgroundDensity(alpha=alpha, n0=0.0),
     )
 
 
@@ -85,24 +85,24 @@ def build_system(n=24, L=1.0, B0=4.0, alpha=3.0, theta=1.0, with_schur=True,
     Chemin de reference quand with_schur=False :
       add_equation (Explicit) -> add_block (IsothermalFlux), sans set_source_stage
     """
-    sim = adc.System(n=n, L=L, periodic=False)
+    sim = pops.System(n=n, L=L, periodic=False)
     sim.set_poisson(bc="dirichlet")
     sim.set_magnetic_field(B0 * np.ones((n, n)))
     if with_schur:
-        time_policy = adc.Split(
-            hyperbolic=adc.Explicit(),
-            source=adc.CondensedSchur(
+        time_policy = pops.Split(
+            hyperbolic=pops.Explicit(),
+            source=pops.CondensedSchur(
                 kind="electrostatic_lorentz",
                 theta=theta,
                 alpha=alpha,
             ),
         )
     else:
-        time_policy = adc.Explicit()
+        time_policy = pops.Explicit()
     sim.add_equation(
         "ions",
         model=iso_fluid_model(cs2=cs2, alpha=alpha),
-        spatial=adc.FiniteVolume(limiter="minmod", riemann="rusanov",
+        spatial=pops.FiniteVolume(limiter="minmod", riemann="rusanov",
                                  variables="conservative"),
         time=time_policy,
     )

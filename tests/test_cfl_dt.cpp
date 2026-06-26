@@ -3,33 +3,33 @@
 // especes -> l'espece la plus rapide contraint le pas. Combine au Stride d'une espece lente,
 // cela donne le multirate pratique.
 
-#include <adc/core/model/coupled_system.hpp>
-#include <adc/core/state/state.hpp>
-#include <adc/coupling/system/system_coupler.hpp>
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/layout/distribution_mapping.hpp>
-#include <adc/mesh/geometry/geometry.hpp>
-#include <adc/mesh/storage/multifab.hpp>
+#include <pops/core/model/coupled_system.hpp>
+#include <pops/core/state/state.hpp>
+#include <pops/coupling/system/system_coupler.hpp>
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/layout/distribution_mapping.hpp>
+#include <pops/mesh/geometry/geometry.hpp>
+#include <pops/mesh/storage/multifab.hpp>
 
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
 #include <limits>
 
-using namespace adc;
+using namespace pops;
 
 // Advection a vitesse constante a : vitesse d'onde max = |a|.
 struct AdvectX {
   using State = StateVec<1>;
-  using Aux = adc::Aux;
+  using Aux = pops::Aux;
   static constexpr int n_vars = 1;
   Real a = Real(1);
-  ADC_HD State flux(const State& u, const Aux&, int dir) const {
+  POPS_HD State flux(const State& u, const Aux&, int dir) const {
     return State{dir == 0 ? a * u[0] : Real(0)};
   }
-  ADC_HD Real max_wave_speed(const State&, const Aux&, int) const { return a < 0 ? -a : a; }
-  ADC_HD State source(const State&, const Aux&) const { return State{}; }
-  ADC_HD Real elliptic_rhs(const State& u) const { return u[0]; }
+  POPS_HD Real max_wave_speed(const State&, const Aux&, int) const { return a < 0 ? -a : a; }
+  POPS_HD State source(const State&, const Aux&) const { return State{}; }
+  POPS_HD Real elliptic_rhs(const State& u) const { return u[0]; }
 };
 
 // ADC-267 : modele dont la vitesse d'onde est NaN (flux physique fini, 0). Verifie que le calcul
@@ -37,14 +37,14 @@ struct AdvectX {
 // donc le NaN (2e argument) est avale (std::max(0, NaN) = 0) -> w_max reste fini -> dt fini.
 struct NanSpeed {
   using State = StateVec<1>;
-  using Aux = adc::Aux;
+  using Aux = pops::Aux;
   static constexpr int n_vars = 1;
-  ADC_HD State flux(const State&, const Aux&, int) const { return State{Real(0)}; }
-  ADC_HD Real max_wave_speed(const State&, const Aux&, int) const {
+  POPS_HD State flux(const State&, const Aux&, int) const { return State{Real(0)}; }
+  POPS_HD Real max_wave_speed(const State&, const Aux&, int) const {
     return std::numeric_limits<Real>::quiet_NaN();
   }
-  ADC_HD State source(const State&, const Aux&) const { return State{}; }
-  ADC_HD Real elliptic_rhs(const State& u) const { return u[0]; }
+  POPS_HD State source(const State&, const Aux&) const { return State{}; }
+  POPS_HD Real elliptic_rhs(const State& u) const { return u[0]; }
 };
 
 struct ZeroSystemRhs {

@@ -1,15 +1,15 @@
 """Spec 3: native HLLC needs model capabilities (criterion 10).
 
-The Riemann solvers are native C++ (`adc::HLLCFlux` etc.). HLLC is generic but needs the
+The Riemann solvers are native C++ (`pops::HLLCFlux` etc.). HLLC is generic but needs the
 model to provide capabilities: a pressure and the fluid roles Density/MomentumX/MomentumY.
 `m.riemann("hllc")` validates this and drives the dsl `enable_hllc()` that GENERATES the
-`ADC_HD` `contact_speed` / `hllc_star_state` hooks from those roles. A model that lacks a
+`POPS_HD` `contact_speed` / `hllc_star_state` hooks from those roles. A model that lacks a
 capability is rejected with a clear message; Rusanov needs only a max wave speed.
 
 Run: python3 examples/spec3/hllc_capabilities_euler.py
 """
-import adc.physics as physics
-from adc.physics import Model
+import pops.physics as physics
+from pops.physics import Model
 
 
 def euler(with_pressure=True):

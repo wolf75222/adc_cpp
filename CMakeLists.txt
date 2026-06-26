@@ -2,7 +2,7 @@
 # PROJECT_IS_TOP_LEVEL (garde consommateur ci-dessous). L'env conda sert >= 3.27.
 cmake_minimum_required(VERSION 3.21)
 
-project(adc_cpp
+project(PoPS
   VERSION 0.3.0  # single source of the version: propagated to the Python module (__version__), the
                  # pip wheel, Doxygen and Sphinx (see docs/VERSIONING.md). Never duplicate elsewhere.
   DESCRIPTION "Solveur advection-diffusion-couplage hyperbolique-elliptique sur AMR, cible cluster"
@@ -10,60 +10,60 @@ project(adc_cpp
                    # hdf5-config parallele de spack)
 )
 
-# Backends par VARIABLE D'ENVIRONNEMENT (pattern WarpX/pyAMReX) : permet `ADC_USE_KOKKOS=ON
+# Backends par VARIABLE D'ENVIRONNEMENT (pattern WarpX/pyAMReX) : permet `POPS_USE_KOKKOS=ON
 # Kokkos_ROOT=$CONDA_PREFIX pip install .` sans toucher aux flags CMake (pip ne propage pas de
 # -D, mais propage l'environnement ; <Pkg>_ROOT est lu nativement par find_package). La graine
 # d'env ne joue QUE si l'option n'est pas posee en cache/-D (CMP0077 NEW : la variable normale
-# prime sur option()) -> -DADC_USE_X=... reste prioritaire, rien d'hardcode.
-foreach(_adc_opt ADC_BUILD_TESTS ADC_BUILD_PYTHON ADC_USE_KOKKOS ADC_USE_MPI ADC_USE_HDF5)
-  if(DEFINED ENV{${_adc_opt}} AND NOT DEFINED ${_adc_opt} AND NOT DEFINED CACHE{${_adc_opt}})
-    set(${_adc_opt} "$ENV{${_adc_opt}}")
-    message(STATUS "adc: option ${_adc_opt}=$ENV{${_adc_opt}} (heritee de l'environnement)")
+# prime sur option()) -> -DPOPS_USE_X=... reste prioritaire, rien d'hardcode.
+foreach(_pops_opt POPS_BUILD_TESTS POPS_BUILD_PYTHON POPS_USE_KOKKOS POPS_USE_MPI POPS_USE_HDF5)
+  if(DEFINED ENV{${_pops_opt}} AND NOT DEFINED ${_pops_opt} AND NOT DEFINED CACHE{${_pops_opt}})
+    set(${_pops_opt} "$ENV{${_pops_opt}}")
+    message(STATUS "pops: option ${_pops_opt}=$ENV{${_pops_opt}} (heritee de l'environnement)")
   endif()
 endforeach()
 
 # Defaut TOP-LEVEL SEULEMENT : un consommateur qui tire adc_cpp via FetchContent/add_subdirectory
 # (cf. README "Utiliser le coeur") ne doit PAS compiler les ~140 executables de tests/ ni voir
-# enable_testing() pollue. Surchargenable (-DADC_BUILD_TESTS=ON) dans les deux sens.
-option(ADC_BUILD_TESTS    "Build tests"    ${PROJECT_IS_TOP_LEVEL})
-# Module Python `adc` (pybind11) : c'est LES BINDINGS DE LA LIB, donc ils vivent ici.
+# enable_testing() pollue. Surchargenable (-DPOPS_BUILD_TESTS=ON) dans les deux sens.
+option(POPS_BUILD_TESTS    "Build tests"    ${PROJECT_IS_TOP_LEVEL})
+# Module Python `pops` (pybind11) : c'est LES BINDINGS DE LA LIB, donc ils vivent ici.
 # Le coeur reste header-only ; le module compile la facade runtime System (python/system.cpp)
 # + les bindings. adc_cases ne contient QUE du code Python qui importe ce module.
-option(ADC_BUILD_PYTHON   "Build the pybind11 Python module `adc`" OFF)
+option(POPS_BUILD_PYTHON   "Build the pybind11 Python module `pops`" OFF)
 # Harnais de PROFILAGE (mesure seule, ZERO optimisation). HORS du build par defaut : le CI ne
 # passe JAMAIS ce drapeau, donc bench/ n'est ni configure ni compile en CI. Active a la main par
-# -DADC_BUILD_BENCH=ON pour mesurer le cout par phase d'un pas (cf. bench/, docs/PROFILE_RESULTS.md).
-option(ADC_BUILD_BENCH    "Build the standalone profiling harness (bench/, OFF by default)" OFF)
+# -DPOPS_BUILD_BENCH=ON pour mesurer le cout par phase d'un pas (cf. bench/, docs/PROFILE_RESULTS.md).
+option(POPS_BUILD_BENCH    "Build the standalone profiling harness (bench/, OFF by default)" OFF)
 # Backend de dispatch on-node : KOKKOS EST LE SEUL backend on-node, et il est OBLIGATOIRE.
 # Un meme code source Kokkos couvre les trois cibles on-node via l'espace d'execution choisi
-# A L'INSTALLATION DE KOKKOS (pas par un drapeau adc) :
+# A L'INSTALLATION DE KOKKOS (pas par un drapeau pops) :
 #   - sequentiel       : Kokkos Serial  (Kokkos_ENABLE_SERIAL=ON)
 #   - CPU multi-thread : Kokkos OpenMP  (Kokkos_ENABLE_OPENMP=ON)
 #   - GPU              : Kokkos Cuda/HIP (Kokkos_ENABLE_CUDA=ON / Kokkos_ENABLE_HIP=ON)
-# Il n'y a PLUS de backend OpenMP autonome (ADC_USE_OPENMP), plus de `#pragma omp`, plus de
+# Il n'y a PLUS de backend OpenMP autonome (POPS_USE_OPENMP), plus de `#pragma omp`, plus de
 # boucle hote manuelle comme chemin de production : tout le parallelisme on-node passe par le
-# seam for_each_cell -> Kokkos (cf. include/adc/mesh/execution/for_each.hpp).
+# seam for_each_cell -> Kokkos (cf. include/pops/mesh/execution/for_each.hpp).
 #
 # Kokkos n'a PAS besoin d'etre pre-installe : on utilise une install existante si elle est trouvee
 # (-DKokkos_ROOT=..., p.ex. cache CI / module ROMEO), SINON on le RECUPERE + construit a la volee
 # (FetchContent). Un simple `cmake -B build` marche donc sur une machine sans Kokkos.
-option(ADC_USE_KOKKOS     "Enable Kokkos backend (the only on-node backend, mandatory)" ON)
-option(ADC_USE_MPI        "Enable the MPI backend (distributed comm seam)" OFF)
-option(ADC_USE_HDF5       "Enable the HDF5 DataWriter (parallel output)" OFF)
+option(POPS_USE_KOKKOS     "Enable Kokkos backend (the only on-node backend, mandatory)" ON)
+option(POPS_USE_MPI        "Enable the MPI backend (distributed comm seam)" OFF)
+option(POPS_USE_HDF5       "Enable the HDF5 DataWriter (parallel output)" OFF)
 # Version de Kokkos recuperee par FetchContent quand aucune install n'est trouvee (release tarball +
 # verification SHA256). Surchargeables ensemble (changer la version impose de changer le SHA256, sinon
 # la verification d'integrite echoue). Le SHA256 est publie sur la page des releases Kokkos.
-set(ADC_KOKKOS_FETCH_VERSION "4.4.01" CACHE STRING "Kokkos release version fetched when no install is found")
-set(ADC_KOKKOS_FETCH_SHA256
+set(POPS_KOKKOS_FETCH_VERSION "4.4.01" CACHE STRING "Kokkos release version fetched when no install is found")
+set(POPS_KOKKOS_FETCH_SHA256
     "3413f0cb39912128d91424ebd92e8832009e7eeaf6fa8da58e99b0d37860d972"
-    CACHE STRING "SHA256 of kokkos-<ADC_KOKKOS_FETCH_VERSION>.tar.gz (empty = skip integrity check)")
+    CACHE STRING "SHA256 of kokkos-<POPS_KOKKOS_FETCH_VERSION>.tar.gz (empty = skip integrity check)")
 
 # Kokkos-only : configurer sans Kokkos est une ERREUR FATALE (le seam for_each_cell ne compile
-# pas sans ADC_HAS_KOKKOS). Le serie passe par Kokkos Serial, pas par une boucle C++ manuelle.
+# pas sans POPS_HAS_KOKKOS). Le serie passe par Kokkos Serial, pas par une boucle C++ manuelle.
 # (Pas besoin d'installer Kokkos a la main : il est recupere via FetchContent si introuvable.)
-if(NOT ADC_USE_KOKKOS)
+if(NOT POPS_USE_KOKKOS)
   message(FATAL_ERROR
-    "adc_cpp is Kokkos-only: configure with -DADC_USE_KOKKOS=ON. Kokkos est trouve s'il est installe "
+    "adc_cpp is Kokkos-only: configure with -DPOPS_USE_KOKKOS=ON. Kokkos est trouve s'il est installe "
     "(-DKokkos_ROOT=...) ou recupere + construit automatiquement (FetchContent). Le backend OpenMP "
     "autonome a ete retire.")
 endif()
@@ -71,8 +71,8 @@ endif()
 # Norme C++ : 20. Kokkos etant obligatoire et compile sous nvcc pour la cible Cuda (CUDA 12.x
 # ne propose pas -std=c++23), tout le coeur compile en C++20 (le seul usage >20 etait cote hote
 # et ne sert plus depuis le retrait du chemin non-Kokkos).
-set(ADC_CXX_STD 20)
-set(CMAKE_CXX_STANDARD ${ADC_CXX_STD})
+set(POPS_CXX_STD 20)
+set(CMAKE_CXX_STANDARD ${POPS_CXX_STD})
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -88,7 +88,7 @@ set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 # module Python 4-5x plus lentement qu'AppleClang (system.cpp : >1h au lieu de ~8 min), sans
 # aucun message expliquant pourquoi. AppleClang s'identifie "AppleClang" ; le LLVM brut "Clang".
 if(APPLE AND CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-  message(STATUS "adc: compilateur = clang LLVM (${CMAKE_CXX_COMPILER}). Sur macOS, AppleClang "
+  message(STATUS "pops: compilateur = clang LLVM (${CMAKE_CXX_COMPILER}). Sur macOS, AppleClang "
                  "compile les grosses TU du module nettement plus vite ; pour le forcer : "
                  "CXX=/usr/bin/clang++ cmake ... (ou pip install .). Cause frequente : "
                  "/opt/homebrew/opt/llvm/bin en tete de PATH.")
@@ -97,15 +97,15 @@ endif()
 # ccache : cache de compilation. ZERO impact sur le code genere (meme objets) ; accelere
 # fortement les RE-builds (ex. quand seul un .cpp change). Auto-detecte s'il est installe
 # (l'env conda le fournit, cf. environment.yml). Inactif si absent, surchargeable
-# (-DADC_USE_CCACHE=OFF ou -DCMAKE_CXX_COMPILER_LAUNCHER=...). On l'EVITE sous nvcc_wrapper
+# (-DPOPS_USE_CCACHE=OFF ou -DCMAKE_CXX_COMPILER_LAUNCHER=...). On l'EVITE sous nvcc_wrapper
 # (chemin GPU Kokkos/CUDA) ou ccache peut mal interagir avec le wrapper.
-option(ADC_USE_CCACHE "Utiliser ccache comme launcher de compilation s'il est present" ON)
-if(ADC_USE_CCACHE AND NOT CMAKE_CXX_COMPILER_LAUNCHER AND NOT CMAKE_CXX_COMPILER MATCHES "nvcc")
+option(POPS_USE_CCACHE "Utiliser ccache comme launcher de compilation s'il est present" ON)
+if(POPS_USE_CCACHE AND NOT CMAKE_CXX_COMPILER_LAUNCHER AND NOT CMAKE_CXX_COMPILER MATCHES "nvcc")
   find_program(CCACHE_PROGRAM ccache)
   if(CCACHE_PROGRAM)
     set(CMAKE_CXX_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
     set(CMAKE_C_COMPILER_LAUNCHER "${CCACHE_PROGRAM}")
-    message(STATUS "ccache actif : ${CCACHE_PROGRAM} (cache de compilation ; -DADC_USE_CCACHE=OFF pour desactiver)")
+    message(STATUS "ccache actif : ${CCACHE_PROGRAM} (cache de compilation ; -DPOPS_USE_CCACHE=OFF pour desactiver)")
   endif()
 endif()
 
@@ -113,13 +113,13 @@ endif()
 # l'instant. L'operateur spatial, l'elliptique et l'integrateur viendront en
 # couches separees ; le backend parallele (AMR/MPI/Kokkos) reste confine au
 # seam de dispatch et ne touche jamais a la couche physique.
-add_library(adc INTERFACE)
-add_library(adc::adc ALIAS adc)
-target_include_directories(adc INTERFACE
+add_library(pops INTERFACE)
+add_library(pops::pops ALIAS pops)
+target_include_directories(pops INTERFACE
   $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-  $<INSTALL_INTERFACE:include>  # consommation via find_package(adc) installe (GNUInstallDirs vient plus tard)
+  $<INSTALL_INTERFACE:include>  # consommation via find_package(pops) installe (GNUInstallDirs vient plus tard)
 )
-target_compile_features(adc INTERFACE cxx_std_${ADC_CXX_STD})
+target_compile_features(pops INTERFACE cxx_std_${POPS_CXX_STD})
 
 # Hints libomp pour AppleClang (qui ne trouve pas libomp seul) : env conda ACTIF (paquet
 # llvm-openmp) d'abord, sinon Homebrew. Sous Kokkos-only il reste UN consommateur : une install
@@ -127,7 +127,7 @@ target_compile_features(adc INTERFACE cxx_std_${ADC_CXX_STD})
 # KokkosConfig.cmake -- sans ces hints, find_package(Kokkos) echouerait sur macOS. Ce N'EST PAS
 # le backend OpenMP autonome (retire) : uniquement la plomberie de DECOUVERTE de libomp.
 # Macro idempotente, no-op hors APPLE ; invoquee AVANT la resolution de Kokkos ci-dessous.
-macro(adc_apple_libomp_hints)
+macro(pops_apple_libomp_hints)
   if(APPLE AND NOT OpenMP_CXX_FOUND)
     set(LIBOMP_PREFIX "")
     if(DEFINED ENV{CONDA_PREFIX} AND EXISTS "$ENV{CONDA_PREFIX}/lib/libomp.dylib")
@@ -153,7 +153,7 @@ endmacro()
 # A DEFAUT, FetchContent recupere le tarball de release (verifie par SHA256) et le construit dans
 # l'arbre de build -> aucune install manuelle requise. La cible on-node se choisit par les options
 # Kokkos (Kokkos_ENABLE_SERIAL / _OPENMP / _CUDA / _HIP) -- defaut Serial pour un CPU mono-thread
-# universel. Quel que soit le chemin, la cible importee `Kokkos::kokkos` est creee et attachee a adc.
+# universel. Quel que soit le chemin, la cible importee `Kokkos::kokkos` est creee et attachee a pops.
 # (On garde la forme explicite if/else plutot que FetchContent FIND_PACKAGE_ARGS, qui exige CMake>=3.24
 # alors que ce projet cible 3.20. CMAKE_DISABLE_FIND_PACKAGE_Kokkos=ON force le chemin FetchContent.)
 # La version mini 4.2 accepte les versions plus recentes, y compris 5.x (Homebrew 5.1.1, p.ex.).
@@ -171,116 +171,116 @@ if(WIN32 AND Kokkos_ENABLE_CUDA)
     "Native Windows supports CPU Serial/OpenMP only. "
     "Refs ADC-168 / ADC-96.")
 endif()
-adc_apple_libomp_hints()
+pops_apple_libomp_hints()
 find_package(Kokkos 4.2 QUIET CONFIG)
 if(Kokkos_FOUND)
   message(STATUS "Kokkos trouve (install ${Kokkos_VERSION}) : for_each_cell backend = Kokkos (${Kokkos_DEVICES})")
 else()
-  message(STATUS "Kokkos introuvable -> FetchContent (release ${ADC_KOKKOS_FETCH_VERSION}). "
+  message(STATUS "Kokkos introuvable -> FetchContent (release ${POPS_KOKKOS_FETCH_VERSION}). "
                  "Cible on-node via -DKokkos_ENABLE_SERIAL/_OPENMP/_CUDA (defaut : Serial).")
   include(FetchContent)
   # Defaut hors-config : au moins Serial, pour un CPU mono-thread fonctionnel sur toute machine.
   # (Si l'utilisateur a deja passe une option Kokkos_ENABLE_*, on la respecte.)
   if(NOT DEFINED Kokkos_ENABLE_SERIAL AND NOT DEFINED Kokkos_ENABLE_OPENMP
      AND NOT DEFINED Kokkos_ENABLE_CUDA AND NOT DEFINED Kokkos_ENABLE_HIP)
-    set(Kokkos_ENABLE_SERIAL ON CACHE BOOL "Kokkos Serial backend (defaut adc FetchContent)" FORCE)
+    set(Kokkos_ENABLE_SERIAL ON CACHE BOOL "Kokkos Serial backend (defaut pops FetchContent)" FORCE)
   endif()
   # Le Kokkos recupere se compile en bibliotheque statique ; pour le lier dans l'extension
-  # PARTAGEE _adc (pybind11_add_module) sous Linux il faut du code position-independant, sinon le
+  # PARTAGEE _pops (pybind11_add_module) sous Linux il faut du code position-independant, sinon le
   # link echoue ("relocation R_X86_64_PC32 ... recompile with -fPIC"). On le pose AVANT
   # FetchContent_MakeAvailable pour que les cibles Kokkos en heritent ; sans ca le repli
   # FetchContent ne marchait que parce que build_docs.sh / wheels.yml passaient le flag a la main
   # (ADC-387).
   set(CMAKE_POSITION_INDEPENDENT_CODE ON)
-  set(_adc_kokkos_url
-      "https://github.com/kokkos/kokkos/releases/download/${ADC_KOKKOS_FETCH_VERSION}/kokkos-${ADC_KOKKOS_FETCH_VERSION}.tar.gz")
-  if(ADC_KOKKOS_FETCH_SHA256)
-    FetchContent_Declare(Kokkos URL "${_adc_kokkos_url}" URL_HASH SHA256=${ADC_KOKKOS_FETCH_SHA256})
+  set(_pops_kokkos_url
+      "https://github.com/kokkos/kokkos/releases/download/${POPS_KOKKOS_FETCH_VERSION}/kokkos-${POPS_KOKKOS_FETCH_VERSION}.tar.gz")
+  if(POPS_KOKKOS_FETCH_SHA256)
+    FetchContent_Declare(Kokkos URL "${_pops_kokkos_url}" URL_HASH SHA256=${POPS_KOKKOS_FETCH_SHA256})
   else()
-    FetchContent_Declare(Kokkos URL "${_adc_kokkos_url}")  # pas de SHA256 : verification d'integrite desactivee
+    FetchContent_Declare(Kokkos URL "${_pops_kokkos_url}")  # pas de SHA256 : verification d'integrite desactivee
   endif()
   FetchContent_MakeAvailable(Kokkos)
-  message(STATUS "Kokkos recupere (FetchContent ${ADC_KOKKOS_FETCH_VERSION}) : devices = ${Kokkos_DEVICES}")
+  message(STATUS "Kokkos recupere (FetchContent ${POPS_KOKKOS_FETCH_VERSION}) : devices = ${Kokkos_DEVICES}")
 endif()
-target_link_libraries(adc INTERFACE Kokkos::kokkos)
-target_compile_definitions(adc INTERFACE ADC_HAS_KOKKOS)
-set(ADC_HAS_KOKKOS ON)
-# Pool Ninja taille 1 partage par les cibles a TU geante du module (python/_adc,
+target_link_libraries(pops INTERFACE Kokkos::kokkos)
+target_compile_definitions(pops INTERFACE POPS_HAS_KOKKOS)
+set(POPS_HAS_KOKKOS ON)
+# Pool Ninja taille 1 partage par les cibles a TU geante du module (python/_pops,
 # bench/scaling_amr) : serialisation anti-OOM de leurs compiles sous Kokkos, cf.
 # python/CMakeLists.txt. Declare ICI et UNE SEULE fois : un nom de pool duplique dans la
 # propriete GLOBALE JOB_POOLS rend build.ninja invalide ("ninja: error: duplicate pool").
 # Les consommateurs ne posent que JOB_POOL_COMPILE. (tests/ garde son pool distinct
-# adc_heavy_tu, declare dans tests/CMakeLists.txt.)
-# ADC-335 : profondeur du pool de compile des TU lourdes (module _adc ET tests/). Defaut 1 =
+# pops_heavy_tu, declare dans tests/CMakeLists.txt.)
+# ADC-335 : profondeur du pool de compile des TU lourdes (module _pops ET tests/). Defaut 1 =
 # anti-OOM historique (deux TU geantes -O3 sous nvcc/Kokkos depassent les ~7 Go du runner -> exit
 # 143). Depuis le split par transport (ADC-335) chaque sous-TU est bien plus petite : on peut RELEVER
 # ce pool pour que `-j` compile plusieurs sous-TU a la fois (c'est le POOL, pas `-j`, qui borne la
 # concurrence des TU lourdes). A relever UNIQUEMENT apres avoir mesure la RSS par sous-TU sur le
 # runner nvcc (CI ci-kokkos*), sinon on re-OOM. Hors Kokkos / machine a forte RAM : relevable
-# librement (-DADC_HEAVY_TU_POOL=$(nproc)).
-set(ADC_HEAVY_TU_POOL 1 CACHE STRING
-    "Profondeur du pool Ninja des TU lourdes (_adc + tests) ; defaut 1 (anti-OOM), relever apres mesure RSS")
-set_property(GLOBAL APPEND PROPERTY JOB_POOLS adc_heavy_module_tu=${ADC_HEAVY_TU_POOL})
+# librement (-DPOPS_HEAVY_TU_POOL=$(nproc)).
+set(POPS_HEAVY_TU_POOL 1 CACHE STRING
+    "Profondeur du pool Ninja des TU lourdes (_pops + tests) ; defaut 1 (anti-OOM), relever apres mesure RSS")
+set_property(GLOBAL APPEND PROPERTY JOB_POOLS pops_heavy_module_tu=${POPS_HEAVY_TU_POOL})
 
 # MPI : backend distribue, confine au seam comm (parallel/comm.hpp). Optionnel :
 # par defaut OFF, le build et les tests restent serie (comm.hpp = rang unique).
 # Quand ON, comm.hpp passe par MPI_Comm_rank/size + collectives, et le test
-# test_mpi_smoke tourne via mpirun. ADC_HAS_MPI est propage a tout ce qui lie adc.
-set(ADC_HAS_MPI OFF)
-if(ADC_USE_MPI)
+# test_mpi_smoke tourne via mpirun. POPS_HAS_MPI est propage a tout ce qui lie pops.
+set(POPS_HAS_MPI OFF)
+if(POPS_USE_MPI)
   find_package(MPI REQUIRED)
-  target_link_libraries(adc INTERFACE MPI::MPI_CXX)
-  target_compile_definitions(adc INTERFACE ADC_HAS_MPI)
-  set(ADC_HAS_MPI ON)
+  target_link_libraries(pops INTERFACE MPI::MPI_CXX)
+  target_compile_definitions(pops INTERFACE POPS_HAS_MPI)
+  set(POPS_HAS_MPI ON)
   message(STATUS "MPI found (${MPIEXEC_EXECUTABLE}) : enabling distributed comm seam")
 endif()
 
 # Sortie HDF5 (DataWriter parallele). En serie : ecriture directe. En parallele
 # (HDF5 MPI-IO) : chaque rang ecrit ses boites par hyperslab, sans gather.
-set(ADC_HAS_HDF5 OFF)
-if(ADC_USE_HDF5)
+set(POPS_HAS_HDF5 OFF)
+if(POPS_USE_HDF5)
   # MODULE (wrappers h5cc/h5pcc + variables) plutot que CONFIG : le hdf5-config.cmake
   # de spack exige une cible importee MPI::MPI_C que ce projet CXX-only ne cree pas.
   # PAS de REQUIRED : la sortie HDF5 parallele passe par la facade Python (h5py) et aucun TU
   # C/C++ n'appelle l'API HDF5, donc une configuration manquante ne doit PAS avorter le build
-  # (cas du recipe HPC -DADC_USE_HDF5=ON ou FindHDF5 echoue). On lie/active si et seulement si
+  # (cas du recipe HPC -DPOPS_USE_HDF5=ON ou FindHDF5 echoue). On lie/active si et seulement si
   # HDF5 est trouve (ADC-387).
   find_package(HDF5 MODULE COMPONENTS C)
   if(HDF5_FOUND)
-    target_link_libraries(adc INTERFACE ${HDF5_C_LIBRARIES})
-    target_include_directories(adc INTERFACE ${HDF5_C_INCLUDE_DIRS})
-    target_compile_definitions(adc INTERFACE ADC_HAS_HDF5)
-    set(ADC_HAS_HDF5 ON)
+    target_link_libraries(pops INTERFACE ${HDF5_C_LIBRARIES})
+    target_include_directories(pops INTERFACE ${HDF5_C_INCLUDE_DIRS})
+    target_compile_definitions(pops INTERFACE POPS_HAS_HDF5)
+    set(POPS_HAS_HDF5 ON)
     message(STATUS "HDF5 found (${HDF5_VERSION}, parallel=${HDF5_IS_PARALLEL}) : enabling DataWriter")
   else()
-    message(WARNING "ADC_USE_HDF5=ON but HDF5 (MODULE, COMPONENTS C) not found -- DataWriter stays off")
+    message(WARNING "POPS_USE_HDF5=ON but HDF5 (MODULE, COMPONENTS C) not found -- DataWriter stays off")
   endif()
 endif()
 
 # Outillage QUALITE opt-in (warnings stricts, sanitizers) porte par la cible INTERFACE
-# `adc_dev_options`, lie en PRIVATE par les SEULES cibles internes (tests/, module _adc). Inclus ICI :
+# `pops_dev_options`, lie en PRIVATE par les SEULES cibles internes (tests/, module _pops). Inclus ICI :
 # apres la resolution de Kokkos, AVANT add_subdirectory(tests)/add_subdirectory(python) qui le lient.
 # Tout est OFF par defaut (cible vide) -> aucun impact sur ci.yml, les builds locaux ni `adc_cases`.
-include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/AdcDevTooling.cmake)
+include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/PopsDevTooling.cmake)
 
 # adc_cpp = COEUR de la bibliotheque (generique, header-only). Les modeles
 # physiques, les facades compilees (libadc), les bindings Python et les exemples
-# vivent dans le depot applicatif separe adc_cases, qui consomme adc::adc via
+# vivent dans le depot applicatif separe adc_cases, qui consomme pops::pops via
 # FetchContent. Le coeur ne connait aucun modele : aucune dependance coeur->cas.
 
 # enable_testing() des que des tests existent : le coeur (tests/) OU le module Python.
-# Sans ca, `ctest --test-dir build-py` avec ADC_BUILD_TESTS=OFF ne voit aucun test.
-if(ADC_BUILD_TESTS OR ADC_BUILD_PYTHON)
+# Sans ca, `ctest --test-dir build-py` avec POPS_BUILD_TESTS=OFF ne voit aucun test.
+if(POPS_BUILD_TESTS OR POPS_BUILD_PYTHON)
   enable_testing()
 endif()
-if(ADC_BUILD_TESTS)
+if(POPS_BUILD_TESTS)
   add_subdirectory(tests)
 endif()
 
 # Harnais de profilage (mesure seule) : sous-repertoire HORS du build par defaut (OFF). N'ajoute
-# AUCUNE cible au build standard ni au CI ; lie adc::adc et herite donc du backend actif (Kokkos /
+# AUCUNE cible au build standard ni au CI ; lie pops::pops et herite donc du backend actif (Kokkos /
 # MPI) sans find_package redondant.
-if(ADC_BUILD_BENCH)
+if(POPS_BUILD_BENCH)
   add_subdirectory(bench)
 endif()
 
@@ -288,13 +288,13 @@ endif()
 # clustering, dense_eig). HORS du build par defaut et du gate CI ; construit par le job hebdo
 # `fuzz` de quality.yml (preset ci-fuzz ; clang LLVM requis pour -fsanitize=fuzzer, le
 # sous-repertoire avertit et n'ajoute rien sous un autre compilateur).
-option(ADC_BUILD_FUZZING "Build the libFuzzer harnesses (fuzz/, requires LLVM clang, OFF by default)" OFF)
-if(ADC_BUILD_FUZZING)
+option(POPS_BUILD_FUZZING "Build the libFuzzer harnesses (fuzz/, requires LLVM clang, OFF by default)" OFF)
+if(POPS_BUILD_FUZZING)
   add_subdirectory(fuzz)
 endif()
 
-# Module Python `adc` (bindings de la lib). Compile la facade runtime System + pybind11.
-if(ADC_BUILD_PYTHON)
+# Module Python `pops` (bindings de la lib). Compile la facade runtime System + pybind11.
+if(POPS_BUILD_PYTHON)
   include(FetchContent)
   # macOS expose souvent plusieurs Python (framework Python.org, conda, brew). Sans garde,
   # FindPython prend le framework le plus recent comme Interpreter mais un autre pour
@@ -305,7 +305,7 @@ if(ADC_BUILD_PYTHON)
     set(Python_FIND_FRAMEWORK LAST)
   endif()
   find_package(Python COMPONENTS Interpreter Development.Module REQUIRED)
-  message(STATUS "adc Python module: interpreteur ${Python_EXECUTABLE} (${Python_VERSION})")
+  message(STATUS "pops Python module: interpreteur ${Python_EXECUTABLE} (${Python_VERSION})")
   # pybind11 : on PREFERE celui de l'environnement (conda/pip) plutot que de le retelecharger a
   # chaque configure. L'interpreteur retenu expose son dossier de config CMake via
   # `python -m pybind11 --cmakedir` ; on l'ajoute en tete du chemin de recherche pour que le
@@ -314,64 +314,64 @@ if(ADC_BUILD_PYTHON)
   # cmake_minimum_required(VERSION 3.5) est deprecie par CMake >= 3.31).
   execute_process(
     COMMAND ${Python_EXECUTABLE} -m pybind11 --cmakedir
-    OUTPUT_VARIABLE _adc_pybind11_cmakedir
+    OUTPUT_VARIABLE _pops_pybind11_cmakedir
     OUTPUT_STRIP_TRAILING_WHITESPACE
-    RESULT_VARIABLE _adc_pybind11_probe
+    RESULT_VARIABLE _pops_pybind11_probe
     ERROR_QUIET)
-  if(_adc_pybind11_probe EQUAL 0 AND IS_DIRECTORY "${_adc_pybind11_cmakedir}")
-    list(PREPEND CMAKE_PREFIX_PATH "${_adc_pybind11_cmakedir}")
+  if(_pops_pybind11_probe EQUAL 0 AND IS_DIRECTORY "${_pops_pybind11_cmakedir}")
+    list(PREPEND CMAKE_PREFIX_PATH "${_pops_pybind11_cmakedir}")
   endif()
   find_package(pybind11 2.13 CONFIG QUIET)  # floor aligne sur environment.yml + le tag FetchContent
   if(pybind11_FOUND)
-    message(STATUS "adc Python module: pybind11 ${pybind11_VERSION} trouve dans l'environnement (pas de FetchContent)")
+    message(STATUS "pops Python module: pybind11 ${pybind11_VERSION} trouve dans l'environnement (pas de FetchContent)")
   else()
     # Repli reseau : aucun pybind11 dans l'environnement. Le CMakeLists de pybind11 v2.13.6 emet un
     # warning de depreciation (cmake_minimum_required 3.5) qui n'est PAS de notre ressort. On le
     # neutralise UNIQUEMENT autour de FetchContent_MakeAvailable, puis on restaure l'etat precedent :
     # les depreciations de notre propre code restent signalees.
-    message(STATUS "adc Python module: pybind11 absent de l'environnement -> repli FetchContent (v2.13.6)")
+    message(STATUS "pops Python module: pybind11 absent de l'environnement -> repli FetchContent (v2.13.6)")
     # Python a deja ete trouve via find_package(... Development.Module) plus haut : on force le
     # pybind11 telecharge a reutiliser ce Python moderne. Sinon il retombe sur sa detection classique,
     # qui ne consomme PAS l'include de Development.Module -> "Python.h: No such file or directory" au
     # build sur les machines sans pybind11 dans l'environnement (spack/HPC). Le chemin
     # find_package(pybind11) ci-dessus n'est pas concerne (ADC-386).
     set(PYBIND11_FINDPYTHON ON)
-    set(_adc_warn_dep_saved "${CMAKE_WARN_DEPRECATED}")
+    set(_pops_warn_dep_saved "${CMAKE_WARN_DEPRECATED}")
     set(CMAKE_WARN_DEPRECATED OFF CACHE BOOL "" FORCE)
     FetchContent_Declare(pybind11
       GIT_REPOSITORY https://github.com/pybind/pybind11.git
       GIT_TAG        v2.13.6)
     FetchContent_MakeAvailable(pybind11)
-    set(CMAKE_WARN_DEPRECATED "${_adc_warn_dep_saved}" CACHE BOOL "" FORCE)
+    set(CMAKE_WARN_DEPRECATED "${_pops_warn_dep_saved}" CACHE BOOL "" FORCE)
   endif()
   add_subdirectory(python)
 endif()
 
-# --- Installation / export du COEUR (find_package(adc)) -------------------------------------
+# --- Installation / export du COEUR (find_package(pops)) -------------------------------------
 # Rend la lib header-only consommable HORS FetchContent : `cmake --install` depose les en-tetes
-# + adcConfig.cmake, et un consommateur fait find_package(adc CONFIG) + adc::adc. Prerequis d'un
+# + popsConfig.cmake, et un consommateur fait find_package(pops CONFIG) + pops::pops. Prerequis d'un
 # eventuel paquet (conda-forge feedstock, Spack). Defaut : ON seulement en top-level ET hors
 # build pip (SKBUILD : la wheel ne doit contenir QUE le paquet Python, pas include/ ni cmake/).
 if(PROJECT_IS_TOP_LEVEL AND NOT SKBUILD)
-  set(_adc_install_default ON)
+  set(_pops_install_default ON)
 else()
-  set(_adc_install_default OFF)
+  set(_pops_install_default OFF)
 endif()
-option(ADC_INSTALL "Regles d'installation du coeur header-only (find_package(adc))" ${_adc_install_default})
-if(ADC_INSTALL)
+option(POPS_INSTALL "Regles d'installation du coeur header-only (find_package(pops))" ${_pops_install_default})
+if(POPS_INSTALL)
   include(GNUInstallDirs)
   include(CMakePackageConfigHelpers)
-  install(TARGETS adc EXPORT adcTargets)
-  install(DIRECTORY include/adc DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
-  install(EXPORT adcTargets NAMESPACE adc:: DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/adc)
-  configure_package_config_file(cmake/adcConfig.cmake.in
-    ${CMAKE_CURRENT_BINARY_DIR}/adcConfig.cmake
-    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/adc)
-  write_basic_package_version_file(${CMAKE_CURRENT_BINARY_DIR}/adcConfigVersion.cmake
+  install(TARGETS pops EXPORT popsTargets)
+  install(DIRECTORY include/pops DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+  install(EXPORT popsTargets NAMESPACE pops:: DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/pops)
+  configure_package_config_file(cmake/popsConfig.cmake.in
+    ${CMAKE_CURRENT_BINARY_DIR}/popsConfig.cmake
+    INSTALL_DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/pops)
+  write_basic_package_version_file(${CMAKE_CURRENT_BINARY_DIR}/popsConfigVersion.cmake
     COMPATIBILITY SameMajorVersion ARCH_INDEPENDENT)  # header-only : version arch-independante
-  install(FILES ${CMAKE_CURRENT_BINARY_DIR}/adcConfig.cmake
-                ${CMAKE_CURRENT_BINARY_DIR}/adcConfigVersion.cmake
-          DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/adc)
+  install(FILES ${CMAKE_CURRENT_BINARY_DIR}/popsConfig.cmake
+                ${CMAKE_CURRENT_BINARY_DIR}/popsConfigVersion.cmake
+          DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/pops)
 endif()
 
 # --- Cible documentation (top-level UNIQUEMENT) ---------------------------------------------

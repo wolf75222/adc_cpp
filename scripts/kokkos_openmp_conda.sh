@@ -2,22 +2,22 @@
 # Compile et installe Kokkos (backends Serial + OpenMP) DANS l'env conda actif.
 #
 # POURQUOI : le paquet `kokkos` de conda-forge est typiquement compile avec le SEUL backend
-# Serial (pas d'OpenMP ; CUDA = paquet a part). Il suffit pour compiler ADC_USE_KOKKOS=ON mais
+# Serial (pas d'OpenMP ; CUDA = paquet a part). Il suffit pour compiler POPS_USE_KOKKOS=ON mais
 # ne scale pas en threads. Ce script comble le trou : UNE commande, et l'env conda possede un
 # Kokkos OpenMP -- l'outillage (cmake, ninja, libomp) vient deja d'environment.yml.
 #
-#   conda activate adc
+#   conda activate pops
 #   bash scripts/kokkos_openmp_conda.sh
 #   cmake --preset python-parallel && cmake --build --preset python-parallel
 #
 # Variables : KOKKOS_VERSION (defaut 4.7.01), KOKKOS_INSTALL_PREFIX (defaut $CONDA_PREFIX),
 # KOKKOS_SRC_DIR (defaut $TMPDIR/kokkos-src-<ver>). Compilateur : celui du systeme (le MEME que
-# le build d'adc_cpp -- AppleClang sur macOS -- pour rester ABI-coherent avec le module _adc).
+# le build d'adc_cpp -- AppleClang sur macOS -- pour rester ABI-coherent avec le module _pops).
 # Sur macOS, libomp est pris dans l'env conda (paquet llvm-openmp) via les hints CMake standard,
-# exactement comme le CMakeLists d'adc_cpp le fait pour ADC_USE_OPENMP.
+# exactement comme le CMakeLists d'adc_cpp le fait pour POPS_USE_OPENMP.
 set -euo pipefail
 
-: "${CONDA_PREFIX:?Activez d'abord l'env conda : conda activate adc}"
+: "${CONDA_PREFIX:?Activez d'abord l'env conda : conda activate pops}"
 VER="${KOKKOS_VERSION:-4.7.01}"
 PREFIX="${KOKKOS_INSTALL_PREFIX:-$CONDA_PREFIX}"
 SRC="${KOKKOS_SRC_DIR:-${TMPDIR:-/tmp}/kokkos-src-$VER}"
@@ -61,4 +61,4 @@ echo ""
 echo "OK : Kokkos $VER (Serial + OpenMP) installe dans $PREFIX"
 echo "Builds adc_cpp : cmake --preset python-parallel  (Kokkos_ROOT=\$CONDA_PREFIX deja cable)"
 [ "$PREFIX" != "$CONDA_PREFIX" ] && echo "  (prefix custom : passer -DKokkos_ROOT=$PREFIX)"
-echo "DSL backend production : export ADC_KOKKOS_ROOT=$PREFIX (parite loader/module)"
+echo "DSL backend production : export POPS_KOKKOS_ROOT=$PREFIX (parite loader/module)"

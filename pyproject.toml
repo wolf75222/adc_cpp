@@ -1,23 +1,23 @@
-# Python package `adc` built by scikit-build-core: `pip install .` DRIVES the existing CMakeLists
-# (single source of truth) and installs the module into site-packages -> `import adc` WITHOUT
+# Python package `pops` built by scikit-build-core: `pip install .` DRIVES the existing CMakeLists
+# (single source of truth) and installs the module into site-packages -> `import pops` WITHOUT
 # PYTHONPATH. This is the standard pattern of the twin projects (pybind11 docs, pyAMReX, WarpX).
 #
 #   pip install . -v                                # builds the Kokkos module (Kokkos is ON, mandatory)
 #   Kokkos_ROOT=$CONDA_PREFIX pip install . -v      # reuse the env Kokkos (OpenMP if the build has it)
-#   ADC_USE_MPI=ON pip install . -v                 # add the distributed MPI backend
+#   POPS_USE_MPI=ON pip install . -v                 # add the distributed MPI backend
 #
-# Backends are chosen by ENVIRONMENT VARIABLES (ADC_USE_KOKKOS / ADC_USE_MPI / ADC_USE_OPENMP /
-# ADC_USE_HDF5, read by the CMakeLists; <Pkg>_ROOT is read natively by find_package). The developer
+# Backends are chosen by ENVIRONMENT VARIABLES (POPS_USE_KOKKOS / POPS_USE_MPI / POPS_USE_OPENMP /
+# POPS_USE_HDF5, read by the CMakeLists; <Pkg>_ROOT is read natively by find_package). The developer
 # flow presets+PYTHONPATH (cmake --preset python...) stays available and unchanged. Runtime threads:
-# adc.set_threads().
+# pops.set_threads().
 [build-system]
 requires = ["scikit-build-core>=0.10", "pybind11>=2.13"]
 build-backend = "scikit_build_core.build"
 
 [project]
-name = "adc-cpp"
+name = "pops"
 dynamic = ["version"]
-description = "Advection-diffusion-coupling hyperbolic-elliptic solver on AMR (Python bindings of the header-only adc_cpp core)"
+description = "PoPS - Plasma-Oriented PDE Solver (Python bindings of the header-only adc_cpp core)"
 readme = "README.md"
 license = { text = "BSD-3-Clause" }
 requires-python = ">=3.10"
@@ -27,20 +27,20 @@ classifiers = [
   "Programming Language :: Python :: 3",
 ]
 dependencies = [
-  "numpy>=1.24",  # required by adc.dsl (host evaluator); the package import is lazy without it
+  "numpy>=1.24",  # required by pops.dsl (host evaluator); the package import is lazy without it
 ]
 
 [tool.scikit-build]
 minimum-version = "0.10"
 cmake.version = ">=3.21"
-# The PURE package (adc/__init__.py, dsl.py, integrate.py, moments.py) is copied as-is into the wheel;
-# the _adc extension is added by the install(TARGETS _adc ...) rule of python/CMakeLists.txt.
-wheel.packages = ["python/adc"]
+# The PURE package (pops/__init__.py, dsl.py, integrate.py, moments.py) is copied as-is into the wheel;
+# the _pops extension is added by the install(TARGETS _pops ...) rule of python/CMakeLists.txt.
+wheel.packages = ["python/pops"]
 build-dir = "build/{wheel_tag}"  # persistent build cache: fast reinstall/editable
 
 [tool.scikit-build.cmake.define]
-ADC_BUILD_PYTHON = "ON"
-ADC_BUILD_TESTS = "OFF"
+POPS_BUILD_PYTHON = "ON"
+POPS_BUILD_TESTS = "OFF"
 
 # Version = the one from the project() CMake (single source). (?m): VERSION at the start of a line in the
 # project block, so as NOT to match cmake_minimum_required(VERSION 3.21).
@@ -49,14 +49,14 @@ provider = "scikit_build_core.metadata.regex"
 input = "CMakeLists.txt"
 regex = '(?m)^\s*VERSION (?P<value>\d+\.\d+\.\d+)'
 
-# ---- ruff: Python lint (python/adc + python/tests + scripts) ----------------------------------
+# ---- ruff: Python lint (python/pops + python/tests + scripts) ----------------------------------
 # Run by the `format` job of quality.yml (informative, --exit-zero) and by pre-commit (local).
 # Ignores calibrated on the REAL state of the codebase (otherwise ~2150 pure-style findings drown the
 # ~130 useful ones, including the bugprone B and the F):
 #   E741  : `l` is the standard MODE index of the domain (diocotron l=3..5);
 #   E501  : historical long lines (1363) -- pure style, to be absorbed via ruff-format/pre-commit;
 #   UP031 : historical %-formatting (790) -- mass modernization, not a bug signal.
-# NB: the F821 on python/adc/__init__.py are an artifact of the `del _os, _sys` at the end of init
+# NB: the F821 on python/pops/__init__.py are an artifact of the `del _os, _sys` at the end of init
 # (pyflakes sees the deletion), NOT real undefined-names.
 [tool.ruff]
 line-length = 100

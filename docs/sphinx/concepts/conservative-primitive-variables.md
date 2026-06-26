@@ -1,6 +1,6 @@
 # Conservative and primitive variables
 
-A hyperbolic model in `adc` carries its state in two complementary layouts: the conservative
+A hyperbolic model in `pops` carries its state in two complementary layouts: the conservative
 variables `U`, which the scheme evolves and conserves, and the primitive variables `P`, which the
 closures and the wave speeds read. This page explains why both exist and where each is used.
 
@@ -30,7 +30,7 @@ For a scalar transported density there is nothing to convert: the primitive equa
 and both conversions are the identity. The distinction only earns its keep once a variable like
 momentum has to be divided by density to recover a velocity.
 
-A model that satisfies the full hyperbolic contract (`adc::HyperbolicPhysicalModel`) carries the
+A model that satisfies the full hyperbolic contract (`pops::HyperbolicPhysicalModel`) carries the
 variable names, the roles, and these two conversions together with its flux, because the flux is
 written for one specific variable layout. Variables, conversions, and flux are physically linked and
 travel as one brick, whether you write it natively or in the DSL. See the
@@ -48,7 +48,7 @@ on either side of the face. Reconstructing in primitives limits `rho`, `u`, and 
 keeps positivity of density and pressure and is more stable for Euler with shocks.
 
 This is why a fluid block typically selects primitive reconstruction. The choice is exposed through
-the `variables="primitive"` option of `adc.FiniteVolume`; the operator then calls `to_primitive`
+the `variables="primitive"` option of `pops.FiniteVolume`; the operator then calls `to_primitive`
 before reconstructing and `to_conservative` after, and the conserved update at the end stays exact.
 
 ## Roles, not indices

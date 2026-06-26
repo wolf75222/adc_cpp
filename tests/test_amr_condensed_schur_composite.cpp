@@ -13,21 +13,21 @@
 //
 // Serie (Kokkos OFF) : grossier mono-box, 1 patch fin mono-box (cadre Phase 3c ; MPI = Phase 4).
 
-#include <adc/coupling/schur/amr/amr_condensed_schur_source_stepper.hpp>
+#include <pops/coupling/schur/amr/amr_condensed_schur_source_stepper.hpp>
 
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/layout/distribution_mapping.hpp>
-#include <adc/mesh/execution/for_each.hpp>
-#include <adc/mesh/geometry/geometry.hpp>
-#include <adc/mesh/storage/multifab.hpp>
-#include <adc/mesh/boundary/physical_bc.hpp>
-#include <adc/parallel/comm.hpp>
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/layout/distribution_mapping.hpp>
+#include <pops/mesh/execution/for_each.hpp>
+#include <pops/mesh/geometry/geometry.hpp>
+#include <pops/mesh/storage/multifab.hpp>
+#include <pops/mesh/boundary/physical_bc.hpp>
+#include <pops/parallel/comm.hpp>
 
 #include <cmath>
 #include <cstdio>
 #include <vector>
 
-using namespace adc;
+using namespace pops;
 static constexpr double kPi = 3.14159265358979323846;
 
 static VariableSet fluid_vars() {
@@ -47,7 +47,7 @@ struct InitKernel {
   Array4 st;
   Real rho0;
   int c_rho, c_mx, c_my, c_E;
-  ADC_HD void operator()(int i, int j) const {
+  POPS_HD void operator()(int i, int j) const {
     const Real x = geom.x_cell(i), y = geom.y_cell(j);
     const Real sx = std::sin(Real(kPi) * x), sy = std::sin(Real(kPi) * y);
     const Real vx = Real(0.6) * sx * sy;
@@ -62,7 +62,7 @@ struct InitKernel {
 struct ConstKernel {
   Array4 a;
   Real v;
-  ADC_HD void operator()(int i, int j) const { a(i, j, 0) = v; }
+  POPS_HD void operator()(int i, int j) const { a(i, j, 0) = v; }
 };
 
 static void init_state(MultiFab& U, const Geometry& g, Real rho0, int c_rho, int c_mx, int c_my,

@@ -1,7 +1,7 @@
 """Critere d'arret MIXTE rel/abs du V-cycle GeometricMG, expose par set_poisson(abs_tol=...).
 
 NE TOURNE QU'EN CI. Le binding set_poisson(abs_tol=...) est un parametre NOUVEAU, absent du module
-_adc deja construit ; l'exercer exige une RECONSTRUCTION de l'extension. Le coeur C++ du correctif
+_pops deja construit ; l'exercer exige une RECONSTRUCTION de l'extension. Le coeur C++ du correctif
 (early-exit + plancher mixte) est valide LOCALEMENT par le harnais python/tests/gpu/mg_cold_tolerance.cpp
 (compile contre les headers, avant/apres patch, ligne BASE bit-identique). Ce test verrouille le
 BINDING bout en bout cote CI.
@@ -15,18 +15,18 @@ Couvre :
 """
 import numpy as np
 
-import adc
+import pops
 
 
 def build(n=64, abs_tol=None):
     """System cartesien Dirichlet, un bloc de charge (ExB + fond), densite gaussienne -> phi non trivial.
     abs_tol=None : set_poisson par defaut (parametre omis) ; sinon passe abs_tol explicitement."""
-    sim = adc.System(n=n, periodic=False)
+    sim = pops.System(n=n, periodic=False)
     sim.add_block(
         "ne",
-        model=adc.Model(state=adc.Scalar(), transport=adc.ExB(B0=1.0),
-                        source=adc.NoSource(), elliptic=adc.BackgroundDensity(alpha=1.0, n0=0.0)),
-        spatial=adc.Spatial(minmod=True), time=adc.Explicit())
+        model=pops.Model(state=pops.Scalar(), transport=pops.ExB(B0=1.0),
+                        source=pops.NoSource(), elliptic=pops.BackgroundDensity(alpha=1.0, n0=0.0)),
+        spatial=pops.Spatial(minmod=True), time=pops.Explicit())
     if abs_tol is None:
         sim.set_poisson(bc="dirichlet")
     else:

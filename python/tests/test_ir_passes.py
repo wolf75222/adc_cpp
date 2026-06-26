@@ -1,4 +1,4 @@
-"""adc.time IR optimization passes -- dead-node elimination (ADC-465, Spec 3 s28).
+"""pops.time IR optimization passes -- dead-node elimination (ADC-465, Spec 3 s28).
 
 ``eliminate_dead_nodes`` is an OPT-IN pass: it returns a NEW Program whose flat SSA list has the
 dead nodes removed. It is SAFE-BY-DEFAULT: a node is removable ONLY if its op is on an explicit
@@ -23,11 +23,11 @@ The contract this test pins:
   - the ``_ir_hash`` genuinely changes (the IR changed) yet the committed outputs are unchanged.
 
 Pure Python: no compilation, no .so. ``model=None`` still lowers FE / SSPRK, so the parity checks run
-on real emitted C++ without a model. Run with python3 (PYTHONPATH = built adc package).
+on real emitted C++ without a model. Run with python3 (PYTHONPATH = built pops package).
 """
 import pytest
 
-adctime = pytest.importorskip("adc.time")
+adctime = pytest.importorskip("pops.time")
 
 
 def _commit_signature(prog):
@@ -163,7 +163,7 @@ _ALPHA = 1.0
 
 
 def test_condensed_schur_buffer_writers_never_removed():
-    """REGRESSION (the safe-by-default whitelist). ``adc.time.condensed_schur`` assembles its RHS with
+    """REGRESSION (the safe-by-default whitelist). ``pops.time.condensed_schur`` assembles its RHS with
     ``P.schur_rhs(rhs, phi_n, U, ...)`` -- a top-level op whose RESULT is DISCARDED. Its real effect is
     filling the caller-allocated ``rhs`` scalar_field buffer, which ``P.solve_linear(rhs=rhs)`` then
     reads BY BUFFER IDENTITY, not via a dataflow input edge. A blacklist marks ``schur_rhs`` dead and

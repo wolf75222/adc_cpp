@@ -1,6 +1,6 @@
-"""adc.time.std -- standard library of time-stepping macros that LOWER to the Program IR (ADC-407).
+"""pops.time.std -- standard library of time-stepping macros that LOWER to the Program IR (ADC-407).
 
-These are Python functions that BUILD adc.time.Program IR (not separate C++ steppers): Forward Euler,
+These are Python functions that BUILD pops.time.Program IR (not separate C++ steppers): Forward Euler,
 SSPRK2, SSPRK3, RK4 and a Strang-splitting combinator. They reuse the merged Phase 2a builder ops and
 the affine algebra over dt, so a scheme is expressed once, without any scheme-specific class (spec
 acceptance: "RK4 is expressed without a special RK4 class"). This test exercises only IR CONSTRUCTION
@@ -8,9 +8,9 @@ acceptance: "RK4 is expressed without a special RK4 class"). This test exercises
 polynomials in dt on the committed state. Parity vs the old C++ steppers needs compile_problem (Phase 2c)
 and is deferred.
 
-Run with python3 (PYTHONPATH = built adc package).
+Run with python3 (PYTHONPATH = built pops package).
 """
-from adc import time as adctime
+from pops import time as adctime
 
 
 def _coeff(node, value):

@@ -3,7 +3,7 @@
 /// @file
 /// @brief Helpers partages des tests autonomes du coeur (assertions, tolerances, sommes de controle).
 ///
-/// Couche : `tests/` (hors `include/adc`, reserve aux executables de test ; non installe).
+/// Couche : `tests/` (hors `include/pops`, reserve aux executables de test ; non installe).
 /// Role : factoriser les briques copiees a l'identique dans des dizaines de tests -- le compteur
 ///   d'echecs + la fonction d'assertion `chk`, le predicat d'exception `raises`, la comparaison
 ///   relative `close_rel`, la somme de controle `checksum`, la constante `kPi`.
@@ -14,7 +14,7 @@
 ///
 /// Invariants :
 /// - aucune variable globale, aucun etat de processus : tout passe par le compteur fourni par
-///   l'appelant (`adc::test::Checker` encapsule le compteur ou l'appelant garde son `int fails`) ;
+///   l'appelant (`pops::test::Checker` encapsule le compteur ou l'appelant garde son `int fails`) ;
 /// - les fonctions n'impriment que sur stdout/stderr et ne touchent ni MPI ni Kokkos (un test MPI
 ///   garde son propre `long fails` reduit par all_reduce a la main, cf. tests MPI) ;
 /// - `close_rel` et `checksum` sont des copies bit-a-bit des versions locales remplacees, pour que
@@ -32,7 +32,7 @@
 #include <stdexcept>
 #include <vector>
 
-namespace adc::test {
+namespace pops::test {
 
 /// Pi en double precision (copie de la constante `kPi` / `pi` dupliquee dans les tests).
 inline constexpr double kPi = 3.14159265358979323846;
@@ -98,7 +98,7 @@ bool raises(F&& f) {
 /// Comparaison a tolerance relative + absolue : |a - b| <= rtol * max(|a|, |b|) + atol.
 ///
 /// Copie bit-a-bit de la version locale de test_dense_eig (atol par defaut 1e-12). @p T est le type
-/// flottant (`adc::Real` ou `double`) ; deduit a l'appel.
+/// flottant (`pops::Real` ou `double`) ; deduit a l'appel.
 template <class T>
 bool close_rel(T a, T b, T rtol, T atol = T(1e-12)) {
   const T d = std::fabs(a - b);
@@ -117,4 +117,4 @@ inline double checksum(const std::vector<double>& v) {
   return s;
 }
 
-}  // namespace adc::test
+}  // namespace pops::test

@@ -9,7 +9,7 @@ against.
 ## Authoring a model (operator-first)
 
 ```python
-import adc.model as model
+import pops.model as model
 
 mod = model.Module("euler_poisson_lorentz")
 U = mod.state_space("U", components=["rho", "mx", "my"])
@@ -29,7 +29,7 @@ See {doc}`operator-modules` for the full operator-first model authoring guide an
 ## Composing a program (operator-first)
 
 ```python
-import adc.time as time
+import pops.time as time
 
 P = time.Program("predictor_corrector")
 P.bind_operators(mod)
@@ -45,7 +45,7 @@ P.commit("plasma", U_star)
 
 `P.call`, `P.linear_combine`, `P.apply`, `P.solve_local_linear`, `P.solve_linear`,
 `P.commit`, `P.commit_many` are first-class. A library time-scheme macro is just a
-function that builds such a `Program`; `adc.lib.time.*` macros do exactly this and add no
+function that builds such a `Program`; `pops.lib.time.*` macros do exactly this and add no
 runtime stepper of their own.
 
 ## Relationship to the board facade

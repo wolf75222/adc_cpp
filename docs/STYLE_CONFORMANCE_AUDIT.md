@@ -5,7 +5,7 @@ Reviewed base: `origin/master` / `ffb9022`.
 Scope: the entire repository, that is 283 files and ~56,700 lines, split into 14 audit
 units: core/AMR/parallel/physics, mesh, numerics (3 batches), coupling (2 batches), runtime
 (3 batches), Python bindings, tests (2 batches) and bench/CMake/scripts. Reviewed are all the
-`include/adc/**/*.hpp`, `python/*.cpp`, `tests/**/*.cpp`, `python/tests/**/*.cpp`, `bench/*.cpp`,
+`include/pops/**/*.hpp`, `python/*.cpp`, `tests/**/*.cpp`, `python/tests/**/*.cpp`, `bench/*.cpp`,
 `CMakeLists.txt`, `CMakePresets.json`, `.clang-format`, `.clang-tidy` and the build scripts.
 
 Method: review by subsystem, one unit at a time. Each non-cosmetic finding was
@@ -33,7 +33,7 @@ audit. It complements:
 
 The repository is of very good quality and, above all, COHERENT with itself. It does not follow a single
 external guide: it applies a stable in-house convention (snake_case, header-only `#pragma once`,
-device-copyable POD structs, `ADC_HD` idiom, named functors rather than extended lambdas under
+device-copyable POD structs, `POPS_HD` idiom, named functors rather than extended lambdas under
 `nvcc`, prefixed `std::runtime_error` exceptions, always explicit casts). The global conformance
 verdict is therefore not "follows Google" or "follows Core Guidelines", but: the repository follows
 mostly and faithfully a coherent internal convention, and the deviations found are
@@ -42,13 +42,13 @@ guides share.
 
 Only two findings are blocking, both conditional on the Windows port work item
 (epic ADC-90) or on the device path:
-- `include/adc/mesh/box_hash.hpp:71-73`: `static_cast<long>(bx) << 32` assumes `long >= 64` bits;
+- `include/pops/mesh/box_hash.hpp:71-73`: `static_cast<long>(bx) << 32` assumes `long >= 64` bits;
   on the LLP64 ABI (native Windows) `long` is 32 bits, the shift is undefined behavior and the
   key loses `bx` -> spatial hash broken. Verified on the spot.
-- `include/adc/numerics/elliptic/elliptic_problem.hpp:104`: `field_postprocess` dispatches via an
-  extended lambda `[=] ADC_HD(int i, int j)` on a device path, exactly the pattern that the rest
+- `include/pops/numerics/elliptic/elliptic_problem.hpp:104`: `field_postprocess` dispatches via an
+  extended lambda `[=] POPS_HD(int i, int j)` on a device path, exactly the pattern that the rest
   of the elliptic directory bans (`nvcc` cross-TU segfault, doctrine #93). Verified: it is the only
-  ADC_HD-lambda in all of `elliptic/`.
+  POPS_HD-lambda in all of `elliptic/`.
 
 No other certain UB nor hard bug was found. The other risks (uninitialized POD members,
 member pointers/references that alias stores without the rule of five, `assert` guards lost
@@ -102,7 +102,7 @@ diverge on mutually exclusive axes: one cannot satisfy all three at once.
 - Include guard: `#ifndef` imposed (Google/LLVM) vs `#pragma once` tolerated (CG SF.8). In header-only
   the repository takes `#pragma once`, ergonomic.
 - Include order: std early (Google) vs system last (LLVM), opposite orders. The repository
-  imposes its own order: `<adc/...>` block first, blank line, then STL (with `SortIncludes:false`).
+  imposes its own order: `<pops/...>` block first, blank line, then STL (with `SortIncludes:false`).
 - Exceptions and RTTI: forbidden (Google/LLVM) vs recommended E.2/E.3 and `dynamic_cast` C.146 (CG).
   `__device__` code can neither `throw` nor `typeid` -> the no-except/no-RTTI position is imposed
   de facto on the device path; exceptions live on the host side only.
@@ -122,7 +122,7 @@ as findings): `snake_case` (vs Google CamelCase); `struct` with public members f
 POD/policies/functors; `#pragma once`; absence of `[[nodiscard]]`; comments in French without
 accents; idiomatic `Real(literal)`; C arrays `Real v[N]` (device-clean); out-params by
 reference for multiple device returns (F.21); model capture BY VALUE in the functors;
-`using namespace adc;` at file scope in the test/bench/bindings TUs (leaves, not a header).
+`using namespace pops;` at file scope in the test/bench/bindings TUs (leaves, not a header).
 
 ## 4. Findings by subsystem
 
@@ -133,11 +133,11 @@ Very good quality: concept-driven architecture (`PhysicalModel`/`HyperbolicPhysi
 documentation. No hard bug; the two real risks are latent.
 
 Important:
-- `include/adc/core/variables.hpp:32-44` (C.48/ES.20): `struct Variable` leaves `role`/`component`
+- `include/pops/core/variables.hpp:32-44` (C.48/ES.20): `struct Variable` leaves `role`/`component`
   and `struct VariableSet` leaves `kind`/`size` without an in-class initializer, whereas `ArenaStats`/
   `ClusterParams`/`Aux` set them. Public default-constructible type -> read = UB. Trivial fix
   without breaking the aggregate `{kind, names, size}`.
-- `include/adc/physics/hyperbolic.hpp:81-114` (DRY): `ExBVelocityPolar` duplicates byte for byte
+- `include/pops/physics/hyperbolic.hpp:81-114` (DRY): `ExBVelocityPolar` duplicates byte for byte
   `ExBVelocity` (l.27-59); only the semantics (Cartesian vs polar local basis) differ, carried
   by the comments. The same file resolves the twin case by inheritance (`IsothermalFluxPolar :
   IsothermalFlux`). Alias or factor out.
@@ -156,7 +156,7 @@ Clean and coherent: unanimous `#pragma once`, device-copyable POD structs, rule-
 correct const-correctness and `explicit`.
 
 Blocking:
-- `include/adc/mesh/box_hash.hpp:71-73` (Integer Types/ES.101): `BoxHash::key()` does
+- `include/pops/mesh/box_hash.hpp:71-73` (Integer Types/ES.101): `BoxHash::key()` does
   `static_cast<long>(bx) << 32` and stores into `unordered_map<long, ...>`. On LLP64 the `<< 32` is
   a shift >= width of the type = UB, and `bx` is lost -> massive collisions, broken hash. Move
   to `std::int64_t`.
@@ -165,8 +165,8 @@ Important:
 - `fab2d.hpp:45,95,123-127` + `box2d.hpp:54` + `box_array.hpp:52`: native `long` for
   memory strides/sizes/offsets; silent overflow > 2^31 on LLP64, compounds the blocker.
 - `refinement.hpp:44-47` / `box2d.hpp:111-114` / `box_hash.hpp:68`: integer floor division
-  (negative handling) is WRITTEN THREE TIMES, identical bodies. Factor out a `floor_div` ADC_HD.
-- `refinement.hpp:179,209` + `multifab.hpp:137`: extended lambdas `[=] ADC_HD` on the hot
+  (negative handling) is WRITTEN THREE TIMES, identical bodies. Factor out a `floor_div` POPS_HD.
+- `refinement.hpp:179,209` + `multifab.hpp:137`: extended lambdas `[=] POPS_HD` on the hot
   V-cycle MG path, whereas `fill_boundary`/`mf_arith`/`physical_bc` have migrated to named functors
   (same documented `nvcc` cross-TU failure mode).
 - `patch_box.hpp:16-20` (C.48/C.49): 5 members `level/ilo/jlo/ihi/jhi` without an initializer whereas
@@ -186,7 +186,7 @@ Healthy and homogeneous: C++23, header-only, RAII, concept-driven design, no C c
 divisions, real device care (named functors, stack buffers O(N^2)).
 
 Blocking:
-- `elliptic_problem.hpp:104`: only kernel of the unit dispatching via an extended lambda `[=] ADC_HD`
+- `elliptic_problem.hpp:104`: only kernel of the unit dispatching via an extended lambda `[=] POPS_HD`
   on a device path (phi -> aux grad consumed by the coupler), pattern banned by
   `poisson_operator.hpp:127-132`. Extract a functor `detail::FieldPostprocessKernel`.
 
@@ -208,7 +208,7 @@ Cosmetic (14): implicit converting ctor `DistributedFFTSolver`; `TensorKrylovSol
 member-references (lifetime); `hqr_minmax()` ~133 lines (verbatim EISPACK port); 8 files
 without `@file`; inverted include order `dense_eig.hpp`; UPPERCASE matrix locals; `kPi_` literal
 vs `std::numbers::pi`; `std::function` by value without `move`; accessors `op_*()` non-const;
-`x,y,z,w,s` uninitialized; fragile positional init of `MGLevel`; FFT helpers in `adc::` instead
+`x,y,z,w,s` uninitialized; fragile positional init of `MGLevel`; FFT helpers in `pops::` instead
 of `detail::`; magic numeric thresholds; heterogeneous exception prefixes.
 
 ### 4.4 numerics-2 flux/operators (10 files)
@@ -218,7 +218,7 @@ protected divisions). No outright UB in the kernels.
 
 Important:
 - `amr_flux_helpers.hpp:85-90`: `mf_apply_source` (Model-template, default Euler path) launches a
-  kernel via an extended lambda `[=] ADC_HD` capturing the model and calling `m.source(...)`, whereas
+  kernel via an extended lambda `[=] POPS_HD` capturing the model and calling `m.source(...)`, whereas
   `AmrSspRhsKernel` just above and the whole unit impose the named functor.
 - `polar_tensor_operator.hpp:726-727`: `PolarTensorKrylovSolver` carries pointers `a_rr_`/`a_tt_`
   that alias its own stores `a_rr_store_`/`a_tt_store_`, without copy/move/dtor (rule of five);
@@ -254,7 +254,7 @@ instead of `Real` in the oracles; `TimeTreatment::Explicit` bare vs `k` prefix;
 
 ### 4.6 coupling-1 (10 files)
 
-Solid and coherent: `#pragma once`, include order respected, `ADC_HD` + named functors,
+Solid and coherent: `#pragma once`, include order respected, `POPS_HD` + named functors,
 concepts/`requires`, `enum class`, exceptions, explicit casts, sink by value+`move`. No blocking
 deviation, no important one after verification (the 6 important candidates were downgraded).
 
@@ -300,7 +300,7 @@ Cosmetic (10): `add_block` ~18 params including 6 flat Newton scalars whereas `N
 exists (the internal functions already use it); UPPERCASE locals `I0/I1/J0/J1`/`PNX/PNY`;
 `SourceNewtonReport` 8 uninitialized members; `abi_key` helper macros not `#undef`; code lines
 >100 col not reformatted (auto-fixable); `build_amr_compiled` ~250 lines; non-const refs to
-the internal state; class-qualified exception prefix vs `adc (...)`; superfluous `mutable` on
+the internal state; class-qualified exception prefix vs `pops (...)`; superfluous `mutable` on
 `solve_count_` (auto-fixable); copy not `= delete`-d explicitly on move-only `AmrSystem`.
 
 ### 4.9 runtime-2 loader/ABI (13 files)
@@ -318,7 +318,7 @@ Important:
 Cosmetic (15): functions extracted VERBATIM from `system.cpp` without re-splitting
 (`add_compiled_block` ~222 l.); magic `3` vs `kAuxBaseComps`; `IModel<NV>` polymorphic base without
 copy suppression (abstract, null practical risk); message prefixes `System::` vs bare;
-include `adc` interleaved in the STL block; lines >100 col (auto-fixable); sinks by value without
+include `pops` interleaved in the STL block; lines >100 col (auto-fixable); sinks by value without
 `move`; dead variable `nn` (auto-fixable); SFINAE `void_t` vs `requires`; single-letter locals +
 hand-written max; integers stored in `double` in `SourceNewtonReport`; MUSCL recon in magic
 `int` 0/1/2; `reinterpret_cast` dlsym (~20 sites, to confine); const-correctness `potential()`.
@@ -360,9 +360,9 @@ Important:
   triple Newton report (lambda `py::dict` x2 in `bindings.cpp`, conversion `SourceNewtonReport`
   x2). A shared `parse_newton_options(...)` + a single factory of the `py::dict`.
 
-Cosmetic (14): `using namespace adc;` at file scope in `bindings.cpp`; very long functions
+Cosmetic (14): `using namespace pops;` at file scope in `bindings.cpp`; very long functions
 (`add_block`, `add_coupled_source`, `build_multi`, `add_native_block`); `PYBIND11_MODULE`
-monolithic ~570 lines; under-indented `else` (auto-fixable); include `adc` interleaved in the STL;
+monolithic ~570 lines; under-indented `else` (auto-fixable); include `pops` interleaved in the STL;
 exact float equalities of defect detection; `static` helpers vs `namespace {}`; `_` suffix
 of pimpl members inconsistent; `size_t->int` narrowing; `time_method` in `int` vs `enum class`;
 non-const accessors; `(void)ncomp` vs `[[maybe_unused]]`; `reinterpret_cast` dlsym (to confine);
@@ -386,7 +386,7 @@ ALL_CAPS constants `NC`/`KAPPA`; mutable global counter `static int fails`.
 
 ### 4.13 tests-b (86 files)
 
-Healthy and aware of the device constraints (`ADC_HD` helpers, named functors). Coherent includes,
+Healthy and aware of the device constraints (`POPS_HD` helpers, named functors). Coherent includes,
 `comm_init` always paired with `comm_finalize`, `int` size accessors (no format bug).
 
 Important:
@@ -403,8 +403,8 @@ a `load()` helper with a `FILE*` leak.
 
 ### 4.14 bench/CMake/scripts (12 files)
 
-Carefully written: clear structure, modern root `CMakeLists` (isolated INTERFACE target `adc`, FetchContent
-Kokkos with SHA256 check, `adc_dev_options` in PRIVATE), `set -euo pipefail` scripts + quoting. Tools
+Carefully written: clear structure, modern root `CMakeLists` (isolated INTERFACE target `pops`, FetchContent
+Kokkos with SHA256 check, `pops_dev_options` in PRIVATE), `set -euo pipefail` scripts + quoting. Tools
 outside CI executed, not the API.
 
 Important:
@@ -413,14 +413,14 @@ Important:
   breaks the consistency of the measurements.
 - `profile_step.cpp:188-228` + `frontend_cpp.cpp` + `scaling_step.cpp` (device): 3 benches write
   the `Array4` by raw HOST loops without `sync_host`/`sync_device`, whereas
-  `profile_transport_mbox.cpp` shows the right idiom (`for_each_cell`+`ADC_HD`+sync). Portable
+  `profile_transport_mbox.cpp` shows the right idiom (`for_each_cell`+`POPS_HD`+sync). Portable
   only by host-accessible memory (UVM); would break on a non-UVM device backend, and `bench/`
   being only compile-tested the deviation would not be detected.
 
 Cosmetic (12): owning `new`/`delete` `fft_storage`; `atoi`/`atof` without error reporting;
 signatures 11-14 params with out-params `double&`; unknown argument silently ignored;
 `volatile Real s` as an anti-elision barrier (CP.200); `double()` casts (auto-fixable); `using
-namespace adc;` global; `namespace {}` vs `static` not uniform; C++ standard set twice in
+namespace pops;` global; `namespace {}` vs `static` not uniform; C++ standard set twice in
 `CMakeLists.txt`; outdated "target 3.20" comment (3.21); dead `kPi` + `wall` not emitted; `printf`
 ~34 args outside `-Wformat=2` coverage.
 

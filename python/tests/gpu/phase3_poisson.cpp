@@ -1,25 +1,25 @@
-// Phase 3 du portage runtime : un solve POISSON (GeometricMG) sur la vraie pile adc. Toute la boucle
+// Phase 3 du portage runtime : un solve POISSON (GeometricMG) sur la vraie pile pops. Toute la boucle
 // V-cycle (smoother red-black GS, residu, restriction average_down, prolongation interpolate, norme
 // via reduce) est deja en for_each -> device. Seul le setup (masque/coefs cut-cell, ici absent) est
 // hote. On resout lap phi = f (Dirichlet phi=0 au bord) et on compare CPU vs GPU. Portable seriel/Kokkos.
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/execution/for_each.hpp>
-#include <adc/mesh/geometry/geometry.hpp>
-#include <adc/mesh/storage/multifab.hpp>
-#include <adc/mesh/boundary/physical_bc.hpp>
-#include <adc/numerics/elliptic/mg/geometric_mg.hpp>
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/execution/for_each.hpp>
+#include <pops/mesh/geometry/geometry.hpp>
+#include <pops/mesh/storage/multifab.hpp>
+#include <pops/mesh/boundary/physical_bc.hpp>
+#include <pops/numerics/elliptic/mg/geometric_mg.hpp>
 
 #include <cmath>
 #include <cstdio>
 
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
 #include <Kokkos_Core.hpp>
 #endif
 
-using namespace adc;
+using namespace pops;
 
 int main(int argc, char** argv) {
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   Kokkos::initialize(argc, argv);
 #else
   (void)argc;
@@ -59,14 +59,14 @@ int main(int argc, char** argv) {
         max_phi = std::fmax(max_phi, std::fabs(p(i, j, 0)));
       }
   }
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   const char* space = Kokkos::DefaultExecutionSpace::name();
 #else
   const char* space = "Serial(host)";
 #endif
   std::printf("exec=%s n=128 cycles=%d  sum(phi)=%.12f  max|phi|=%.12f\n", space, cycles, sum_phi,
               max_phi);
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   Kokkos::finalize();
 #endif
   return 0;

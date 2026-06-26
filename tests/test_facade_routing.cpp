@@ -20,18 +20,18 @@
 // transport DIOCOTRON de production. La vitesse derive de grad phi (Poisson sur la densite) : champ a
 // divergence nulle -> la masse est conservee par les schemas masque / EB. Compile python/system.cpp.
 
-#include <adc/runtime/config/model_spec.hpp>
-#include <adc/runtime/system.hpp>
+#include <pops/runtime/config/model_spec.hpp>
+#include <pops/runtime/system.hpp>
 
 #include <cmath>
 #include <cstdio>
 #include <vector>
 
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
 #include <Kokkos_Core.hpp>
 #endif
 
-using namespace adc;
+using namespace pops;
 
 namespace {
 
@@ -88,7 +88,7 @@ bool all_finite(const std::vector<double>& a) {
 }  // namespace
 
 int main(int argc, char** argv) {
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   Kokkos::ScopeGuard guard(argc, argv);
 #else
   (void)argc;

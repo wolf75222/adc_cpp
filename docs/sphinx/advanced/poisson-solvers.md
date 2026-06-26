@@ -6,9 +6,9 @@ the core of the coupling: `f` depends on the density, and `phi` (via `grad phi`)
 drift. The solver is chosen by keyword in `set_poisson`:
 
 ```python
-import adc
+import pops
 
-sim = adc.System(n=128, L=1.0, periodic=True)
+sim = pops.System(n=128, L=1.0, periodic=True)
 # ... add_block / add_equation ...
 sim.set_poisson(rhs="charge_density", solver="geometric_mg", bc="auto")
 ```
@@ -22,7 +22,7 @@ contributions). `bc=` is `"auto"`, `"periodic"`, `"dirichlet"`.
 
 - Elliptic algorithms (multigrid, FFT, eps/Helmholtz/anisotropic, cut-cell):
   [ALGORITHMS.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/ALGORITHMS.md), sections 9 to 12.
-- The headers: `include/adc/numerics/elliptic/mg/geometric_mg.hpp`,
+- The headers: `include/pops/numerics/elliptic/mg/geometric_mg.hpp`,
   `poisson_fft_solver.hpp`, `poisson_operator.hpp`.
 - Conservation properties of the coupled scheme (exact FV mass, momentum, energy, values
   measured by the tests): [CONSERVATION_SUMMARY.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/CONSERVATION_SUMMARY.md).

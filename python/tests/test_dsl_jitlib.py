@@ -14,7 +14,7 @@ import tempfile
 
 import numpy as np
 
-from adc import dsl
+from pops import dsl
 
 GAMMA = 1.4
 

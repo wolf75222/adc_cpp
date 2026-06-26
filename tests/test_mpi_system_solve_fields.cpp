@@ -13,34 +13,34 @@
 // AVANT le fix : segfault a np=2/4 sur le(s) rang(s) sans box locale. APRES : np=1/2/4 verts, et le
 // resultat (potentiel, masse) est invariant au nombre de rangs (la box unique vit toujours sur rang 0).
 
-#include <adc/physics/composition/composite.hpp>
-#include <adc/physics/fluids/euler.hpp>       // Euler (bloc fluide source de T_e)
-#include <adc/physics/bricks/hyperbolic.hpp>  // ExBVelocity
-#include <adc/physics/bricks/source.hpp>      // NoSource
-#include <adc/runtime/builders/compiled/dsl_block.hpp>   // add_compiled_model
-#include <adc/runtime/system.hpp>
+#include <pops/physics/composition/composite.hpp>
+#include <pops/physics/fluids/euler.hpp>       // Euler (bloc fluide source de T_e)
+#include <pops/physics/bricks/hyperbolic.hpp>  // ExBVelocity
+#include <pops/physics/bricks/source.hpp>      // NoSource
+#include <pops/runtime/builders/compiled/dsl_block.hpp>   // add_compiled_model
+#include <pops/runtime/system.hpp>
 
-#include <adc/parallel/comm.hpp>
+#include <pops/parallel/comm.hpp>
 
 #include <cmath>
 #include <cstdio>
 #include <vector>
 
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
 #include <Kokkos_Core.hpp>
 #endif
 
-#ifdef ADC_HAS_MPI
+#ifdef POPS_HAS_MPI
 #include <mpi.h>
 #endif
 
-using namespace adc;
+using namespace pops;
 
 // Source qui lit T_e : exerce le canal aux derive (apply_te) dans solve_fields() (composante 4).
 struct TeSource {
   static constexpr int n_aux = 5;
   template <class State>
-  ADC_HD State apply(const State& u, const Aux& a) const {
+  POPS_HD State apply(const State& u, const Aux& a) const {
     State s{};
     s[0] = a.T_e * u[0];
     return s;
@@ -49,13 +49,13 @@ struct TeSource {
 // Bloc de CHARGE : alimente le second membre du Poisson (elliptic_rhs = densite de charge q n).
 struct ChargeEll {
   template <class State>
-  ADC_HD Real rhs(const State& u) const {
+  POPS_HD Real rhs(const State& u) const {
     return u[0];
   }  // rho = comp 0
 };
 struct NoEll {
   template <class State>
-  ADC_HD Real rhs(const State&) const {
+  POPS_HD Real rhs(const State&) const {
     return Real(0);
   }
 };
@@ -65,7 +65,7 @@ using GasModel = CompositeModel<Euler, NoSource, NoEll>;              // fournit
 
 int main(int argc, char** argv) {
   comm_init(&argc, &argv);
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   Kokkos::ScopeGuard guard(argc, argv);
 #endif
   const int me = my_rank(), np = n_ranks();
@@ -155,7 +155,7 @@ int main(int argc, char** argv) {
   // masse du gaz = rho_gas * n*n (la box vit sur rang 0, repliquee logiquement par l'all_reduce).
   chk(std::fabs(mtot - rho_gas * static_cast<double>(nn)) < 1e-9, "mass_value");
 
-#ifdef ADC_HAS_MPI
+#ifdef POPS_HAS_MPI
   if (np > 1) {
     long g = 0;
     MPI_Allreduce(&fails, &g, 1, MPI_LONG, MPI_SUM, MPI_COMM_WORLD);

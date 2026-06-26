@@ -1,22 +1,22 @@
-"""Spec 3 board-like physics DSL (adc.physics.Model + adc.math).
+"""Spec 3 board-like physics DSL (pops.physics.Model + pops.math).
 
 These tests exercise the LOWERING of a blackboard-style model to the Spec 2
-operator-first IR (adc.model.Module) and to the adc.dsl codegen engine. They are
-pure-Python: only adc.physics / adc.math / adc.model / adc.dsl are needed; no
-compiled time-program run, so they pass without a freshly built _adc beyond what
-``import adc`` requires.
+operator-first IR (pops.model.Module) and to the pops.dsl codegen engine. They are
+pure-Python: only pops.physics / pops.math / pops.model / pops.dsl are needed; no
+compiled time-program run, so they pass without a freshly built _pops beyond what
+``import pops`` requires.
 """
 import pytest
 
-from adc import model as _model
+from pops import model as _model
 
-physics = pytest.importorskip("adc.physics")
-amath = pytest.importorskip("adc.math")
+physics = pytest.importorskip("pops.physics")
+amath = pytest.importorskip("pops.math")
 
 
 def _euler_poisson_lorentz():
     """The canonical Spec 3 board model: 2D isothermal Euler + Poisson + Lorentz."""
-    from adc.math import sqrt, grad, laplacian, div, ddt
+    from pops.math import sqrt, grad, laplacian, div, ddt
 
     m = physics.Model("euler_poisson_lorentz")
 
@@ -135,8 +135,8 @@ def test_local_linear_operator_object_is_not_callable():
 def test_rate_and_operator_return_callables_usable_in_a_program():
     # Spec 3 amendment: m.rate / m.operator return callable operators so a board program
     # can write explicit_rate(U_n, fields_n) and get the same IR as P.call(...).
-    from adc.math import sqrt, grad, div, laplacian, ddt
-    from adc.time import Program
+    from pops.math import sqrt, grad, div, laplacian, ddt
+    from pops.time import Program
     m = physics.Model("ep")
     U = m.state("U", components=["rho", "mx", "my"])
     rho, mx, my = U
@@ -175,7 +175,7 @@ def test_board_model_check_passes():
 def test_board_module_is_consumable_by_operator_first_program():
     # Spec 2 retention: the board model lowers to a real operator-first Module that the
     # explicit P.bind_operators / P.call layer drives unchanged (board never replaces it).
-    from adc.time import Program
+    from pops.time import Program
     m = _euler_poisson_lorentz()
     P = Program("operator_first")
     P.bind_operators(m.module)

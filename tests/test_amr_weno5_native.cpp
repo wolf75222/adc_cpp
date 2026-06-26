@@ -19,12 +19,12 @@
 // Le modele est un transport pur (CompositeModel<Euler, NoSource, BackgroundDensity{alpha=0}>) : la
 // brique elliptique vaut 0, donc le solve MG donne phi=0 partout (zero bruit FP), parite STRICTE.
 //
-// CMake injecte ADC_TEST_CXX (compilateur), ADC_TEST_INCLUDE (en-tetes adc), ADC_TEST_CXX_STD (norme
-// C++ du build : la cle d'ABI du loader concorde avec celle du test) et ADC_TEST_TMPDIR.
-#include <adc/physics/bricks/bricks.hpp>  // CompositeModel, Euler, NoSource, BackgroundDensity
-#include <adc/runtime/builders/compiled/amr_dsl_block.hpp>
-#include <adc/runtime/amr_system.hpp>
-#include <adc/runtime/config/model_spec.hpp>
+// CMake injecte POPS_TEST_CXX (compilateur), POPS_TEST_INCLUDE (en-tetes pops), POPS_TEST_CXX_STD (norme
+// C++ du build : la cle d'ABI du loader concorde avec celle du test) et POPS_TEST_TMPDIR.
+#include <pops/physics/bricks/bricks.hpp>  // CompositeModel, Euler, NoSource, BackgroundDensity
+#include <pops/runtime/builders/compiled/amr_dsl_block.hpp>
+#include <pops/runtime/amr_system.hpp>
+#include <pops/runtime/config/model_spec.hpp>
 
 #include <cmath>
 #include <cstdio>
@@ -34,11 +34,11 @@
 #include <string>
 #include <vector>
 
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
 #include <Kokkos_Core.hpp>  // ScopeGuard : la partie (A) tourne le coupleur AMR (for_each/kokkos_malloc)
 #endif
 
-using namespace adc;
+using namespace pops;
 
 namespace {
 
@@ -118,24 +118,24 @@ std::string loader_source() {
   // emitted source verbatim.
   // clang-format off
   return R"CPP(
-#include <adc/runtime/builders/compiled/amr_dsl_block.hpp>
-#include <adc/runtime/dynamic/abi_key.hpp>
-#include <adc/physics/bricks/bricks.hpp>
+#include <pops/runtime/builders/compiled/amr_dsl_block.hpp>
+#include <pops/runtime/dynamic/abi_key.hpp>
+#include <pops/physics/bricks/bricks.hpp>
 #include <string>
-namespace adc_generated {
-using ProdModel = adc::CompositeModel<adc::Euler, adc::NoSource, adc::BackgroundDensity>;
+namespace pops_generated {
+using ProdModel = pops::CompositeModel<pops::Euler, pops::NoSource, pops::BackgroundDensity>;
 }
 // LITTERAL preprocesseur (PAS abi_key_string() : une inline serait interposee, ELF/RTLD_GLOBAL,
 // vers la copie du module deja charge -> cle du module renvoyee -> garde d'ABI tautologique).
-extern "C" const char* adc_native_abi_key() { return ADC_ABI_KEY_LITERAL; }
-extern "C" void adc_install_native_amr(void* sys, const char* name, const char* limiter,
+extern "C" const char* pops_native_abi_key() { return POPS_ABI_KEY_LITERAL; }
+extern "C" void pops_install_native_amr(void* sys, const char* name, const char* limiter,
                                        const char* riemann, const char* recon, const char* time,
                                        double gamma, int substeps) {
-  adc::AmrSystem* s = reinterpret_cast<adc::AmrSystem*>(sys);
-  adc::add_compiled_model<adc_generated::ProdModel>(
+  pops::AmrSystem* s = reinterpret_cast<pops::AmrSystem*>(sys);
+  pops::add_compiled_model<pops_generated::ProdModel>(
       *s, name,
-      adc_generated::ProdModel{adc::Euler{static_cast<adc::Real>(gamma)}, adc::NoSource{},
-                               adc::BackgroundDensity{adc::Real(0), adc::Real(0)}},
+      pops_generated::ProdModel{pops::Euler{static_cast<pops::Real>(gamma)}, pops::NoSource{},
+                               pops::BackgroundDensity{pops::Real(0), pops::Real(0)}},
       limiter, riemann, recon, time, gamma, substeps);
 }
 )CPP";
@@ -146,9 +146,9 @@ bool compile_loader(const std::string& src_path, const std::string& so_path) {
 #if defined(__APPLE__)
   const std::string cc = "/usr/bin/c++";  // resout l'SDK (cf. test_amr_native_loader)
 #else
-  const std::string cc = ADC_TEST_CXX;
+  const std::string cc = POPS_TEST_CXX;
 #endif
-  std::string cmd = cc + " -shared -fPIC -std=" + ADC_TEST_CXX_STD + " -O2 -I " + ADC_TEST_INCLUDE +
+  std::string cmd = cc + " -shared -fPIC -std=" + POPS_TEST_CXX_STD + " -O2 -I " + POPS_TEST_INCLUDE +
                     " " + src_path + " -o " + so_path;
 #if defined(__APPLE__)
   cmd += " -undefined dynamic_lookup";
@@ -160,7 +160,7 @@ bool compile_loader(const std::string& src_path, const std::string& so_path) {
 }  // namespace
 
 int main(int argc, char** argv) {
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   Kokkos::ScopeGuard guard(argc, argv);  // initialise/finalise le backend (partie A : coupleur AMR)
 #else
   (void)argc;
@@ -221,14 +221,14 @@ int main(int argc, char** argv) {
   //     Le loader est recompile par un g++ nu -> incompatible avec un module Kokkos : on SAUTE (A
   //     a deja couvert la parite CPU). exit 0.
   // ============================================================================================
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   std::printf("skip (B) loader .so (backend Kokkos : loader CPU nu incompatible)\n");
 #else
-  const char* cxx = ADC_TEST_CXX;
+  const char* cxx = POPS_TEST_CXX;
   if (!cxx || cxx[0] == '\0') {
     std::printf("skip (B) loader .so (aucun compilateur C++ connu du build)\n");
   } else {
-    const std::string tmp = std::string(ADC_TEST_TMPDIR) + "/amr_weno5_native_" +
+    const std::string tmp = std::string(POPS_TEST_TMPDIR) + "/amr_weno5_native_" +
                             std::to_string(static_cast<long>(std::clock()));
     const std::string src = tmp + ".cpp";
     const std::string so = tmp + ".so";
@@ -264,7 +264,7 @@ int main(int argc, char** argv) {
       std::printf("OK (B) add_native_block(weno5/minmod) == add_compiled_model(AmrSystem&)\n");
     }
   }
-#endif  // ADC_HAS_KOKKOS
+#endif  // POPS_HAS_KOKKOS
 
   if (fails == 0)
     std::printf(

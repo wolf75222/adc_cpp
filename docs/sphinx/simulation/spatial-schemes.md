@@ -4,20 +4,20 @@
 The spatial scheme = reconstruction (limiter) + numerical Riemann flux + reconstructed
 variables. Two equivalent facades describe it.
 
-`adc.Spatial(limiter=, flux=, recon=)` is the direct facade, with boolean shortcuts
+`pops.Spatial(limiter=, flux=, recon=)` is the direct facade, with boolean shortcuts
 (`minmod=True`, `vanleer=True`, `weno5=True`, `none=True`, `primitive=True`):
 
 ```python
-adc.Spatial(minmod=True)                       # MUSCL minmod, Rusanov, conservative variables
-adc.Spatial(vanleer=True, flux="hllc")         # MUSCL Van Leer, HLLC
-adc.Spatial(weno5=True, primitive=True)        # WENO5-Z, primitive reconstruction
+pops.Spatial(minmod=True)                       # MUSCL minmod, Rusanov, conservative variables
+pops.Spatial(vanleer=True, flux="hllc")         # MUSCL Van Leer, HLLC
+pops.Spatial(weno5=True, primitive=True)        # WENO5-Z, primitive reconstruction
 ```
 
-`adc.FiniteVolume(limiter=, riemann=, variables=)` is the same thing, but the numerical
+`pops.FiniteVolume(limiter=, riemann=, variables=)` is the same thing, but the numerical
 Riemann flux is called `riemann` (and not `flux`, reserved for the physical flux of a DSL model):
 
 ```python
-adc.FiniteVolume(limiter="minmod", riemann="rusanov", variables="conservative")
+pops.FiniteVolume(limiter="minmod", riemann="rusanov", variables="conservative")
 ```
 
 The possible values:

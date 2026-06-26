@@ -4,8 +4,8 @@
 This is the runtime counterpart to the emit-only Spec 3 tests (test_pernode_profiling,
 test_profiling_counters, scheduled_fields_subcycled_transport): those pin the GENERATED C++ or
 assert the scheduler counters are ABSENT on the native path and defer the runtime to ROMEO. Here we
-build a REAL board-flavoured Program, compile it to a problem.so against the loaded _adc toolchain
-(`adc.compile_problem`), install it, and STEP it -- so the spec's runtime acceptance criteria are
+build a REAL board-flavoured Program, compile it to a problem.so against the loaded _pops toolchain
+(`pops.compile_problem`), install it, and STEP it -- so the spec's runtime acceptance criteria are
 RUNTIME-proven, not emit-asserted. It never fakes the engine.
 
 The Program holds a board-style field solve on an `every(N).hold()` schedule (Spec 3 sections 17-18,
@@ -26,8 +26,8 @@ Asserted runtime criteria (each a Spec 3 acceptance criterion):
      the COMPILED-runtime counters test_profiling_counters could only assert ABSENT on the host path.
 
 Runs on the gate's Kokkos Serial shard (CI auto-discovers python/tests/test_*.py) and locally with
-`ADC_KOKKOS_ROOT=... KMP_DUPLICATE_LIB_OK=TRUE OMP_NUM_THREADS=1`. Self-skips cleanly (exit 0) when
-_adc/numpy is unavailable, the install_program / scheduler bindings are missing, or no compiler /
+`POPS_KOKKOS_ROOT=... KMP_DUPLICATE_LIB_OK=TRUE OMP_NUM_THREADS=1`. Self-skips cleanly (exit 0) when
+_pops/numpy is unavailable, the install_program / scheduler bindings are missing, or no compiler /
 visible Kokkos can build the .so -- never asserting a fake pass.
 """
 import sys
@@ -41,10 +41,10 @@ def _skip(msg):
 try:
     import numpy as np
 
-    import adc
-    from adc import time as adctime
-except Exception as exc:  # noqa: BLE001  -- numpy or _adc unavailable in this interpreter
-    _skip("adc/numpy unavailable: %s" % exc)
+    import pops
+    from pops import time as adctime
+except Exception as exc:  # noqa: BLE001  -- numpy or _pops unavailable in this interpreter
+    _skip("pops/numpy unavailable: %s" % exc)
 
 fails = 0
 
@@ -60,10 +60,10 @@ def chk(cond, label):
 # PotentialForce. The force reads the field solve's phi/grad, so holding the field solve between
 # refreshes is observable in the trajectory (a held phi forces a stale E into the momentum source).
 def plasma_model():
-    return adc.Model(state=adc.FluidState("isothermal", cs2=0.5),
-                     transport=adc.IsothermalFlux(),
-                     source=adc.PotentialForce(charge=1.0),
-                     elliptic=adc.ChargeDensity(charge=1.0))
+    return pops.Model(state=pops.FluidState("isothermal", cs2=0.5),
+                     transport=pops.IsothermalFlux(),
+                     source=pops.PotentialForce(charge=1.0),
+                     elliptic=pops.ChargeDensity(charge=1.0))
 
 
 N = 24
@@ -71,10 +71,10 @@ EVERY = 2  # the field solve recomputes every 2 macro-steps and holds the cached
 
 
 def make_sim():
-    sim = adc.System(n=N, L=1.0, periodic=True)
+    sim = pops.System(n=N, L=1.0, periodic=True)
     sim.add_block("ions", plasma_model(),
-                  spatial=adc.FiniteVolume(limiter="none", riemann="rusanov"),
-                  time=adc.Explicit(method="euler"))
+                  spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                  time=pops.Explicit(method="euler"))
     sim.set_poisson("charge_density", "geometric_mg")
     x = (np.arange(N) + 0.5) / N
     X, Y = np.meshgrid(x, x, indexing="ij")
@@ -103,13 +103,13 @@ def held_program(name="spec3_runtime_held"):
 
 
 # --- toolchain probe: skip cleanly if the runtime chain is not buildable here ---------------------
-probe = adc.System(n=8, L=1.0, periodic=True)
+probe = pops.System(n=8, L=1.0, periodic=True)
 if not hasattr(probe, "install_program") or not hasattr(probe, "step_cfl"):
-    _skip("_adc lacks install_program / step_cfl (rebuild _adc)")
+    _skip("_pops lacks install_program / step_cfl (rebuild _pops)")
 
 print("== compile the held-schedule Program to a problem.so ==")
 try:
-    compiled = adc.compile_problem(model=plasma_model(), time=held_program())
+    compiled = pops.compile_problem(model=plasma_model(), time=held_program())
 except RuntimeError as exc:  # no compiler / no visible Kokkos / .so compile failed
     _skip("compile_problem could not build the .so: %s" % str(exc)[:200])
 chk(bool(compiled.program_hash), "compiled handle carries the IR hash (%s...)" % compiled.program_hash[:12])
@@ -172,15 +172,15 @@ chk(len(py_calls) == 0,
     % (len(py_calls), py_calls[:6]))
 
 # (1b) stronger proxy: the installed step body is a C++ closure (System::install_program dlopen'd the
-# .so and `adc_install_program` set program_step_, a std::function holding only C++ pointers). So the
+# .so and `pops_install_program` set program_step_, a std::function holding only C++ pointers). So the
 # Python `compiled` handle and the Python model objects can be DROPPED entirely and the step still
 # runs -- if the step needed any Python object, it would fault after these are gc'd. We dlopen the .so
 # afresh into a sim built from a model whose Python object is then deleted + gc-collected.
-orphan = adc.System(n=N, L=1.0, periodic=True)
+orphan = pops.System(n=N, L=1.0, periodic=True)
 _m = plasma_model()
 orphan.add_block("ions", _m,
-                 spatial=adc.FiniteVolume(limiter="none", riemann="rusanov"),
-                 time=adc.Explicit(method="euler"))
+                 spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                 time=pops.Explicit(method="euler"))
 orphan.set_poisson("charge_density", "geometric_mg")
 _x = (np.arange(N) + 0.5) / N
 _X, _Y = np.meshgrid(_x, _x, indexing="ij")

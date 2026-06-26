@@ -2,19 +2,19 @@
 // Exercises the due/store/retrieve/accumulate logic + cold-start + a MultiFab store-retrieve
 // bit-identity, with no Program/codegen needed.
 
-#include <adc/runtime/program/cache_manager.hpp>
+#include <pops/runtime/program/cache_manager.hpp>
 
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/layout/distribution_mapping.hpp>
-#include <adc/mesh/storage/multifab.hpp>
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/layout/distribution_mapping.hpp>
+#include <pops/mesh/storage/multifab.hpp>
 
-#include "test_harness.hpp"  // adc::test::Checker
+#include "test_harness.hpp"  // pops::test::Checker
 
 #include <cmath>
 #include <cstdio>
 
-using namespace adc;
-using adc::runtime::program::CacheManager;
+using namespace pops;
+using pops::runtime::program::CacheManager;
 
 namespace {
 
@@ -30,7 +30,7 @@ MultiFab make_mf(double fill) {
 }  // namespace
 
 int main() {
-  adc::test::Checker chk;
+  pops::test::Checker chk;
 
   // --- is_due: cold start is always due; then every N ---
   {

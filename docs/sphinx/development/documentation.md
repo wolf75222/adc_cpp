@@ -81,7 +81,7 @@ locations are:
   `PRESET` with one of serial, python, mpi, parallel".
 - Introduce each code block with a sentence. Mark omitted code with a language comment, not `...`.
 - Use code font for filenames, classes, methods, constants, types, CLI options and terminal output:
-  `PhysicalModel`, `ADC_USE_KOKKOS`, `CMakePresets.json`.
+  `PhysicalModel`, `POPS_USE_KOKKOS`, `CMakePresets.json`.
 - Use descriptive link text, never "here" or a bare URL. Link sparingly; do not duplicate a link.
 - Notices are rare. Reserve a warning for a strong or irreversible risk (an experimental backend, an
   unsupported configuration, a non-reproducible result, a normalization change, overwriting an

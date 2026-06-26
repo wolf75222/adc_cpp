@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Create (or update) the conda env `adc` AND pin the best toolchain for the platform in it.
+# Create (or update) the conda env `pops` AND pin the best toolchain for the platform in it.
 #
 #   bash scripts/setup_env.sh            # CPU install (default)
 #   bash scripts/setup_env.sh --cuda     # allow the CUDA Kokkos variant (NVIDIA host)
-#   conda activate adc
+#   conda activate pops
 #   pip install . -v
 #
 # Why this script rather than `conda env create` alone: environment.yml cannot make a PER-PLATFORM
@@ -11,23 +11,23 @@
 #   - macOS  : AppleClang (Xcode CLT). Measured on the module's translation units: a vanilla LLVM clang
 #     (Homebrew, and very likely the conda one, same family) compiles system.cpp >15x slower
 #     (>1h24 vs 5min21). So we pin CC/CXX=AppleClang IN the env (`conda env config vars`): every
-#     `conda activate adc` exports them, taking priority over a polluted PATH (real case:
+#     `conda activate pops` exports them, taking priority over a polluted PATH (real case:
 #     /opt/homebrew/opt/llvm/bin at the head of PATH via ~/.zshrc).
 #   - Linux  : `cxx-compiler` conda-forge (gcc 14.2 via cxx-compiler 1.11.0, C++23) -- full toolchain, no root,
 #     installed here as the pinned Linux default; its activation scripts export CC/CXX automatically.
 #     This is the fix for the slow `-j40` Linux build: a wrong/floating host gcc, plus the (now split,
 #     ADC-335) heavy TUs, made it crawl; a pinned conda gcc + the split restore a fast parallel build.
 # Overrides remain possible: CC/CXX set by hand before a build win, and the DSL runtime follows the
-# compiler baked into _adc anyway.
+# compiler baked into _pops anyway.
 #
 # It also makes the Linux/Ubuntu user path reliable end to end (cf.
 # docs/sphinx/getting-started/installation.md): it bootstraps conda guidance, configures conda-forge to
 # survive HTTP 429, forces a CPU Kokkos by default (the bare `kokkos` resolves to the CUDA variant on a
 # host with an NVIDIA driver -> `pip install .` then fails "Could not find nvcc"), persists the DSL
-# runtime variables in the env, and ends on `adc.doctor()`.
+# runtime variables in the env, and ends on `pops.doctor()`.
 set -euo pipefail
 
-ENV_NAME="${ADC_ENV_NAME:-adc}"
+ENV_NAME="${POPS_ENV_NAME:-pops}"
 HERE="$(cd "$(dirname "$0")/.." && pwd)"
 
 # --- git hygiene: ignore the mechanical clang-format sweep in `git blame` (ADC-118) ----------------
@@ -38,11 +38,11 @@ if git -C "$HERE" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
 fi
 
 # --- arguments --------------------------------------------------------------------------------------
-ADC_WITH_CUDA=0
+POPS_WITH_CUDA=0
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --cpu)  ADC_WITH_CUDA=0 ;;
-    --cuda) ADC_WITH_CUDA=1 ;;
+    --cpu)  POPS_WITH_CUDA=0 ;;
+    --cuda) POPS_WITH_CUDA=1 ;;
     -h|--help)
       sed -n '2,8p' "$0" | sed 's/^# \{0,1\}//'
       exit 0 ;;
@@ -85,7 +85,7 @@ command -v mamba >/dev/null 2>&1 && PKG="mamba"
 # The bare `kokkos` resolves to the CUDA variant whenever conda sees a `__cuda` virtual package (NVIDIA
 # driver present). CONDA_OVERRIDE_CUDA="" tells conda there is no CUDA, so it picks the CPU builds --
 # robust, with no fragile build-string pin. `--cuda` leaves conda's real CUDA detection in place.
-if [[ "$ADC_WITH_CUDA" == "0" ]]; then
+if [[ "$POPS_WITH_CUDA" == "0" ]]; then
   export CONDA_OVERRIDE_CUDA=""
   echo "--- CPU install (CONDA_OVERRIDE_CUDA=\"\" forces CPU Kokkos ; pass --cuda for the CUDA variant) ---"
 else
@@ -102,7 +102,7 @@ else
 fi
 
 # --- safety net: reject a CUDA Kokkos build in CPU mode ----------------------------------------------
-if [[ "$ADC_WITH_CUDA" == "0" ]]; then
+if [[ "$POPS_WITH_CUDA" == "0" ]]; then
   kbuild="$(conda list -n "$ENV_NAME" kokkos 2>/dev/null | awk '$1 == "kokkos" {print $3}')"
   if printf '%s' "$kbuild" | grep -qi cuda; then
     echo "ERROR: a CUDA Kokkos build was selected ($kbuild) in CPU mode." >&2
@@ -135,28 +135,28 @@ case "$(uname)" in
     ;;
 esac
 
-# --- persist the DSL runtime variables in the env (exported on each `conda activate adc`) ------------
-# ADC_INCLUDE   : the adc headers for the DSL production/aot backend (here: the source checkout).
-# ADC_KOKKOS_ROOT / Kokkos_ROOT : the Kokkos install the DSL .so compiles against (the env Kokkos;
+# --- persist the DSL runtime variables in the env (exported on each `conda activate pops`) ------------
+# POPS_INCLUDE   : the pops headers for the DSL production/aot backend (here: the source checkout).
+# POPS_KOKKOS_ROOT / Kokkos_ROOT : the Kokkos install the DSL .so compiles against (the env Kokkos;
 #                 Serial is enough on CPU). Without it, the tutorial dead-ends on "no DSL backend".
-# ADC_CACHE_DIR : a stable cache for the compiled DSL .so.
+# POPS_CACHE_DIR : a stable cache for the compiled DSL .so.
 # CMAKE_PREFIX_PATH : point find_package at the env prefix (env Kokkos/pybind11/MPI) even outside an
 #                 activated shell or when a system CMAKE_PREFIX_PATH would otherwise win.
-ADC_PREFIX="$(conda run -n "$ENV_NAME" printenv CONDA_PREFIX 2>/dev/null || true)"
-[ -n "$ADC_PREFIX" ] || ADC_PREFIX="$(conda env list | awk -v n="$ENV_NAME" '$1 == n {print $NF}')"
+POPS_PREFIX="$(conda run -n "$ENV_NAME" printenv CONDA_PREFIX 2>/dev/null || true)"
+[ -n "$POPS_PREFIX" ] || POPS_PREFIX="$(conda env list | awk -v n="$ENV_NAME" '$1 == n {print $NF}')"
 conda env config vars set -n "$ENV_NAME" \
-  ADC_INCLUDE="$HERE/include" \
-  ADC_KOKKOS_ROOT="$ADC_PREFIX" \
-  Kokkos_ROOT="$ADC_PREFIX" \
-  CMAKE_PREFIX_PATH="$ADC_PREFIX" \
-  ADC_CACHE_DIR="$HERE/.adc_cache" >/dev/null
-mkdir -p "$HERE/.adc_cache"
-echo "env vars pinned: ADC_INCLUDE, ADC_KOKKOS_ROOT, Kokkos_ROOT, CMAKE_PREFIX_PATH, ADC_CACHE_DIR (prefix: $ADC_PREFIX)."
+  POPS_INCLUDE="$HERE/include" \
+  POPS_KOKKOS_ROOT="$POPS_PREFIX" \
+  Kokkos_ROOT="$POPS_PREFIX" \
+  CMAKE_PREFIX_PATH="$POPS_PREFIX" \
+  POPS_CACHE_DIR="$HERE/.pops_cache" >/dev/null
+mkdir -p "$HERE/.pops_cache"
+echo "env vars pinned: POPS_INCLUDE, POPS_KOKKOS_ROOT, Kokkos_ROOT, CMAKE_PREFIX_PATH, POPS_CACHE_DIR (prefix: $POPS_PREFIX)."
 
 # --- final diagnostic --------------------------------------------------------------------------------
 echo ""
 echo "Env ready. Next, in one command (sizes the heavy-TU pool, exports the discovery vars + ccache,"
-echo "installs, then runs adc.doctor()):"
+echo "installs, then runs pops.doctor()):"
 echo "    bash scripts/build_python.sh"
 echo ""
 echo "Or by hand:"
@@ -164,20 +164,20 @@ echo "    conda activate $ENV_NAME"
 echo "    pip install . -v          # builds the Kokkos module (Kokkos is ON and mandatory)"
 echo ""
 # ADC-338: after the ADC-335 split, the heavy module TUs are small but a size-1 Ninja pool
-# (ADC_HEAVY_TU_POOL, the CI 7GB-runner OOM guard) still serializes them. On a high-RAM local box,
+# (POPS_HEAVY_TU_POOL, the CI 7GB-runner OOM guard) still serializes them. On a high-RAM local box,
 # widen it so -j actually compiles the sub-TUs in parallel (this, not -j alone, bounds the heavy TUs).
 # scripts/build_python.sh sizes this automatically (cores capped by RAM); the manual knob:
 _ncpu="$( (nproc 2>/dev/null) || sysctl -n hw.ncpu 2>/dev/null || echo 4)"
 echo "Manual heavy-TU pool (build_python.sh does this for you):"
-echo "    pip install . -v -C cmake.define.ADC_HEAVY_TU_POOL=$_ncpu      # or a C++ preset: -DADC_HEAVY_TU_POOL=$_ncpu"
+echo "    pip install . -v -C cmake.define.POPS_HEAVY_TU_POOL=$_ncpu      # or a C++ preset: -DPOPS_HEAVY_TU_POOL=$_ncpu"
 echo "    (leave it at the default 1 on memory-constrained machines / CI -- it is the OOM guard.)"
 echo ""
-if conda run -n "$ENV_NAME" python -c "import adc" >/dev/null 2>&1; then
-  echo "--- adc.doctor() ---"
-  conda run -n "$ENV_NAME" python -c "import adc; adc.doctor()" || true
+if conda run -n "$ENV_NAME" python -c "import pops" >/dev/null 2>&1; then
+  echo "--- pops.doctor() ---"
+  conda run -n "$ENV_NAME" python -c "import pops; pops.doctor()" || true
 else
-  echo "adc is not installed in '$ENV_NAME' yet. Install it, then check the environment:"
+  echo "pops is not installed in '$ENV_NAME' yet. Install it, then check the environment:"
   echo "    conda activate $ENV_NAME"
   echo "    pip install . -v"
-  echo "    python -c 'import adc; adc.doctor()'"
+  echo "    python -c 'import pops; pops.doctor()'"
 fi

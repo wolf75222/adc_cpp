@@ -2,7 +2,7 @@
 // python/tests/gpu/amrmpi_integrated.cpp : MEME cas (modele euler_poisson COMPILE via
 // add_compiled_model -- chemin foncteur nomme qui PASSE nvcc, contrairement au chemin generique),
 // hierarchie AMR avec regrid + reflux + Poisson, niveau fin multi-patch distribue sur les rangs.
-// Ici on emet le JSONL adc_perf_v1 (workload=amr) au lieu de la sortie de validation : percentiles
+// Ici on emet le JSONL pops_perf_v1 (workload=amr) au lieu de la sortie de validation : percentiles
 // du pas, cells/s (proxy = n^2 grossier), invariants (conservation de masse, finitude, n_patches).
 //
 // Mode d'ownership du grossier : --distribute 1 => grossier multi-box reparti (vrai strong-scaling
@@ -12,13 +12,13 @@
 // Portable : Kokkos initialise SEULEMENT si compile avec Kokkos (sinon serie, AmrSystem tourne hote).
 // Lance via bench/run_scaling.sh (kokkos-omp / kokkos-cuda / mpi-cuda) en srun -n 1/2/4.
 
-#include <adc/parallel/comm.hpp>
-#include <adc/physics/bricks/bricks.hpp>
-#include <adc/physics/fluids/euler.hpp>
-#include <adc/runtime/builders/compiled/amr_dsl_block.hpp>
-#include <adc/runtime/amr_system.hpp>
+#include <pops/parallel/comm.hpp>
+#include <pops/physics/bricks/bricks.hpp>
+#include <pops/physics/fluids/euler.hpp>
+#include <pops/runtime/builders/compiled/amr_dsl_block.hpp>
+#include <pops/runtime/amr_system.hpp>
 
-#ifdef ADC_HAS_KOKKOS
+#ifdef POPS_HAS_KOKKOS
 #include <Kokkos_Core.hpp>
 #endif
 
@@ -31,20 +31,20 @@
 #include <string>
 #include <vector>
 
-using namespace adc;
+using namespace pops;
 using Clock = std::chrono::steady_clock;
 // euler_poisson auto-gravitant/plasma : Euler + force de gravite + couplage self-consistant (Gauss).
 using Model = CompositeModel<Euler, GravityForce, GravityCoupling>;
 
-#ifndef ADC_BUILD_SHA
-#define ADC_BUILD_SHA "unknown"
+#ifndef POPS_BUILD_SHA
+#define POPS_BUILD_SHA "unknown"
 #endif
-#ifndef ADC_BUILD_BRANCH
-#define ADC_BUILD_BRANCH "unknown"
+#ifndef POPS_BUILD_BRANCH
+#define POPS_BUILD_BRANCH "unknown"
 #endif
 
 static void fence() {
-#ifdef ADC_HAS_KOKKOS
+#ifdef POPS_HAS_KOKKOS
   Kokkos::fence();
 #endif
 }
@@ -156,15 +156,15 @@ static int run(int argc, char** argv) {
 
   if (my_rank() == 0) {
     std::printf(
-        "{\"schema\":\"adc_perf_v1\",\"front\":\"cpp_scaling\","
-        "\"adc_cpp_sha\":\"%s\",\"adc_cpp_branch\":\"%s\","
+        "{\"schema\":\"pops_perf_v1\",\"front\":\"cpp_scaling\","
+        "\"pops_cpp_sha\":\"%s\",\"pops_cpp_branch\":\"%s\","
         "\"backend\":\"%s\",\"machine\":\"%s\",\"ranks\":%d,\"threads\":%d,\"gpus\":%d,"
         "\"workload\":\"amr\",\"scaling\":\"%s\",\"nx\":%d,\"ny\":%d,\"distribute_coarse\":%s,"
         "\"patches0\":%d,\"patches\":%d,\"warmup\":%d,\"steps\":%d,"
         "\"hot_ms_per_step\":{\"median\":%.6e,\"p10\":%.6e,\"p90\":%.6e,\"cv\":%.6e},"
         "\"cells_per_s\":%.6e,"
         "\"invariants\":{\"mass\":%.10e,\"mass_drift\":%.3e,\"patches\":%d,\"nan\":%s}}\n",
-        ADC_BUILD_SHA, ADC_BUILD_BRANCH, backend.c_str(), machine.c_str(), n_ranks(),
+        POPS_BUILD_SHA, POPS_BUILD_BRANCH, backend.c_str(), machine.c_str(), n_ranks(),
         std::atoi(std::getenv("OMP_NUM_THREADS") ? std::getenv("OMP_NUM_THREADS") : "1"), 0,
         scaling.c_str(), n, n, dist ? "true" : "false", np0, npf, warmup, steps, med, p10, p90, cv,
         cells_per_s, mass, drift, npf, finite ? "false" : "true");
@@ -175,11 +175,11 @@ static int run(int argc, char** argv) {
 
 int main(int argc, char** argv) {
   comm_init(&argc, &argv);
-#ifdef ADC_HAS_KOKKOS
+#ifdef POPS_HAS_KOKKOS
   Kokkos::initialize(argc, argv);
 #endif
   int rc = run(argc, argv);
-#ifdef ADC_HAS_KOKKOS
+#ifdef POPS_HAS_KOKKOS
   Kokkos::finalize();
 #endif
   comm_finalize();

@@ -4,15 +4,15 @@ P.call resolves an operator name against the model's typed registry, type-checks
 arguments against its Signature, and lowers to the matching PDE shortcut so the
 generated C++ is IDENTICAL to the Spec 1 path. m.rate_operator names a composite
 -div F + sources rate as a Program-side alias. Pure Python (emit_cpp_program returns
-the .so source text without compiling); skips cleanly if adc is not importable.
+the .so source text without compiling); skips cleanly if pops is not importable.
 """
 import sys
 
 try:
-    from adc import dsl
-    from adc import time as adctime
-except Exception as exc:  # adc not importable here -> skip, never fake
-    print("skip test_operator_call (adc unavailable: %s)" % exc)
+    from pops import dsl
+    from pops import time as adctime
+except Exception as exc:  # pops not importable here -> skip, never fake
+    print("skip test_operator_call (pops unavailable: %s)" % exc)
     sys.exit(0)
 
 

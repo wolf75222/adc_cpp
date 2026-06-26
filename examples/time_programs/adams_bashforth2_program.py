@@ -4,7 +4,7 @@
 A compiled Program can declare / read / write a SYSTEM-OWNED history field carried across macro-steps
 (a HistoryManager in System::Impl, not a closure capture), which enables the explicit 2-step AB2
 recurrence ``U^{n+1} = U + dt*(3/2 R_n - 1/2 R_{n-1})`` then ``store_history(block.R, R_n)``. The
-``adc.time.std.adams_bashforth2`` macro builds this with ``P.history(name, lag=1)`` / ``store_history``
+``pops.time.std.adams_bashforth2`` macro builds this with ``P.history(name, lag=1)`` / ``store_history``
 (the codegen appends ``ctx.rotate_histories()`` at the end of the step body).
 
 COLD START (step 0): the runtime fills EVERY history slot on the FIRST store, so step 0 reads
@@ -17,7 +17,7 @@ The model is a 1-variable block (rho) with ZERO flux and a manufactured LINEAR s
 
     python examples/time_programs/adams_bashforth2_program.py
 
-Requires a compiler + a visible Kokkos (``ADC_KOKKOS_ROOT``); prints a skip notice and exits 0
+Requires a compiler + a visible Kokkos (``POPS_KOKKOS_ROOT``); prints a skip notice and exits 0
 otherwise. cf. docs/sphinx/reference/time-program.md.
 """
 import sys
@@ -25,11 +25,11 @@ import sys
 try:
     import numpy as np
 
-    import adc
-    from adc import dsl
-    from adc import time as adctime
+    import pops
+    from pops import dsl
+    from pops import time as adctime
 except Exception as exc:  # noqa: BLE001
-    print("skip adams_bashforth2_program (adc/numpy unavailable: %s)" % exc)
+    print("skip adams_bashforth2_program (pops/numpy unavailable: %s)" % exc)
     sys.exit(0)
 
 C = 0.75  # source coefficient: S(rho) = C * rho (a linear ODE rho' = c rho; R changes every step)
@@ -73,21 +73,21 @@ def offline_ab2(rho0, dt, nsteps):
 
 def main():
     n = 16
-    if not hasattr(adc.System(n=8, L=1.0, periodic=True), "install_program"):
-        print("skip adams_bashforth2_program (_adc lacks install_program; rebuild _adc)")
+    if not hasattr(pops.System(n=8, L=1.0, periodic=True), "install_program"):
+        print("skip adams_bashforth2_program (_pops lacks install_program; rebuild _pops)")
         return 0
     try:
-        compiled = adc.compile_problem(model=source_model("ab2_prog"), time=ab2_program())
+        compiled = pops.compile_problem(model=source_model("ab2_prog"), time=ab2_program())
         block_model = source_model("ab2_block").compile(backend="production")
     except RuntimeError as exc:
         print("skip adams_bashforth2_program (compile_problem could not build the .so: %s)"
               % str(exc)[:160])
         return 0
 
-    sim = adc.System(n=n, L=1.0, periodic=True)
+    sim = pops.System(n=n, L=1.0, periodic=True)
     sim.add_equation("blk", block_model,
-                     spatial=adc.FiniteVolume(limiter="none", riemann="rusanov"),
-                     time=adc.Explicit(method="euler"))
+                     spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                     time=pops.Explicit(method="euler"))
     x = (np.arange(n) + 0.5) / n
     X, Y = np.meshgrid(x, x, indexing="ij")
     rho0 = 1.0 + 0.3 * np.sin(2 * np.pi * X) * np.cos(2 * np.pi * Y)

@@ -7,7 +7,7 @@ schedule, replacing the scattered block stride / substeps / source frequency kno
 :class: note
 The schedule AUTHORING surface (the vocabulary below, policy chaining, recording a schedule on a
 Program node, the cacheable-capability validation) and the CODEGEN that lowers every kind/policy to
-C++ are available in `adc.time` (ADC-458). A scheduled node lowers to a due-test guard plus its
+C++ are available in `pops.time` (ADC-458). A scheduled node lowers to a due-test guard plus its
 policy branch around the statements it emits (the cache lives in the C++ `CacheManager`). Two cases
 still refuse to lower, loudly: `on_end()` (a compiled `sim.step(dt)` loop carries no end-of-run
 signal, so the `.so` cannot know the last step -- use an on_end host hook) and a `when(cond)` over a
@@ -20,7 +20,7 @@ bare Python callable (only a Program Bool predicate lowers). The cache cadence R
 ## Authoring
 
 ```python
-import adc.time as adctime
+import pops.time as adctime
 P = adctime.Program("step").bind_operators(mod)
 U = P.state("plasma")
 fields = P.call("fields_from_state", U, schedule=adctime.every(10).hold())  # refresh every 10
@@ -88,7 +88,7 @@ off-cadence. A field solve caches the System aux; any other node caches its own 
 
 ## Cache and checkpoint
 
-The `CacheManager` (`include/adc/runtime/program/cache_manager.hpp`) stores per node the cached value
+The `CacheManager` (`include/pops/runtime/program/cache_manager.hpp`) stores per node the cached value
 (aux or named scratch), the last update step, the accumulated dt and a validity flag. It is typed,
 C++-allocated and Kokkos/MPI-safe. The cache is owned by the `System` (`System::program_cache()`), not
 the `.so` step closure, so the EXISTING checkpoint reaches it: `sim.checkpoint` gathers each valid slot

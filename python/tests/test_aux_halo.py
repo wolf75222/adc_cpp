@@ -1,4 +1,4 @@
-"""ADC-369 : halos/ghosts auxiliaires CONFIGURABLES PAR CHAMP (adc.AuxHalo).
+"""ADC-369 : halos/ghosts auxiliaires CONFIGURABLES PAR CHAMP (pops.AuxHalo).
 
 Un champ aux NOMME (m.aux_field) heritait jusqu'ici de la BC de ghost PARTAGEE (derivee de phi). Cette
 PR laisse UN champ declarer sa propre politique de halo (foextrap / dirichlet), appliquee APRES le
@@ -6,7 +6,7 @@ remplissage partage a SA composante seulement, sur les faces NON PERIODIQUES (le
 domaine periodique, theta polaire -- gardent leur wrap).
 
 On verifie (compilateur requis pour le bout-en-bout, auto-skip sinon) :
-  (1) validation pure-Python de adc.AuxHalo ;
+  (1) validation pure-Python de pops.AuxHalo ;
   (2) capabilities() annonce la politique de halo ;
   (3) System CARTESIEN non periodique : un flux lisant un aux nomme vx voit le ghost ; la BC dirichlet
       du champ change le residu AU BORD mais PAS a l'interieur, et 'foextrap' explicite == defaut
@@ -20,8 +20,8 @@ import tempfile
 
 import numpy as np
 
-import adc
-from adc import dsl
+import pops
+from pops import dsl
 
 INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "include"))
 
@@ -47,13 +47,13 @@ def build_advect_vx():
 
 
 def test_auxhalo_validation():
-    """adc.AuxHalo : kinds valides, valeur, rejet d'un kind inconnu. Pur Python."""
-    assert adc.AuxHalo("foextrap").bc_type == 1
-    d = adc.AuxHalo("dirichlet", value=2.5)
+    """pops.AuxHalo : kinds valides, valeur, rejet d'un kind inconnu. Pur Python."""
+    assert pops.AuxHalo("foextrap").bc_type == 1
+    d = pops.AuxHalo("dirichlet", value=2.5)
     assert d.bc_type == 2 and d.value == 2.5
     raised = False
     try:
-        adc.AuxHalo("periodic")  # pas une politique par champ (gardee par le domaine)
+        pops.AuxHalo("periodic")  # pas une politique par champ (gardee par le domaine)
     except ValueError:
         raised = True
     assert raised, "AuxHalo('periodic') devrait lever (foextrap/dirichlet uniquement)"
@@ -62,7 +62,7 @@ def test_auxhalo_validation():
 
 def test_capabilities_halo():
     """capabilities()['aux']['named']['halo_policy'] annonce la politique par champ."""
-    named = adc.capabilities()["aux"]["named"]
+    named = pops.capabilities()["aux"]["named"]
     hp = named["halo_policy"]
     assert set(hp["kinds"]) >= {"inherit", "foextrap", "dirichlet"}, hp["kinds"]
     assert "amr_coarse" in hp["backends"] and "system_polar" in hp["backends"], hp["backends"]
@@ -70,10 +70,10 @@ def test_capabilities_halo():
 
 
 def _cart_rhs(compiled, n, vx2d, halo):
-    sim = adc.System(n=n, L=1.0, periodic=False)
+    sim = pops.System(n=n, L=1.0, periodic=False)
     sim.add_equation("a", model=compiled,
-                     spatial=adc.FiniteVolume(limiter="none", riemann="rusanov"),
-                     time=adc.Explicit())
+                     spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                     time=pops.Explicit())
     sim.set_poisson(rhs="charge_density", solver="geometric_mg", bc="dirichlet")
     sim.set_density("a", np.ones((n, n)))
     sim.set_aux_field("a", "vx", vx2d, halo=halo)
@@ -96,8 +96,8 @@ def test_system_cartesian_halo():
         vx2d = np.tile(x, (n, 1))  # vx[j, i] = x_i : varie en x -> foextrap != dirichlet au bord x
 
         R_def = _cart_rhs(compiled, n, vx2d, None)
-        R_foe = _cart_rhs(compiled, n, vx2d, adc.AuxHalo("foextrap"))
-        R_dir = _cart_rhs(compiled, n, vx2d, adc.AuxHalo("dirichlet", value=0.0))
+        R_foe = _cart_rhs(compiled, n, vx2d, pops.AuxHalo("foextrap"))
+        R_dir = _cart_rhs(compiled, n, vx2d, pops.AuxHalo("dirichlet", value=0.0))
 
         # (a) defaut == foextrap explicite : le defaut partage (phi non periodique) EST deja Foextrap.
         assert np.allclose(R_def, R_foe, atol=1e-12), \
@@ -129,16 +129,16 @@ def test_polar_halo():
         vx = np.tile((np.arange(nr) + 0.5) / nr, (nth, 1))  # varies in r (fast axis i)
 
         def rhs(halo):
-            s = adc.System(mesh=adc.PolarMesh(r_min=0.3, r_max=1.0, nr=nr, ntheta=nth))
+            s = pops.System(mesh=pops.PolarMesh(r_min=0.3, r_max=1.0, nr=nr, ntheta=nth))
             s.add_equation("a", model=compiled,
-                           spatial=adc.FiniteVolume(limiter="none", riemann="rusanov"), time=adc.Explicit())
+                           spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"), time=pops.Explicit())
             s.set_density("a", np.ones((nth, nr)))
             s.set_aux_field("a", "vx", vx, halo=halo)
             s.solve_fields()
             return np.array(s.eval_rhs("a")).reshape(nth, nr)  # (theta=j, r=i)
 
         R_def = rhs(None)
-        R_dir = rhs(adc.AuxHalo("dirichlet", value=0.0))
+        R_dir = rhs(pops.AuxHalo("dirichlet", value=0.0))
         assert np.all(np.isfinite(R_def)) and np.all(np.isfinite(R_dir)), "polar residual finite (theta periodic)"
         # the RADIAL boundary (r = column 0 and nr-1) changes; theta is periodic -> no theta boundary effect.
         rb = max(float(np.max(np.abs(R_dir[:, 0] - R_def[:, 0]))),
@@ -163,14 +163,14 @@ def test_amr_halo():
     tmp = tempfile.mkdtemp()
     try:
         n = 16
-        sp = adc.FiniteVolume(limiter="none", riemann="rusanov")
+        sp = pops.FiniteVolume(limiter="none", riemann="rusanov")
         compiled = build_advect_vx().compile(os.path.join(tmp, "avxa.so"), include=INCLUDE,
                                              backend="production", target="amr_system")
         vx = np.tile((np.arange(n) + 0.5) / n, (n, 1))
 
         def stepped_density(halo):
-            s = adc.AmrSystem(n=n, L=1.0, periodic=False)
-            s.add_equation("a", model=compiled, spatial=sp, time=adc.Explicit())
+            s = pops.AmrSystem(n=n, L=1.0, periodic=False)
+            s.add_equation("a", model=compiled, spatial=sp, time=pops.Explicit())
             s.set_poisson(bc="dirichlet")
             s.set_density("a", np.ones((n, n)))
             s.set_aux_field("a", "vx", vx, halo=halo)
@@ -178,7 +178,7 @@ def test_amr_halo():
             return np.array(s.density("a")).reshape(n, n)
 
         D_def = stepped_density(None)
-        D_dir = stepped_density(adc.AuxHalo("dirichlet", value=0.0))
+        D_dir = stepped_density(pops.AuxHalo("dirichlet", value=0.0))
         assert np.all(np.isfinite(D_def)) and np.all(np.isfinite(D_dir)), "AMR density finite with a halo"
         db = max(float(np.max(np.abs(D_dir[:, 0] - D_def[:, 0]))),
                  float(np.max(np.abs(D_dir[:, n - 1] - D_def[:, n - 1]))))

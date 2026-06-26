@@ -7,12 +7,12 @@ smallest program yourself) or the [Tutorial A->Z](tutorial.md).
 
 ## Before you start
 
-You need the `adc` module built and importable. If you have not built it yet,
+You need the `pops` module built and importable. If you have not built it yet,
 follow [Installation](installation.md), then come back here. To confirm the
 module is on your path:
 
 ```bash
-python -c "import adc; print(adc.__file__)"
+python -c "import pops; print(pops.__file__)"
 ```
 
 The command prints the path to the compiled module. If it raises
@@ -46,7 +46,7 @@ Python traceback and produces those files has succeeded.
 
 ## Next steps
 
-- [First run](first-run.md): write the smallest `adc` program yourself, one
+- [First run](first-run.md): write the smallest `pops` program yourself, one
   block, copyable as is.
 - [Tutorial A->Z](tutorial.md): the full 18-step path, from `git clone` to the
   uniform versus AMR comparison.

@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
 """Briques magnetiques natives exposees a l'API Python (audit 2026-06, chantier 5).
 
-adc.MagneticLorentzForce (q v x B_z) et adc.PotentialMagneticForce (electrostatique + Lorentz
+pops.MagneticLorentzForce (q v x B_z) et pops.PotentialMagneticForce (electrostatique + Lorentz
 sommees, CompositeSource C++) etaient routees par la factory C++ ("magnetic"/"potential_magnetic")
-mais ABSENTES de la surface Python (adc.Model n'acceptait que NoSource/PotentialForce/GravityForce).
+mais ABSENTES de la surface Python (pops.Model n'acceptait que NoSource/PotentialForce/GravityForce).
 
 Verifie :
-  - adc.Model(source=adc.MagneticLorentzForce(q)) accepte ; le residu d'un etat UNIFORME (flux nul)
+  - pops.Model(source=pops.MagneticLorentzForce(q)) accepte ; le residu d'un etat UNIFORME (flux nul)
     vaut EXACTEMENT la force magnetique attendue s = (q B m_y, -q B m_x) (cablage quantitatif) ;
   - l'energie n'est pas touchee par la force magnetique (F . v = 0 : pas de composante energie) ;
-  - adc.PotentialMagneticForce accepte et tourne fini ;
+  - pops.PotentialMagneticForce accepte et tourne fini ;
   - rejet explicite sur un transport scalaire (la brique exige >= 3 variables).
 
 Invariants par assert ; imprime "OK test_magnetic_bricks" en cas de succes.
@@ -18,7 +18,7 @@ import sys
 
 import numpy as np
 
-import adc
+import pops
 
 fails = 0
 
@@ -34,13 +34,13 @@ n, B0, q = 16, 3.0, -2.0
 
 # --- 1. MagneticLorentzForce : residu quantitatif sur etat uniforme ----------------
 print("== MagneticLorentzForce : residu = force magnetique exacte (etat uniforme) ==")
-sim = adc.System(n=n, L=1.0, periodic=True)
+sim = pops.System(n=n, L=1.0, periodic=True)
 sim.add_block("e",
-              adc.Model(state=adc.FluidState("isothermal", cs2=0.5),
-                        transport=adc.IsothermalFlux(),
-                        source=adc.MagneticLorentzForce(charge=q),
-                        elliptic=adc.ChargeDensity(charge=0.0)),  # pas de couplage Poisson
-              spatial=adc.FiniteVolume(limiter="minmod"), time=adc.Explicit())
+              pops.Model(state=pops.FluidState("isothermal", cs2=0.5),
+                        transport=pops.IsothermalFlux(),
+                        source=pops.MagneticLorentzForce(charge=q),
+                        elliptic=pops.ChargeDensity(charge=0.0)),  # pas de couplage Poisson
+              spatial=pops.FiniteVolume(limiter="minmod"), time=pops.Explicit())
 sim.set_poisson(rhs="charge_density", solver="geometric_mg", bc="periodic")
 sim.set_magnetic_field(B0 * np.ones(n * n))
 rho0, v0 = 1.0, 0.7
@@ -62,13 +62,13 @@ chk(np.all(np.isfinite(rho)), "5 pas magnetises : densite finie")
 
 # --- 2. PotentialMagneticForce : accepte et tourne ---------------------------------
 print("== PotentialMagneticForce (electrostatique + Lorentz sommees) ==")
-sim2 = adc.System(n=n, L=1.0, periodic=True)
+sim2 = pops.System(n=n, L=1.0, periodic=True)
 sim2.add_block("e",
-               adc.Model(state=adc.FluidState("isothermal", cs2=0.5),
-                         transport=adc.IsothermalFlux(),
-                         source=adc.PotentialMagneticForce(charge=q),
-                         elliptic=adc.BackgroundDensity(alpha=1.0, n0=1.0)),
-               spatial=adc.FiniteVolume(limiter="minmod"), time=adc.Explicit())
+               pops.Model(state=pops.FluidState("isothermal", cs2=0.5),
+                         transport=pops.IsothermalFlux(),
+                         source=pops.PotentialMagneticForce(charge=q),
+                         elliptic=pops.BackgroundDensity(alpha=1.0, n0=1.0)),
+               spatial=pops.FiniteVolume(limiter="minmod"), time=pops.Explicit())
 sim2.set_poisson(rhs="charge_density", solver="geometric_mg", bc="periodic")
 sim2.set_magnetic_field(B0 * np.ones(n * n))
 x = (np.arange(n) + 0.5) / n
@@ -81,13 +81,13 @@ chk(np.all(np.isfinite(np.asarray(sim2.density("e")))),
 
 # --- 3. Rejet explicite sur scalaire ------------------------------------------------
 print("== rejet sur transport scalaire (la force exige >= 3 variables) ==")
-sim3 = adc.System(n=8, L=1.0, periodic=True)
+sim3 = pops.System(n=8, L=1.0, periodic=True)
 try:
     sim3.add_block("s",
-                   adc.Model(state=adc.Scalar(), transport=adc.ExB(B0=1.0),
-                             source=adc.MagneticLorentzForce(charge=1.0),
-                             elliptic=adc.BackgroundDensity()),
-                   spatial=adc.FiniteVolume())
+                   pops.Model(state=pops.Scalar(), transport=pops.ExB(B0=1.0),
+                             source=pops.MagneticLorentzForce(charge=1.0),
+                             elliptic=pops.BackgroundDensity()),
+                   spatial=pops.FiniteVolume())
     chk(False, "MagneticLorentzForce sur scalaire aurait du lever")
 except RuntimeError as e:
     chk("3 variables" in str(e) or "invalide" in str(e), f"erreur explicite : {e}")

@@ -10,21 +10,21 @@
 //  (2) NO-DEFAULT-CHANGE : pour none et minmod (<= 2 ghosts), add_compiled_model reste BIT-IDENTIQUE
 //      a add_block -- la reallocation set_block_ghosts est un NO-OP (U a deja 2 ghosts), donc
 //      l'allocation et le resultat sont inchanges vs avant ce chantier.
-#include <adc/physics/bricks/bricks.hpp>  // CompositeModel, GravityForce, GravityCoupling
-#include <adc/physics/fluids/euler.hpp>   // Euler (= CompressibleFlux)
-#include <adc/runtime/builders/compiled/dsl_block.hpp>
-#include <adc/runtime/config/model_spec.hpp>
-#include <adc/runtime/system.hpp>
+#include <pops/physics/bricks/bricks.hpp>  // CompositeModel, GravityForce, GravityCoupling
+#include <pops/physics/fluids/euler.hpp>   // Euler (= CompressibleFlux)
+#include <pops/runtime/builders/compiled/dsl_block.hpp>
+#include <pops/runtime/config/model_spec.hpp>
+#include <pops/runtime/system.hpp>
 
 #include <cmath>
 #include <cstdio>
 #include <vector>
 
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
 #include <Kokkos_Core.hpp>
 #endif
 
-using namespace adc;
+using namespace pops;
 
 namespace {
 
@@ -118,7 +118,7 @@ int compare(int n, double L, const std::vector<double>& rho, const char* limiter
 }  // namespace
 
 int main(int argc, char** argv) {
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   Kokkos::ScopeGuard guard(argc, argv);
 #else
   (void)argc;

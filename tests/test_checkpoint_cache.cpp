@@ -13,13 +13,13 @@
 // only an accumulator is skipped); (c) the two verbatim restart error messages -- the program-hash
 // mismatch and the missing cached value naming the node -- are produced verbatim from the cache name.
 
-#include <adc/runtime/program/cache_manager.hpp>
+#include <pops/runtime/program/cache_manager.hpp>
 
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/layout/distribution_mapping.hpp>
-#include <adc/mesh/storage/multifab.hpp>
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/layout/distribution_mapping.hpp>
+#include <pops/mesh/storage/multifab.hpp>
 
-#include "test_harness.hpp"  // adc::test::Checker
+#include "test_harness.hpp"  // pops::test::Checker
 
 #include <cmath>
 #include <cstdio>
@@ -27,9 +27,9 @@
 #include <string>
 #include <vector>
 
-using namespace adc;
-using adc::runtime::program::CacheManager;
-using adc::runtime::program::CacheSlot;
+using namespace pops;
+using pops::runtime::program::CacheManager;
+using pops::runtime::program::CacheSlot;
 
 namespace {
 
@@ -84,7 +84,7 @@ void deserialize(CacheManager& c, const std::vector<SerializedSlot>& slots) {
 }  // namespace
 
 int main() {
-  adc::test::Checker chk;
+  pops::test::Checker chk;
 
   // --- (a) full round-trip: populated cache serializes + deserializes to an EQUAL state ---
   {

@@ -30,7 +30,7 @@ import textwrap
 _CHILD = textwrap.dedent(
     """
     import math
-    import adc
+    import pops
 
     RMIN, RMAX, NR, NTH = 0.30, 1.00, 48, 64  # nr != ntheta : declencheur du debordement de tampon
 
@@ -49,13 +49,13 @@ _CHILD = textwrap.dedent(
                 rho.append(100.0 * g * (1.0 + 0.5 * math.cos(3.0 * th)))
         return rho
 
-    sim = adc.System(mesh=adc.PolarMesh(r_min=RMIN, r_max=RMAX, nr=NR, ntheta=NTH))
+    sim = pops.System(mesh=pops.PolarMesh(r_min=RMIN, r_max=RMAX, nr=NR, ntheta=NTH))
     sim.add_block(
         "ne",
-        model=adc.Model(state=adc.Scalar(), transport=adc.ExB(B0=1.0),
-                        source=adc.NoSource(),
-                        elliptic=adc.BackgroundDensity(alpha=1.0, n0=0.0)),
-        spatial=adc.Spatial(minmod=True), time=adc.Explicit())
+        model=pops.Model(state=pops.Scalar(), transport=pops.ExB(B0=1.0),
+                        source=pops.NoSource(),
+                        elliptic=pops.BackgroundDensity(alpha=1.0, n0=0.0)),
+        spatial=pops.Spatial(minmod=True), time=pops.Explicit())
     sim.set_poisson(rhs="charge_density", solver="polar", bc="dirichlet")
     sim.set_density("ne", steep_gaussian())
 
@@ -75,7 +75,7 @@ _CHILD = textwrap.dedent(
 
 
 def test_unstable_polar_profile_does_not_crash_at_teardown():
-    # On herite du PYTHONPATH courant (le module compile adc) : meme interpreteur que pytest.
+    # On herite du PYTHONPATH courant (le module compile pops) : meme interpreteur que pytest.
     proc = subprocess.run([sys.executable, "-c", _CHILD], capture_output=True, text=True, timeout=120)
 
     # Un crash dur (SIGSEGV=11 -> rc -11 ; SIGABRT=6 -> rc -6 ; etc.) se manifeste par un returncode

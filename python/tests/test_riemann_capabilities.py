@@ -8,12 +8,12 @@ ARBITRARY board formulas and the end-to-end compile remain ADC-456 follow-ups.
 """
 import pytest
 
-physics = pytest.importorskip("adc.physics")
-lib = pytest.importorskip("adc.lib")
+physics = pytest.importorskip("pops.physics")
+lib = pytest.importorskip("pops.lib")
 
 
 def _euler(with_pressure=True, with_roles=True):
-    from adc.math import sqrt
+    from pops.math import sqrt
     m = physics.Model("euler")
     roles = ({"rho": "density", "mx": "momentum_x", "my": "momentum_y", "E": "energy"}
              if with_roles else None)
@@ -73,7 +73,7 @@ def test_hll_requires_wave_speeds():
     with pytest.raises(ValueError, match="requires model capability 'wave_speeds'"):
         m.riemann("hll")
     # declaring the flux waves provides them:
-    from adc.math import sqrt
+    from pops.math import sqrt
     m2, U = _euler(with_pressure=True, with_roles=True)
     rho, mx, my, E = U
     u, v = mx / rho, my / rho
@@ -93,7 +93,7 @@ def test_hll_accepts_jacobian_derived_wave_speeds():
 
 
 def test_finite_volume_rate_validates_riemann():
-    from adc.math import sqrt
+    from pops.math import sqrt
     m, U = _euler(with_pressure=True, with_roles=True)
     rho, mx, my, E = U
     u, v = mx / rho, my / rho

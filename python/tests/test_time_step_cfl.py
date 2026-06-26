@@ -12,7 +12,7 @@ program cadence + ticks the clock, with NO implicit couplings / projections (the
 itself). Equivalently: step_cfl(cfl) == step(dt_cfl) for the dt_cfl step_cfl chose -- bit-exact.
 
 Section (A) (pure Python) is minimal -- this is runtime behavior; the substantive checks are Section (B)
-(end-to-end), which needs _adc + a compiler + a visible Kokkos (ADC_KOKKOS_ROOT) and self-skips cleanly
+(end-to-end), which needs _pops + a compiler + a visible Kokkos (POPS_KOKKOS_ROOT) and self-skips cleanly
 otherwise. It never fakes the engine.
 """
 import sys
@@ -26,10 +26,10 @@ def _skip(msg):
 try:
     import numpy as np
 
-    import adc
-    from adc import time as adctime
+    import pops
+    from pops import time as adctime
 except Exception as exc:  # noqa: BLE001
-    _skip("adc/numpy unavailable: %s" % exc)
+    _skip("pops/numpy unavailable: %s" % exc)
 
 fails = 0
 
@@ -43,7 +43,7 @@ def chk(cond, label):
 
 # ---- (A) sanity: the System API exposes step_cfl (always runs) ----
 print("== (A) step_cfl API present ==")
-probe = adc.System(n=8, L=1.0, periodic=True)
+probe = pops.System(n=8, L=1.0, periodic=True)
 chk(hasattr(probe, "step_cfl"), "System exposes step_cfl")
 
 
@@ -55,19 +55,19 @@ def transport_model():
     # Pure transport (isothermal, NoSource); BackgroundDensity(n0=0) keeps solve_fields well-defined
     # but INERT (no Poisson feedback into the flux), so re-running solve_fields per program call changes
     # nothing -> the compiled cadence is bit-exact vs the native cadence (same trick as substeps_stride).
-    return adc.Model(state=adc.FluidState("isothermal", cs2=0.5),
-                     transport=adc.IsothermalFlux(),
-                     source=adc.NoSource(),
-                     elliptic=adc.BackgroundDensity(alpha=1.0, n0=0.0))
+    return pops.Model(state=pops.FluidState("isothermal", cs2=0.5),
+                     transport=pops.IsothermalFlux(),
+                     source=pops.NoSource(),
+                     elliptic=pops.BackgroundDensity(alpha=1.0, n0=0.0))
 
 
 N = 24
 
 
 def make_sim(time):
-    sim = adc.System(n=N, L=1.0, periodic=True)
+    sim = pops.System(n=N, L=1.0, periodic=True)
     sim.add_block("ions", transport_model(),
-                  spatial=adc.FiniteVolume(limiter="none", riemann="rusanov"), time=time)
+                  spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"), time=time)
     sim.set_poisson("charge_density", "geometric_mg")
     x = (np.arange(N) + 0.5) / N
     X, Y = np.meshgrid(x, x, indexing="ij")
@@ -86,10 +86,10 @@ def fe_program(name="fe_stepcfl"):
 
 
 if not hasattr(probe, "install_program") or not hasattr(probe, "set_program_cadence"):
-    _skip("_adc lacks install_program / set_program_cadence (rebuild _adc) (A passed)")
+    _skip("_pops lacks install_program / set_program_cadence (rebuild _pops) (A passed)")
 
 try:
-    compiled = adc.compile_problem(model=transport_model(), time=fe_program())
+    compiled = pops.compile_problem(model=transport_model(), time=fe_program())
 except RuntimeError as exc:  # no compiler / no Kokkos visible / compile failed
     _skip("compile_problem could not build the .so: %s" % str(exc)[:160])
 
@@ -98,7 +98,7 @@ CFL = 0.4
 
 def make_compiled(cadence=None):
     """Install the FE program (optionally setting a cadence) and return the sim."""
-    sim = make_sim(adc.Explicit(method="euler"))
+    sim = make_sim(pops.Explicit(method="euler"))
     sim.install_program(compiled.so_path)
     if cadence is not None:
         sim.set_program_cadence(cadence.substeps, cadence.stride)
@@ -119,7 +119,7 @@ chk(d_adv > 1e-9, "step_cfl advanced the state via the program (max|du|=%.2e)" %
 print("-- (b) dt == native CFL dt, and step_cfl == step(dt_cfl) bit-exact --")
 # A NATIVE System (no program) on the SAME state computes the SAME CFL dt: step_cfl keeps the CFL
 # logic in adc_cpp (per-block bounds on the native state), only the advance is routed to the program.
-sim_native = make_sim(adc.Explicit(method="euler"))
+sim_native = make_sim(pops.Explicit(method="euler"))
 dt_native = sim_native.step_cfl(CFL)
 chk(abs(dt_cfl - dt_native) < 1e-14,
     "step_cfl dt (program) == native step_cfl dt (%.10g vs %.10g)" % (dt_cfl, dt_native))
@@ -137,17 +137,17 @@ print("-- (c) substeps / stride honored under step_cfl --")
 # substeps=2: step_cfl computes the SAME dt (CFL is on the state, cadence-independent at step 1),
 # then runs the cadence -> 2x program_step_(dt/2). Must match step(dt) with substeps=2 set, and DIFFER
 # from substeps=1.
-sim_c1 = make_compiled(adc.CompiledTime(substeps=1))
+sim_c1 = make_compiled(pops.CompiledTime(substeps=1))
 dt_c1 = sim_c1.step_cfl(CFL)
 u_c1 = np.array(sim_c1.get_state("ions"))
 
-sim_c2 = make_compiled(adc.CompiledTime(substeps=2))
+sim_c2 = make_compiled(pops.CompiledTime(substeps=2))
 dt_c2 = sim_c2.step_cfl(CFL)
 u_c2 = np.array(sim_c2.get_state("ions"))
 chk(abs(dt_c2 - dt_c1) < 1e-14, "step_cfl dt is cadence-independent at step 1 (%.10g vs %.10g)"
     % (dt_c2, dt_c1))
 
-sim_c2_ref = make_compiled(adc.CompiledTime(substeps=2))
+sim_c2_ref = make_compiled(pops.CompiledTime(substeps=2))
 sim_c2_ref.step(dt_c2)
 u_c2_ref = np.array(sim_c2_ref.get_state("ions"))
 e_c2 = float(np.abs(u_c2 - u_c2_ref).max())
@@ -162,14 +162,14 @@ chk(d_c > 1e-9, "substeps=2 differs from substeps=1 under step_cfl (non-degenera
 # capture the first step_cfl dt, then drive the reference with step(that_dt).
 print("-- (c') stride honored under step_cfl --")
 K = 4
-sim_s = make_compiled(adc.CompiledTime(stride=2))
+sim_s = make_compiled(pops.CompiledTime(stride=2))
 dts = []
 for _ in range(K):
     dts.append(sim_s.step_cfl(CFL))
 u_s = np.array(sim_s.get_state("ions"))
 t_s = float(sim_s.time())
 
-sim_s_ref = make_compiled(adc.CompiledTime(stride=2))
+sim_s_ref = make_compiled(pops.CompiledTime(stride=2))
 for dt_k in dts:
     sim_s_ref.step(dt_k)
 u_s_ref = np.array(sim_s_ref.get_state("ions"))
@@ -177,7 +177,7 @@ e_s = float(np.abs(u_s - u_s_ref).max())
 chk(e_s == 0.0, "step_cfl stride=2 == step(dt_k) stride=2 over %d steps bit-exact (max|d|=%.2e)"
     % (K, e_s))
 
-sim_s1 = make_compiled(adc.CompiledTime(stride=1))
+sim_s1 = make_compiled(pops.CompiledTime(stride=1))
 for dt_k in dts:
     sim_s1.step(dt_k)
 u_s1 = np.array(sim_s1.get_state("ions"))

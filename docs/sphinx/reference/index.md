@@ -12,7 +12,7 @@ lists what exists. For the design detail (contributors), each page points to the
 
 Scope reminder: the core only exposes generic composable bricks (state, transport,
 source, elliptic right-hand side). A model is a brick composition; no named
-physical scenario (diocotron, euler_poisson...) lives in `adc`. These named compositions
+physical scenario (diocotron, euler_poisson...) lives in `pops`. These named compositions
 are on the application side (repository `adc_cases`).
 
 ```{toctree}

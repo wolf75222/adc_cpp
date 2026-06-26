@@ -1,6 +1,6 @@
 name: Docs
 
-# Lane LOURDE de la documentation : build Sphinx + Doxygen + module Python `_adc`, puis
+# Lane LOURDE de la documentation : build Sphinx + Doxygen + module Python `_pops`, puis
 # deploiement Pages. Elle ne tourne PAS sur les PR ordinaires -- c'est docs-pr.yml (lane legere,
 # sans build) qui garde les PR. DECLENCHEURS :
 #   - push master AVEC "[docs]" dans le message de commit : publie la doc du nouveau master ;
@@ -60,14 +60,14 @@ jobs:
       # numpy est requis a l'IMPORT du module (dsl.py fait `import numpy`) et par autodoc.
       # matplotlib (+ Pillow, tire en dependance) est requis par le tutoriel diocotron que
       # docs/run_doc_examples.py rejoue : make_figures() importe matplotlib et ecrit un GIF via
-      # PillowWriter. On installe avant de compiler/importer adc.
+      # PillowWriter. On installe avant de compiler/importer pops.
       - name: Python deps
         run: |
           pip install --upgrade pip
           pip install numpy matplotlib
           pip install -r docs/sphinx/requirements.txt
 
-      # Cache ccache persistant : le preset auto-detecte ccache (ADC_USE_CCACHE=ON). Persister
+      # Cache ccache persistant : le preset auto-detecte ccache (POPS_USE_CCACHE=ON). Persister
       # ~/.ccache evite de tout recompiler (module + Kokkos FetchContent) a chaque run hebdo.
       - name: Cache ccache (docs)
         uses: actions/cache@v5
@@ -77,7 +77,7 @@ jobs:
           restore-keys: |
             ccache-docs-${{ runner.os }}-
 
-      # TOUTES les etapes (lint, module _adc pour autodoc, sphinx -W, doxygen, site combine) vivent
+      # TOUTES les etapes (lint, module _pops pour autodoc, sphinx -W, doxygen, site combine) vivent
       # dans scripts/build_docs.sh : SOURCE UNIQUE, identique en local et en CI. Le script construit
       # le module via le preset ci-python (pin interpreteur de setup-python ; ninja fourni par apt).
       # LDFLAGS=-fuse-ld=lld : le link du module avec le ld BFD du runner echoue ("failed to set

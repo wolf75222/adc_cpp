@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""adc.time NAME-based block binding -- end-to-end runtime (Spec 3 criterion 23, ADC-457).
+"""pops.time NAME-based block binding -- end-to-end runtime (Spec 3 criterion 23, ADC-457).
 
 A compiled multi-block Program binds its blocks to the System blocks BY NAME, not by add-order. This
 test PROVES the runtime binding by COMPILING a 2-block .so and installing it on Systems whose blocks
@@ -14,7 +14,7 @@ were added in DIFFERENT orders:
 This exercises the AOT .so path: it compiles a problem.so (production model + compiled Program) and
 dlopens it via sim.install_program. That path needs a C++ compiler + Kokkos, so it CANNOT run on a
 host-only Mac -- it SKIPS cleanly there (never faking the engine) and is validated on CI-Kokkos
-(gate-python rebuilds _adc, ci-kokkos-python) and on ROMEO. The codegen ABI export + IR identity are
+(gate-python rebuilds _pops, ci-kokkos-python) and on ROMEO. The codegen ABI export + IR identity are
 covered host-side by test_name_binding_codegen.py.
 
 Runs as a plain script (``python3 test_name_binding_runtime.py``, the CI invocation) and under pytest.
@@ -76,14 +76,14 @@ def _run():
     try:
         import numpy as np
 
-        import adc
-        import adc.time as t
-        from adc import dsl
-    except Exception as exc:  # noqa: BLE001 -- numpy / _adc / adc.time unavailable
-        _skip("adc / adc.time / numpy unavailable: %s" % exc)
+        import pops
+        import pops.time as t
+        from pops import dsl
+    except Exception as exc:  # noqa: BLE001 -- numpy / _pops / pops.time unavailable
+        _skip("pops / pops.time / numpy unavailable: %s" % exc)
 
-    if not hasattr(adc.System(n=8, L=1.0, periodic=True), "install_program"):
-        _skip("_adc lacks the install_program binding (rebuild _adc)")
+    if not hasattr(pops.System(n=8, L=1.0, periodic=True), "install_program"):
+        _skip("_pops lacks the install_program binding (rebuild _pops)")
 
     print("== NAME-based block binding: reversed System add-order matches in-order ==")
     n = 16
@@ -98,20 +98,20 @@ def _run():
 
     # Compile the 2-block .so ONCE (production model + compiled Program). Needs compiler + Kokkos.
     try:
-        comp = adc.compile_problem(model=passive_model(dsl, "nb_model"), time=two_block_program(t))
+        comp = pops.compile_problem(model=passive_model(dsl, "nb_model"), time=two_block_program(t))
     except (RuntimeError, ValueError) as exc:  # no compiler / no Kokkos / .so compile failed
         _skip("compile_problem could not build the .so: %s" % str(exc)[:160])
 
     def make_sim(add_order):
         """A System with the two blocks added in @p add_order, each set to its OWN-named IC."""
-        sim = adc.System(n=n, L=1.0, periodic=True)
+        sim = pops.System(n=n, L=1.0, periodic=True)
         for blk in add_order:
             try:
                 cm = passive_model(dsl, "nb_blk_" + blk).compile(backend="production")
             except RuntimeError as exc:  # no compiler / no Kokkos
                 _skip("model compile could not build the .so: %s" % str(exc)[:160])
-            sim.add_equation(blk, cm, spatial=adc.FiniteVolume(limiter="none", riemann="rusanov"),
-                             time=adc.Explicit(method="euler"))
+            sim.add_equation(blk, cm, spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                             time=pops.Explicit(method="euler"))
         for blk in add_order:
             sim.set_state(blk, ic[blk][None, :, :])
         return sim

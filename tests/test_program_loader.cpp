@@ -2,7 +2,7 @@
 // dlopens a generated problem.so and installs its compiled time Program across the ABI boundary.
 //
 // We compile AT RUNTIME a stub problem.so -- the role the codegen (Phase 2c-ii) will fill -- that
-// exports adc_program_abi_key() + adc_install_program(void* sys); the installer wraps the System in a
+// exports pops_program_abi_key() + pops_install_program(void* sys); the installer wraps the System in a
 // ProgramContext and installs the SAME Forward-Euler closure as the in-process test_program_runtime.
 // We then sim.install_program(so) + sim.step(dt) and check bit-parity against a reference Forward-Euler
 // step computed from the same primitives (solve_fields + eval_rhs + U + dt*R). This validates the
@@ -10,15 +10,15 @@
 //
 // Skips (exit 0) under Kokkos (a nu CPU loader is ABI-incompatible with the device module) or when no
 // C++ compiler is known to the build -- same policy as test_amr_native_loader. CMake injects
-// ADC_TEST_CXX / ADC_TEST_INCLUDE / ADC_TEST_CXX_STD / ADC_TEST_TMPDIR and sets ENABLE_EXPORTS so the
+// POPS_TEST_CXX / POPS_TEST_INCLUDE / POPS_TEST_CXX_STD / POPS_TEST_TMPDIR and sets ENABLE_EXPORTS so the
 // .so resolves the exported System seam symbols against this executable.
 
-#include <adc/mesh/storage/multifab.hpp>
-#include <adc/physics/bricks/source.hpp>                // NoSource
-#include <adc/physics/composition/composite.hpp>        // CompositeModel
-#include <adc/physics/fluids/euler.hpp>                 // Euler
-#include <adc/runtime/builders/compiled/dsl_block.hpp>  // add_compiled_model
-#include <adc/runtime/system.hpp>
+#include <pops/mesh/storage/multifab.hpp>
+#include <pops/physics/bricks/source.hpp>                // NoSource
+#include <pops/physics/composition/composite.hpp>        // CompositeModel
+#include <pops/physics/fluids/euler.hpp>                 // Euler
+#include <pops/runtime/builders/compiled/dsl_block.hpp>  // add_compiled_model
+#include <pops/runtime/system.hpp>
 
 #include <cmath>
 #include <cstdio>
@@ -28,17 +28,17 @@
 #include <string>
 #include <vector>
 
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
 #include <Kokkos_Core.hpp>
 #endif
 
-using namespace adc;
+using namespace pops;
 
 namespace {
 
 struct NoEll {
   template <class State>
-  ADC_HD Real rhs(const State&) const {
+  POPS_HD Real rhs(const State&) const {
     return Real(0);
   }
 };
@@ -72,21 +72,21 @@ void add_gas(System& s) {
 std::string loader_source() {
   // clang-format off
   return R"CPP(
-#include <adc/runtime/program/program_context.hpp>
-#include <adc/runtime/dynamic/abi_key.hpp>
-#include <adc/mesh/storage/multifab.hpp>
-#include <adc/core/foundation/types.hpp>
-extern "C" const char* adc_program_abi_key() { return ADC_ABI_KEY_LITERAL; }
-extern "C" const char* adc_program_name() { return "forward_euler_stub"; }
-extern "C" void adc_install_program(void* sys) {
-  adc::runtime::program::ProgramContext ctx(sys);
+#include <pops/runtime/program/program_context.hpp>
+#include <pops/runtime/dynamic/abi_key.hpp>
+#include <pops/mesh/storage/multifab.hpp>
+#include <pops/core/foundation/types.hpp>
+extern "C" const char* pops_program_abi_key() { return POPS_ABI_KEY_LITERAL; }
+extern "C" const char* pops_program_name() { return "forward_euler_stub"; }
+extern "C" void pops_install_program(void* sys) {
+  pops::runtime::program::ProgramContext ctx(sys);
   ctx.install([ctx](double dt) {
     ctx.solve_fields();
     for (int b = 0; b < ctx.n_blocks(); ++b) {
-      adc::MultiFab& U = ctx.state(b);
-      adc::MultiFab R = ctx.rhs_scratch_like(U);
+      pops::MultiFab& U = ctx.state(b);
+      pops::MultiFab R = ctx.rhs_scratch_like(U);
       ctx.rhs_into(b, U, R);
-      ctx.axpy(U, static_cast<adc::Real>(dt), R);
+      ctx.axpy(U, static_cast<pops::Real>(dt), R);
     }
   });
 }
@@ -99,9 +99,9 @@ bool compile_loader(const std::string& src_path, const std::string& so_path) {
   const std::string cc =
       "/usr/bin/c++";  // xcrun wrapper: resolves the SDK sysroot (same clang family)
 #else
-  const std::string cc = ADC_TEST_CXX;
+  const std::string cc = POPS_TEST_CXX;
 #endif
-  std::string cmd = cc + " -shared -fPIC -std=" + ADC_TEST_CXX_STD + " -O2 -I " + ADC_TEST_INCLUDE +
+  std::string cmd = cc + " -shared -fPIC -std=" + POPS_TEST_CXX_STD + " -O2 -I " + POPS_TEST_INCLUDE +
                     " " + src_path + " -o " + so_path;
 #if defined(__APPLE__)
   cmd += " -undefined dynamic_lookup";  // undefined System symbols resolved at load from the exe
@@ -113,7 +113,7 @@ bool compile_loader(const std::string& src_path, const std::string& so_path) {
 }  // namespace
 
 int main(int argc, char** argv) {
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   (void)argc;
   (void)argv;
   std::printf("skip test_program_loader (backend Kokkos : nu CPU loader incompatible)\n");
@@ -121,7 +121,7 @@ int main(int argc, char** argv) {
 #else
   (void)argc;
   (void)argv;
-  const char* cxx = ADC_TEST_CXX;
+  const char* cxx = POPS_TEST_CXX;
   if (!cxx || cxx[0] == '\0') {
     std::printf("skip test_program_loader (aucun compilateur C++ connu du build)\n");
     return 0;
@@ -149,7 +149,7 @@ int main(int argc, char** argv) {
     Uref[k] = U0[k] + dt * R0[k];
 
   // Compile the stub problem.so and load it via System::install_program.
-  const std::string tmp = std::string(ADC_TEST_TMPDIR) + "/program_loader_" +
+  const std::string tmp = std::string(POPS_TEST_TMPDIR) + "/program_loader_" +
                           std::to_string(static_cast<long>(std::clock()));
   const std::string src = tmp + ".cpp";
   const std::string so = tmp + ".so";
@@ -165,7 +165,7 @@ int main(int argc, char** argv) {
   System sim(cfg);
   add_gas(sim);
   sim.set_state("gas", U0);
-  sim.install_program(so);  // dlopen + ABI check + adc_install_program(this)
+  sim.install_program(so);  // dlopen + ABI check + pops_install_program(this)
   const int step0 = sim.macro_step();
   sim.step(dt);  // SystemStepper dispatches to the installed Program
   const std::vector<double> Up = sim.get_state("gas");

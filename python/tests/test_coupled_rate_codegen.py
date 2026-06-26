@@ -3,7 +3,7 @@
 
 A ``coupled_rate`` operator (collisions / ionization, Spec 3 criterion 27) takes N input state
 spaces and returns a RateBundle (one Rate per block); its component formulas reference cons vars from
-MULTIPLE input states. ``emit_cpp_program`` now lowers it to ONE multi-state ``adc::for_each_cell``
+MULTIPLE input states. ``emit_cpp_program`` now lowers it to ONE multi-state ``pops::for_each_cell``
 kernel filling every block's rate scratch at once -- not independent single-block rates.
 
 This test pins the EMIT + the un-gate + the cons-only deferral (pure Python, no compile): the
@@ -12,17 +12,17 @@ for_each_cell that binds BOTH input states' Array4s, binds ``ne``/``ni`` from th
 writes BOTH block rate scratches, and the per-block out composes in a forward step; a formula that
 references a PRIM var raises the ADC-457 NotImplementedError. The compiled-.so collision STEP (the
 runtime that fills the rate and advances the species) is validated on ROMEO (Kokkos-only AOT), NOT
-here. Real engine only; skips if adc.time is unavailable, never faking.
+here. Real engine only; skips if pops.time is unavailable, never faking.
 
 Runs BOTH as a script (``python3 test_coupled_rate_codegen.py``, the CI-style invocation) and under
-pytest (the test_* functions take no args and importorskip adc.time).
+pytest (the test_* functions take no args and importorskip pops.time).
 """
 import sys
 
 import pytest
 
-adctime = pytest.importorskip("adc.time")
-from adc import dsl, model  # noqa: E402 (after importorskip so a missing adc skips cleanly)
+adctime = pytest.importorskip("pops.time")
+from pops import dsl, model  # noqa: E402 (after importorskip so a missing pops skips cleanly)
 
 
 def _two_fluid_module(electron_expr=None):
@@ -64,15 +64,15 @@ def test_emit_one_multi_state_for_each_cell():
     _mod, P = _two_fluid_program()
     src = P.emit_cpp_program(model=None)
     # ONE shared kernel fills both blocks' rate scratches (not two independent single-block rates).
-    assert src.count("adc::for_each_cell") == 1
+    assert src.count("pops::for_each_cell") == 1
 
 
 def test_emit_binds_both_input_state_array4s():
     _mod, P = _two_fluid_program()
     src = P.emit_cpp_program(model=None)
     # The two species states are ctx.state(0) / ctx.state(1) -> u0 / u1; each binds its OWN read handle.
-    assert "const adc::ConstArray4 u0A = u0.fab(li).const_array();" in src
-    assert "const adc::ConstArray4 u1A = u1.fab(li).const_array();" in src
+    assert "const pops::ConstArray4 u0A = u0.fab(li).const_array();" in src
+    assert "const pops::ConstArray4 u1A = u1.fab(li).const_array();" in src
 
 
 def test_emit_binds_cons_vars_from_respective_states():
@@ -80,8 +80,8 @@ def test_emit_binds_cons_vars_from_respective_states():
     src = P.emit_cpp_program(model=None)
     # ne is component 0 of the electron state (u0), ni component 0 of the ion state (u1): each cons
     # local reads from ITS OWN state's Array4, so the coupled formulas reference the right cells.
-    assert "const adc::Real ne = u0A(i, j, 0);" in src
-    assert "const adc::Real ni = u1A(i, j, 0);" in src
+    assert "const pops::Real ne = u0A(i, j, 0);" in src
+    assert "const pops::Real ni = u1A(i, j, 0);" in src
 
 
 def test_emit_writes_both_block_rate_scratches():
@@ -107,8 +107,8 @@ def test_per_block_out_composes_in_a_forward_step():
     ion_scratch = next(ln.split("=")[0].strip().split()[-1]
                        for ln in src.splitlines()
                        if "ctx.rhs_scratch_like(u1)" in ln)
-    assert ("ctx.axpy(acc" in src) and ("static_cast<adc::Real>(dt), %s);" % electron_scratch) in src
-    assert ("static_cast<adc::Real>(dt), %s);" % ion_scratch) in src
+    assert ("ctx.axpy(acc" in src) and ("static_cast<pops::Real>(dt), %s);" % electron_scratch) in src
+    assert ("static_cast<pops::Real>(dt), %s);" % ion_scratch) in src
 
 
 def test_coupled_rate_with_prim_var_is_deferred():
@@ -165,7 +165,7 @@ def test_read_only_catalyst_input_is_bound():
     src = P.emit_cpp_program(model=None)
     # the catalyst's read handle (3rd input -> u2) and its cons local must be emitted
     assert "u2.fab(li).const_array()" in src, "the catalyst input state's read handle is bound"
-    assert "const adc::Real nn = u2A(i, j, 0);" in src, "the catalyst cons var nn binds from u2"
+    assert "const pops::Real nn = u2A(i, j, 0);" in src, "the catalyst cons var nn binds from u2"
     assert "= (ni + nn);" in src and "= (ne + nn);" in src, "both rates read the catalyst nn"
 
 

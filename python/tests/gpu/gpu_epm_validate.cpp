@@ -1,7 +1,7 @@
 // Validation DEVICE (GH200, Kokkos Cuda) des operateurs elliptiques composables de GeometricMG
 // merges sur master apres #48 : (2) Poisson ECRANTE / Helmholtz div(eps grad phi) - kappa phi = f
 // (#44, set_reaction) et (3) Poisson ANISOTROPE div(diag(eps_x, eps_y) grad phi) = f (#52,
-// set_epsilon_anisotropic). Les noyaux kappa/eps_y vivent dans les for_each_cell ADC_HD du
+// set_epsilon_anisotropic). Les noyaux kappa/eps_y vivent dans les for_each_cell POPS_HD du
 // smoother red-black, du residu et de l'apply (cf. numerics/elliptic/poisson_operator.hpp) : ils
 // s'executent donc sur le device sous le backend Cuda, EXACTEMENT comme le Poisson de base
 // (phase 3). Ce harness rejoue les MMS de tests/test_screened_poisson.cpp et
@@ -12,12 +12,12 @@
 //     Serial par diff_bin (dmax sur CHAQUE cellule, pas seulement une reduction).
 // Portable seriel / Kokkos+CUDA : le MEME .cpp donne l'oracle Serial (exec=Serial) et le run device.
 
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/storage/fab2d.hpp>
-#include <adc/mesh/execution/for_each.hpp>
-#include <adc/mesh/geometry/geometry.hpp>
-#include <adc/mesh/storage/multifab.hpp>
-#include <adc/numerics/elliptic/mg/geometric_mg.hpp>
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/storage/fab2d.hpp>
+#include <pops/mesh/execution/for_each.hpp>
+#include <pops/mesh/geometry/geometry.hpp>
+#include <pops/mesh/storage/multifab.hpp>
+#include <pops/numerics/elliptic/mg/geometric_mg.hpp>
 
 #include <cmath>
 #include <cstdint>
@@ -26,11 +26,11 @@
 #include <string>
 #include <vector>
 
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
 #include <Kokkos_Core.hpp>
 #endif
 
-using namespace adc;
+using namespace pops;
 static constexpr double kPi = 3.14159265358979323846;
 static constexpr double KAPPA = 50.0;  // 1/lambda_D^2 (ecrantage de Debye modere)
 
@@ -133,7 +133,7 @@ static void dump_bin(const std::string& path, const std::vector<double>& v) {
 }
 
 int main(int argc, char** argv) {
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   Kokkos::initialize(argc, argv);
 #else
   (void)argc;
@@ -151,7 +151,7 @@ int main(int argc, char** argv) {
       ++fails;
     }
   };
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   const char* space = Kokkos::DefaultExecutionSpace::name();
 #else
   const char* space = "Serial(host)";
@@ -193,7 +193,7 @@ int main(int argc, char** argv) {
 
   if (fails == 0)
     std::printf("OK gpu_epm_validate (exec=%s)\n", space);
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   Kokkos::finalize();
 #endif
   return fails == 0 ? 0 : 1;

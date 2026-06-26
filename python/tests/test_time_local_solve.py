@@ -1,19 +1,19 @@
-"""adc.time Phase 4 IR ops (epic ADC-399 / ADC-403): named sources + local linear operators.
+"""pops.time Phase 4 IR ops (epic ADC-399 / ADC-403): named sources + local linear operators.
 
 Pins the builder surface for split sources and cell-local implicit solves -- `P.source`,
 `P.linear_source`, `P.apply`, `P.solve_local_linear`, and the operator algebra `P.I - a*L`. These
 build typed IR (validated structurally); the codegen that LOWERS them is a later PR, so
 `emit_cpp_program` still refuses a Program that uses them with a clear NotImplementedError (never a
-mis-lowering). Pure Python (no compile / no _adc runtime); skips if adc is unavailable.
+mis-lowering). Pure Python (no compile / no _pops runtime); skips if pops is unavailable.
 """
 import sys
 
 
-def _adc_time():
+def _pops_time():
     try:
-        import adc.time as t
-    except Exception as exc:  # adc not importable here -> skip, never fake
-        print("skip test_time_local_solve (adc.time unavailable: %s)" % exc)
+        import pops.time as t
+    except Exception as exc:  # pops not importable here -> skip, never fake
+        print("skip test_time_local_solve (pops.time unavailable: %s)" % exc)
         sys.exit(0)
     return t
 
@@ -105,7 +105,7 @@ def test_codegen_refuses_phase4_ops(t):
 
 
 def _run():
-    t = _adc_time()
+    t = _pops_time()
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for fn in fns:
         fn(t)

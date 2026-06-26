@@ -1,8 +1,8 @@
 // ADC-335 (P0-B flux subdivision): compressible (Euler) x HLLC flux only (contact-resolving algebra,
 // one of the two heaviest leaves). See system_compressible_rusanov.cpp.
-#include <adc/runtime/builders/block/block_seam.hpp>
+#include <pops/runtime/builders/block/block_seam.hpp>
 
-namespace adc::detail {
+namespace pops::detail {
 
 BuiltBlock build_block_compressible_hllc(const ModelSpec& model, const BlockBuildArgs& a) {
   return build_block_for_make(CompressibleFlux{Real(model.gamma)}, model, a,
@@ -13,4 +13,4 @@ BuiltBlock build_block_compressible_hllc(const ModelSpec& model, const BlockBuil
                               });
 }
 
-}  // namespace adc::detail
+}  // namespace pops::detail
