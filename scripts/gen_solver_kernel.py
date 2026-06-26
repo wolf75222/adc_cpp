@@ -11,32 +11,25 @@ system, comparing to the native ``pops::richardson_solve``.
 Run standalone (no ``_pops`` extension needed -- the IR-authoring + codegen layers are
 pure Python): ``python3 scripts/gen_solver_kernel.py <out_header>``.
 """
-import importlib.util
+import importlib
 import os
 import sys
 import types
 
 
 def _load_lib():
-    """Load ``pops.lib`` (and its ``pops.time`` dependency) WITHOUT importing the ``pops``
-    package ``__init__`` (which needs the compiled ``_pops`` extension). The IR-authoring
-    and codegen layers are pure Python, so they load standalone from source."""
+    """Load ``pops.lib`` from source WITHOUT importing the ``pops`` package ``__init__``
+    (which needs the compiled ``_pops`` extension). The IR-authoring and codegen layers
+    are pure Python, so ``pops.lib`` and its ``pops.ir`` / ``pops.model`` dependencies
+    import standalone under a synthetic ``pops`` package rooted at the source tree. Using
+    the normal import machinery resolves ``pops.lib`` whether it is a flat module or a
+    package (Spec 4) and follows its submodule imports without hard-coded file paths."""
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     pops_dir = os.path.join(root, "python", "pops")
     pkg = types.ModuleType("pops")
     pkg.__path__ = [pops_dir]
     sys.modules["pops"] = pkg
-
-    def load(name):
-        spec = importlib.util.spec_from_file_location(
-            "pops." + name, os.path.join(pops_dir, name + ".py"))
-        module = importlib.util.module_from_spec(spec)
-        sys.modules["pops." + name] = module
-        spec.loader.exec_module(module)
-        return module
-
-    load("time")
-    return load("lib")
+    return importlib.import_module("pops.lib")
 
 
 # omega / tol of the generated Richardson solver. They MUST match the constants the C++ validation
