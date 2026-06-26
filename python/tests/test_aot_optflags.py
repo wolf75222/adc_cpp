@@ -23,6 +23,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 import pops  # noqa: E402  (the .so paths require the native module, like the neighboring AOT tests)
 from pops import dsl  # noqa: E402
+from pops.codegen import compile as _cg_compile  # noqa: E402  (compile_aot + its toolchain helpers live here)
 from test_dsl_phase_a import INCLUDE, build_euler, initial_state  # noqa: E402
 
 
@@ -39,7 +40,10 @@ def _capture_compile_aot_cmd(optflags_env):
     We neutralize the toolchain probes (Kokkos / std / compiler) and replace _run_compile with a
     capture: the test stays valid even without a compiler or Kokkos installed."""
     saved_env = os.environ.get("POPS_DSL_OPTFLAGS")
-    saved = {nm: getattr(dsl, nm) for nm in (
+    # compile_aot is now pops.codegen.compile.compile_aot and calls these helpers as its own
+    # module globals (imported there from codegen.toolchain). Patching dsl no longer intercepts;
+    # patch the names where compile_aot actually resolves them.
+    saved = {nm: getattr(_cg_compile, nm) for nm in (
         "_run_compile", "_native_kokkos_root", "_native_kokkos_compiler",
         "_native_kokkos_flags", "_probe_cxx_std")}
     if optflags_env is None:
@@ -50,11 +54,11 @@ def _capture_compile_aot_cmd(optflags_env):
         def _grab(cmd, what):
             raise _Captured(cmd)
 
-        dsl._run_compile = _grab
-        dsl._native_kokkos_root = lambda: "/dummy/kokkos"     # Kokkos-only guard cleared
-        dsl._native_kokkos_compiler = lambda cxx=None: "c++"  # no real which()
-        dsl._native_kokkos_flags = lambda: ([], [])           # no Kokkos includes/libs
-        dsl._probe_cxx_std = lambda cc, std: std              # no -fsyntax-only probe
+        _cg_compile._run_compile = _grab
+        _cg_compile._native_kokkos_root = lambda: "/dummy/kokkos"     # Kokkos-only guard cleared
+        _cg_compile._native_kokkos_compiler = lambda cxx=None: "c++"  # no real which()
+        _cg_compile._native_kokkos_flags = lambda: ([], [])           # no Kokkos includes/libs
+        _cg_compile._probe_cxx_std = lambda cc, std: std              # no -fsyntax-only probe
         m = build_euler("euler_optflags")
         try:
             m._m.compile_aot(os.path.join(tempfile.gettempdir(), "unused_optflags.so"), INCLUDE)
@@ -63,7 +67,7 @@ def _capture_compile_aot_cmd(optflags_env):
         raise AssertionError("compile_aot did not reach _run_compile (capture missed)")
     finally:
         for nm, fn in saved.items():
-            setattr(dsl, nm, fn)
+            setattr(_cg_compile, nm, fn)
         if saved_env is None:
             os.environ.pop("POPS_DSL_OPTFLAGS", None)
         else:
