@@ -236,14 +236,17 @@ pops_add_test(test_generic_krylov)
 find_package(Python3 COMPONENTS Interpreter QUIET)
 if(Python3_Interpreter_FOUND)
   set(_pops_gen_solver_hpp "${CMAKE_CURRENT_BINARY_DIR}/pops_generated_solver.hpp")
+  # The generator imports the pure-Python pops.lib (+ its ir/model deps) from source, so the
+  # header tracks every pops Python module rather than the (now restructured) flat files it used
+  # to hard-code. GLOB_RECURSE + CONFIGURE_DEPENDS re-globs when the file set changes (Spec 4).
+  file(GLOB_RECURSE _pops_gen_solver_pysrc CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/python/pops/*.py")
   add_custom_command(
     OUTPUT "${_pops_gen_solver_hpp}"
     COMMAND ${CMAKE_COMMAND} -E env "PYTHONDONTWRITEBYTECODE=1"
             "${Python3_EXECUTABLE}" "${CMAKE_SOURCE_DIR}/scripts/gen_solver_kernel.py"
             "${_pops_gen_solver_hpp}"
     DEPENDS "${CMAKE_SOURCE_DIR}/scripts/gen_solver_kernel.py"
-            "${CMAKE_SOURCE_DIR}/python/pops/lib.py"
-            "${CMAKE_SOURCE_DIR}/python/pops/time.py"
+            ${_pops_gen_solver_pysrc}
     COMMENT "Generating custom-solver C++ kernel (pops.lib.generate_solver_cpp, ADC-462)"
     VERBATIM)
   add_custom_target(pops_gen_solver_kernel DEPENDS "${_pops_gen_solver_hpp}")
