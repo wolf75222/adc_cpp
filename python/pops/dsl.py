@@ -95,6 +95,21 @@ from pops.codegen.cpp_writer import (  # noqa: E402,F401
     _cpp_expand, _cpp_cse, _cse_emit, _collect_eig_witnesses, _eig_witness_helpers,
     _count_cons_denoms, _recip_rewrite, _dir_key, _roe_validate, _cpp_roe,
 )
+from pops.codegen.compile import (  # noqa: E402,F401
+    _BACKEND_CAPS, _BACKENDS,
+    model_hash as _cg_model_hash,
+    adder_for as _cg_adder_for,
+    emit_cpp_so_source as _cg_emit_cpp_so_source,
+    emit_cpp_aot_source as _cg_emit_cpp_aot_source,
+    emit_cpp_native_loader as _cg_emit_cpp_native_loader,
+    compile_so as _cg_compile_so,
+    compile_aot as _cg_compile_aot,
+    compile_native as _cg_compile_native,
+    compile_or_jit as _cg_compile_or_jit,
+    compile_model as _cg_compile_model,
+    compile_problem, _module_to_model,
+)
+from pops.codegen.loader import CompiledModel, CompiledProblem  # noqa: E402,F401
 
 
 # --- Aux channel: canonical layout ------------------------------------------
@@ -1562,380 +1577,41 @@ class HyperbolicModel:
         return _cg._emit_metadata(self, model_alias)
 
     def emit_cpp_so_source(self, name=None, hoist_reciprocals=False):
-        """Source of the JIT library (backend "jit"): the FULL MODEL as CompositeModel<GenHyp,
-        GenSrc, GenEll> behind an extern "C" factory (pops_model_nvars / pops_make_model /
-        pops_destroy_model via pops::ModelAdapter). This is what compile_so compiles and what
-        System.add_dynamic_block loads as a coupled block with VIRTUAL DISPATCH (host prototyping)."""
-        # PROJECTION ponctuelle (ADC-177) : le chemin JIT (IModel, dispatch virtuel) ne la transporte
-        # pas -- elle serait IGNOREE en silence (le bloc dynamique n'a pas de hook post-pas). Rejet
-        # explicite (regle : jamais d'option ignoree) ; backends 'aot' / 'production' la portent.
-        if self._proj is not None:
-            raise ValueError("backend 'prototype' (JIT, IModel) : projection ponctuelle "
-                             "(m.projection) non transportee par ce chemin ; utiliser "
-                             "backend='aot' ou 'production'")
-        # NAMED elliptic fields (ADC-428): the JIT path (extern "C" factory, IModel virtual dispatch)
-        # has NO hook to register the field on the System -- _emit_bricks would emit the named RHS brick
-        # but it would be silently dropped, failing only at runtime ("System: unknown named elliptic
-        # field"). Reject loud here, like the target='amr_system' guard; available on backend='production'.
-        if self._elliptic_fields:
-            raise NotImplementedError(
-                "elliptic_field (named multi-elliptic, ADC-428) on backend='jit' is not supported "
-                "yet; the JIT extern-C factory has no hook to register named elliptic fields on the "
-                "System. Use backend='production'. Declared: %s" % sorted(self._elliptic_fields))
-        nv, bricks, composite = self._emit_bricks(name, hoist_reciprocals=hoist_reciprocals)
-        return ('#include <pops/runtime/dynamic/dynamic_model.hpp>\n'
-                '#include <pops/physics/bricks/bricks.hpp>\n'  # CompositeModel + NoSource + bricks
-                '#include <pops/core/state/variables.hpp>\n'
-                + bricks
-                + '\nnamespace pops_generated { using JitModel = %s; }\n' % composite  # comma-free alias (metadata macro)
-                + 'extern "C" int pops_model_nvars() { return %d; }\n' % nv
-                + 'extern "C" void* pops_make_model() { return new pops::ModelAdapter<pops_generated::JitModel>(); }\n'
-                + 'extern "C" void pops_destroy_model(void* p) { delete static_cast<pops::IModel<%d>*>(p); }\n' % nv
-                + self._emit_metadata("pops_generated::JitModel"))
+        """Thin wrapper: delegates to pops.codegen.compile.emit_cpp_so_source."""
+        return _cg_emit_cpp_so_source(self, name=name, hoist_reciprocals=hoist_reciprocals)
 
     def compile_so(self, so_path, include=None, name=None, cxx=None, std="c++20",
                    hoist_reciprocals=False):
-        """JIT: generate the FULL MODEL (emit_cpp_so_source) and compile a shared library
-        loadable by System.add_dynamic_block (dlopen). The .so exposes a CompositeModel<hyperbolic,
-        source, elliptic>: the dynamic block applies the flux AND the source, and contributes to the
-        system Poisson via elliptic_rhs (a real coupled block, no longer just transport). include = pops
-        headers directory (None -> auto-detected via pops_include()); cxx = compiler (default
-        c++/g++/clang++). Returns so_path. Requires set_primitive_state(...) and
-        set_conservative_from([...]) (like emit_cpp_brick)."""
-        import os
-        import tempfile
-
-        if include is None:
-            include = pops_include()
-        src = self.emit_cpp_so_source(name=name, hoist_reciprocals=hoist_reciprocals)
-        cc = _default_cxx(cxx)
-        if not cc:
-            raise RuntimeError("compile_so: no C++ compiler found")
-        std = _probe_cxx_std(cc, std)  # ACTIONABLE error if the std is not supported (vs raw error)
-        with tempfile.TemporaryDirectory() as tmp:
-            cpp = os.path.join(tmp, "model.cpp")
-            with open(cpp, "w") as f:
-                f.write(src)
-            _run_compile([cc, "-shared", "-fPIC", "-std=" + std, "-O2", "-I", include, cpp,
-                          "-o", so_path], "backend jit, compile_so")
-        return so_path
+        """Thin wrapper: delegates to pops.codegen.compile.compile_so."""
+        return _cg_compile_so(self, so_path, include=include, name=name, cxx=cxx, std=std,
+                              hoist_reciprocals=hoist_reciprocals)
 
     def emit_cpp_aot_source(self, name=None, hoist_reciprocals=False):
-        """Source of the AOT library (backend "compile"): the FULL MODEL as CompositeModel<...>
-        behind the extern "C" ABI of compiled_block_abi.hpp. The .so RUNS the PRODUCTION path
-        (assemble_rhs<Limiter, Flux>, the core's SSPRK2/IMEX) on the generated model: inlined numerics,
-        identical to a native add_block block. As opposed to the "jit" backend (IModel, virtual dispatch)."""
-        # NAMED elliptic fields (ADC-428): the flat-ABI loader macro (POPS_DEFINE_COMPILED_BLOCK) has NO
-        # mechanism to call register_elliptic_field / set_block_elliptic_field, so _emit_bricks would emit
-        # the named RHS brick but the field would be silently dropped, failing only at runtime ("System:
-        # unknown named elliptic field"). Reject loud here, like the target='amr_system' guard in
-        # emit_cpp_native_loader; the named runtime is available on backend='production' (native loader).
-        if self._elliptic_fields:
-            raise NotImplementedError(
-                "elliptic_field (named multi-elliptic, ADC-428) on backend='aot' is not supported yet; "
-                "the flat-ABI compiled block cannot register named elliptic fields on the System. Use "
-                "backend='production'. Declared: %s" % sorted(self._elliptic_fields))
-        nv, bricks, composite = self._emit_bricks(name, hoist_reciprocals=hoist_reciprocals)
-        return ('#include <pops/runtime/builders/compiled/compiled_block_abi.hpp>\n'
-                '#include <pops/physics/bricks/bricks.hpp>\n'  # CompositeModel + NoSource + bricks
-                '#include <pops/core/state/variables.hpp>\n'
-                + bricks
-                + '\nnamespace pops_generated { using AotModel = %s; }\n' % composite
-                + 'POPS_DEFINE_COMPILED_BLOCK(pops_generated::AotModel)\n'
-                + self._emit_metadata("pops_generated::AotModel"))  # comma-free alias (metadata macro)
+        """Thin wrapper: delegates to pops.codegen.compile.emit_cpp_aot_source."""
+        return _cg_emit_cpp_aot_source(self, name=name, hoist_reciprocals=hoist_reciprocals)
 
     def compile_aot(self, so_path, include=None, name=None, cxx=None, std="c++20",
                     hoist_reciprocals=False):
-        """Backend "compile" (AOT): generate the FULL MODEL (emit_cpp_aot_source) and compile a .so
-        loadable by System.add_compiled_block. Unlike the "jit" backend (compile_so: IModel,
-        virtual dispatch, host Rusanov), the block here runs the PRODUCTION path (HLLC/Roe flux at
-        will, order 2, SSPRK2/IMEX) on the generated model -- numerics identical to a native block.
-        include = pops headers directory (None -> auto-detected via pops_include()); cxx = compiler.
-        Returns so_path.
-
-        KOKKOS-ONLY: the AOT model includes the pops headers (multifab/for_each), which do NOT compile
-        without POPS_HAS_KOKKOS. So we compile the .so WITH Kokkos (same flags as the native loader), which
-        also aligns its ABI with the _pops module (also Kokkos). An installed Kokkos must be visible
-        via POPS_KOKKOS_ROOT / Kokkos_ROOT (Serial is enough on CPU)."""
-        import os
-        import tempfile
-
-        if include is None:
-            include = pops_include()
-        src = self.emit_cpp_aot_source(name=name, hoist_reciprocals=hoist_reciprocals)
-        if _native_kokkos_root() is None:
-            raise RuntimeError(
-                "compile_aot: adc_cpp is Kokkos-only -- the AOT model includes the pops headers which "
-                "require Kokkos. Point at an installed Kokkos via POPS_KOKKOS_ROOT (or Kokkos_ROOT), e.g. "
-                "`export POPS_KOKKOS_ROOT=/path/to/kokkos` (Serial is enough on CPU). "
-                "Run `python -c \"import pops; pops.doctor()\"` for a full diagnosis and copy-paste fixes.")
-        cc = _native_kokkos_compiler(cxx)
-        if not cc:
-            raise RuntimeError("compile_aot: no C++ compiler found")
-        std = _probe_cxx_std(cc, std)  # ACTIONABLE error if the std is not supported (vs raw error)
-        kokkos_compile_flags, kokkos_link_flags = _native_kokkos_flags()
-        mpi_compile_flags = _native_mpi_flags()  # ADC-319: real comm.hpp MPI seam (else serial stubs)
-        # Like the native loader, the AOT .so leaves the Kokkos symbols UNDEFINED (resolved at load
-        # against the Kokkos runtime already loaded by _pops -- no 2nd copy). macOS/Apple-ld then requires
-        # -undefined dynamic_lookup (on ELF/Linux -shared already allows it; the option is NOT GNU ld's).
-        link_extra = ["-undefined", "dynamic_lookup"] if sys.platform == "darwin" else []
-        with tempfile.TemporaryDirectory() as tmp:
-            cpp = os.path.join(tmp, "model_aot.cpp")
-            with open(cpp, "w") as f:
-                f.write(src)
-            # Same optimization flags as native (identical production path): at -O2 without
-            # -DNDEBUG the marshaled kernel is ~1.48x. $POPS_DSL_OPTFLAGS overrides (cf. _dsl_optflags).
-            _run_compile([cc, "-shared", "-fPIC", "-std=" + std, *_dsl_optflags(), "-I", include]
-                         + kokkos_compile_flags + mpi_compile_flags + link_extra
-                         + [cpp, "-o", so_path] + kokkos_link_flags,
-                         "backend aot, compile_aot")
-        return so_path
+        """Thin wrapper: delegates to pops.codegen.compile.compile_aot."""
+        return _cg_compile_aot(self, so_path, include=include, name=name, cxx=cxx, std=std,
+                               hoist_reciprocals=hoist_reciprocals)
 
     def emit_cpp_native_loader(self, name=None, target="system", hoist_reciprocals=False):
-        """Source of the NATIVE LOADER (backend "production"): the FULL MODEL as CompositeModel<...>
-        behind a THIN extern "C" ABI.
-
-        Unlike the "aot" backend (emit_cpp_aot_source: flat array ABI, where the .so
-        recomputes everything on a local grid and marshals the arrays), the native loader does NOT carry
-        the numerics: it merely INSTALLS the generated model as a NATIVE block of the already-built
-        facade, via the header template pops::add_compiled_model<ProdModel>. That template builds the
-        closures on the facade's REAL CONTEXT -> the block then runs the SAME path as
-        add_block, ZERO-COPY, device-clean (named functors).
-
-        @p target: "system" (default) | "amr_system". Selects the targeted facade and thus the
-        add_compiled_model OVERLOAD called:
-
-        - "system": pops::System -> add_compiled_model(System&, ..., evolve); flat single-level
-          block (closures on grid_context, add_block production path).
-        - "amr_system": pops::AmrSystem -> add_compiled_model(AmrSystem&, ...); single block carried
-          over the AMR hierarchy (conservative reflux, regrid). NO evolve parameter (single-block AMR).
-
-        Emitted extern "C" symbols:
-
-        - pops_native_abi_key(): ABI key frozen at the LOADER's compilation, emitted as a preprocessor
-          LITERAL (POPS_ABI_KEY_LITERAL) and NOT via the inline function abi_key_string(): under
-          ELF/RTLD_GLOBAL, an inline (weak linkage) would be interposed toward the module's copy and
-          the loader would return the MODULE's key (tautological guard, never a rejection -- a real CI
-          bug when gcc stops inlining). add_native_block compares it to the module's abi_key() -> explicit
-          error if headers / compiler / standard diverge (no silent UB).
-          Common to both targets.
-        - pops_install_native (target="system") OR pops_install_native_amr (target="amr_system"):
-          reinterpret_cast<pops::System*|pops::AmrSystem*>(sys) then add_compiled_model<ProdModel>(...).
-          The scheme passes through flat arguments (strings + double + int); no C++ object
-          crosses the ABI in THIS direction (only the facade* is taken by reference on the loader side, hence
-          the requirement of an identical ABI verified by the key). DISTINCT symbol per target: a System
-          loader cannot be wired onto AmrSystem.add_native_block, and vice versa."""
-        if target not in ("system", "amr_system"):
-            raise ValueError("emit_cpp_native_loader: target 'system' | 'amr_system' (got %r)"
-                             % (target,))
-        nv, bricks, composite = self._emit_bricks(name, hoist_reciprocals=hoist_reciprocals)
-        nm = name or (self.name.capitalize() + "Gen")  # brick struct prefix (matches _emit_bricks)
-        ell_field_regs = self._elliptic_field_registrations(nm)  # ADC-428 named elliptic fields
-        # std headers FIRST (before any namespace). MSVC: a #include <std> while an pops namespace
-        # is open makes std seen as pops::std (<vector> errors); g++ tolerates it because already included via
-        # guard. Hoisting them here makes the brick-internal #include std harmless (no-op guard).
-        head = ('#include <cmath>\n'
-                '#include <vector>\n'
-                '#include <array>\n'
-                '#include <cstddef>\n'
-                '#include <string>\n'
-                '#include <pops/runtime/dynamic/abi_key.hpp>\n'         # POPS_ABI_KEY_LITERAL (key frozen at compile)
-                '#include <pops/physics/bricks/bricks.hpp>\n'          # CompositeModel + NoSource + bricks
-                '#include <pops/core/state/variables.hpp>\n')
-        # Header template of the target: dsl_block.hpp (System) or amr_dsl_block.hpp (AmrSystem). Included
-        # selectively so as not to pull the AMR machinery into a System loader (and vice versa).
-        head += ('#include <pops/runtime/builders/compiled/dsl_block.hpp>\n' if target == "system"
-                 else '#include <pops/runtime/builders/compiled/amr_dsl_block.hpp>\n')
-        # preprocessor LITERAL, no call to abi_key_string(): an inline would be interposed
-        # (ELF/RTLD_GLOBAL) toward the module's copy -> module's key returned -> tautological guard.
-        key = ('#if defined(_WIN32)\n'
-               '#define POPS_LOADER_API extern "C" __declspec(dllexport)\n'
-               '#else\n'
-               '#define POPS_LOADER_API extern "C"\n'
-               '#endif\n'
-               'POPS_LOADER_API const char* pops_native_abi_key() {\n'
-               '  return POPS_ABI_KEY_LITERAL;\n'
-               '}\n')
-        if target == "system":
-            # pos_floor (ADC-76, Zhang-Shu positivity limiter): final flat argument, marshaled
-            # down to the loader's make_block via add_compiled_model. Old signature = old .so =
-            # rejected by the ABI key (the headers changed), never a wrong argument layout.
-            # NAMED elliptic fields (ADC-428): after the block is installed, register each named field's
-            # aux output components on the System and attach its per-block RHS closure
-            # (make_poisson_rhs of the self-contained brick). solve_fields(field=name) then drives a
-            # SECOND elliptic solve. Empty (no named field) -> byte-identical to the historical loader.
-            ell_field_lines = "".join(
-                '  s->register_elliptic_field("%s", %d, %d, %d);\n'
-                '  s->set_block_elliptic_field(name, "%s", pops::make_poisson_rhs(%s{}));\n'
-                % (fld, phi_c, gx_c, gy_c, fld, brick)
-                for (fld, brick, phi_c, gx_c, gy_c) in ell_field_regs)
-            install = ('POPS_LOADER_API void pops_install_native(void* sys, const char* name, const char* limiter,\n'
-                       '                                    const char* riemann, const char* recon,\n'
-                       '                                    const char* time, double gamma, int substeps,\n'
-                       '                                    int evolve, int stride, double pos_floor) {\n'
-                       '  pops::System* s = reinterpret_cast<pops::System*>(sys);\n'
-                       '  pops::add_compiled_model<pops_generated::ProdModel>(*s, name, pops_generated::ProdModel{},\n'
-                       '                                                    limiter, riemann, recon, time, gamma,\n'
-                       '                                                    substeps, evolve != 0, stride,\n'
-                       '                                                    pos_floor);\n'
-                       + ell_field_lines +
-                       '}\n')
-        else:  # amr_system: AmrSystem overload (no evolve parameter, single-block AMR)
-            # NAMED elliptic fields (ADC-428) are CARTESIAN-System only for now: the AMR named-elliptic
-            # runtime (a second elliptic solve over the AMR hierarchy) is a future extension. Reject
-            # them loud rather than silently dropping the field (the .so would compile but never solve).
-            if ell_field_regs:
-                raise NotImplementedError(
-                    "elliptic_field (named multi-elliptic, ADC-428) on target='amr_system' is not "
-                    "supported yet; it is available on target='system' (cartesian). Declared: %s"
-                    % sorted(f for (f, *_rest) in ell_field_regs))
-            # pos_floor (ADC-322, Zhang-Shu positivity limiter): final flat argument, marshaled down to
-            # add_compiled_model -> set_compiled_block (mono via AmrBuildParams::pos_floor, multi via the
-            # AmrCompiledBlockBuilder slot). stride / implicit_vars / implicit_roles stay at their defaults
-            # (the AMR .so ABI does not transport them; rejected at the facade). An older 8-argument
-            # loader carries a pre-floor ABI key and is rejected at load, so the layout never mismatches.
-            install = ('POPS_LOADER_API void pops_install_native_amr(void* sys, const char* name,\n'
-                       '                                        const char* limiter, const char* riemann,\n'
-                       '                                        const char* recon, const char* time,\n'
-                       '                                        double gamma, int substeps, double pos_floor) {\n'
-                       '  pops::AmrSystem* s = reinterpret_cast<pops::AmrSystem*>(sys);\n'
-                       '  pops::add_compiled_model<pops_generated::ProdModel>(*s, name, pops_generated::ProdModel{},\n'
-                       '                                                    limiter, riemann, recon, time, gamma,\n'
-                       '                                                    substeps, /*stride=*/1,\n'
-                       '                                                    /*implicit_vars=*/{},\n'
-                       '                                                    /*implicit_roles=*/{}, pos_floor);\n'
-                       '}\n')
-        return (head
-                + bricks
-                + '\nnamespace pops_generated { using ProdModel = %s; }\n' % composite  # comma-free alias
-                + key
-                + install
-                + self._emit_metadata("pops_generated::ProdModel"))  # names/roles/gamma (diagnostic, like AOT/JIT)
+        """Thin wrapper: delegates to pops.codegen.compile.emit_cpp_native_loader."""
+        return _cg_emit_cpp_native_loader(self, name=name, target=target,
+                                          hoist_reciprocals=hoist_reciprocals)
 
     def compile_native(self, so_path, include=None, name=None, cxx=None, std="c++23", target="system",
                        hoist_reciprocals=False):
-        """Backend "production": generate the NATIVE LOADER (emit_cpp_native_loader) and compile it into a
-        .so loadable by System.add_native_block (target="system") or AmrSystem.add_native_block
-        (target="amr_system"). The .so inlines add_compiled_model<ProdModel>: the block runs the
-        NATIVE zero-copy path (strict parity with add_block / add_compiled_model<>).
-
-        @p target: "system" (default) | "amr_system" (cf. emit_cpp_native_loader). Selects the
-        targeted facade and thus the header template + the installation symbol emitted.
-
-        The loader calls out-of-line methods of the _pops module (install_block / grid_context /
-        ensure_aux_width on the System side; set_compiled_block on the AmrSystem side) DEFINED elsewhere: so we
-        compile with '-undefined dynamic_lookup' (macOS) to allow these undefined ones (resolved at
-        runtime against the already-loaded module; cf. add_native_block). We also bake
-        -DPOPS_HEADER_SIG=<signature> IDENTICAL to the module's so that the ABI keys match when
-        the headers match. std: a std different from the module would change __cplusplus hence the key ->
-        explicit rejection; the callers (Model.compile/HybridModel.compile) therefore default to the
-        loader's standard (loader_cxx_std: c++20 under Kokkos, c++23 otherwise) and not c++23 hard-coded.
-        include = pops headers directory (None -> auto-detected via pops_include()); cxx = compiler.
-        Returns so_path."""
-        import os
-        import sys
-        import tempfile
-
-        if include is None:
-            include = pops_include()
-        # PRE-DLOPEN GUARD: headers != those of the _pops build -> clear error HERE ("rebuild the
-        # module") instead of a cryptic dlopen 'symbol not found' in add_native_block. Returns the
-        # computed signature (reused for -DPOPS_HEADER_SIG: a single walk+sha256, not two).
-        sig = _check_headers_match_module(include)
-        _warn_kokkos_parity()  # Kokkos module + serial loader (or the reverse) -> warn, do not block
-        src = self.emit_cpp_native_loader(name=name, target=target,
-                                          hoist_reciprocals=hoist_reciprocals)
-        cc = _native_kokkos_compiler(cxx)
-        if not cc:
-            raise RuntimeError("compile_native: no C++ compiler found")
-        # Probe BEFORE compilation: if the compiler does not support the standard (real case: old
-        # gcc/clang of a conda env picked from the PATH), an actionable error instead of the raw error
-        # "invalid value 'c++23'". May fall back to the c++2b spelling (same level).
-        std = _probe_cxx_std(cc, std)
-        # -DPOPS_HEADER_SIG: SAME signature as the module build (ABI key concordance).
-        #
-        # (1) BACKEND PARITY (most important for scaling): if _pops is compiled with Kokkos
-        # (OpenMP/CUDA), the loader MUST be too. The header-only templates (assemble_rhs /
-        # for_each_cell) compiled WITHOUT -DPOPS_HAS_KOKKOS instantiate on the SERIAL fallback: the
-        # DSL block stays zero-copy but does NOT scale with threads/GPU (ROMEO measurement: DSL warm ~341 ms
-        # invariant for threads=1/4/8 whereas the native scales 292->239->177). _native_kokkos_flags() adds
-        # -DPOPS_HAS_KOKKOS + Kokkos includes/libs + -fopenmp when POPS_KOKKOS_ROOT (or Kokkos_ROOT)
-        # points at an install; otherwise the historical serial behavior. The compiler follows the backend:
-        # g++ (OpenMP) by default, nvcc_wrapper ONLY if explicit (CUDA).
-        #
-        # (2) OPTIMIZATION PARITY: at -O2 without -DNDEBUG the generated kernel is ~1.48x the native
-        # (hot-loop asserts + weak vectorization); -O3 -DNDEBUG => parity (ROMEO measurement CV<1%, ratio 1.04x). These
-        # flags affect NEITHER the ABI NOR portability. $POPS_DSL_OPTFLAGS overrides (e.g. add
-        # -march=native: the .so being JIT-compiled on the machine -> ~0.88x the generic native; not
-        # default because a shared .so cache reused on a different micro-arch = illegal-instr risk).
-        kokkos_compile_flags, kokkos_link_flags = _native_kokkos_flags()
-        mpi_compile_flags = _native_mpi_flags()  # ADC-319: real comm.hpp MPI seam (else serial stubs)
-        with tempfile.TemporaryDirectory() as tmp:
-            cpp = os.path.join(tmp, "model_native.cpp")
-            # Windows: bake POPS_HEADER_SIG via #define AT THE TOP of the source (quoting an inline
-            # macro string on the cl command line is unmanageable); POSIX keeps the historical -D below.
-            src_eff = ('#define POPS_HEADER_SIG "%s"\n' % sig + src) if sys.platform == "win32" else src
-            with open(cpp, "w") as f:
-                f.write(src_eff)
-            if sys.platform == "win32":
-                # MSVC/clang-cl (ADC-100): .dll linked against kokkoscore.lib (Kokkos SHARED) + _pops.lib
-                # (System POPS_EXPORT symbols). cl accepts -D/-I; output /Fe; libs after /link. No
-                # RTLD_GLOBAL: undefined symbols are resolved at the .dll LINK step (import libraries).
-                pops_lib = _pops_import_lib()
-                if not pops_lib:
-                    raise RuntimeError(
-                        "compile_native: _pops.lib not found next to the _pops module (required to "
-                        "link the DSL .dll; rebuild _pops with POPS_EXPORT_BUILDING_MODULE).")
-                # /DNOMINMAX: windows.h (pulled by dynlib.hpp) must not define min/max (breaks the STL).
-                # /bigobj: large template TU. NO /Zc:__cplusplus: keep __cplusplus aligned with the
-                # module build (otherwise the ABI key diverges).
-                cl_flags = (["/nologo", "/LD", "/std:" + std, "/O2", "/DNDEBUG", "/EHsc",
-                             "/permissive-", "/Zc:preprocessor", "/DNOMINMAX", "/bigobj"]
-                            + kokkos_compile_flags + mpi_compile_flags)
-                cmd = ([cc] + cl_flags + ["-I", include, cpp,
-                        "/Fe:" + so_path, "/Fo" + tmp + os.sep,
-                        "/link"] + kokkos_link_flags + [pops_lib])
-            else:
-                optflags = _dsl_optflags()
-                flags = ["-shared", "-fPIC", "-std=" + std, *optflags,
-                         "-DPOPS_HEADER_SIG=\"%s\"" % sig, *kokkos_compile_flags, *mpi_compile_flags]
-                # macOS/Apple-ld: explicitly allow undefined symbols (resolved at runtime).
-                if sys.platform == "darwin":
-                    flags += ["-undefined", "dynamic_lookup"]
-                cmd = [cc, *flags, "-I", include, cpp, "-o", so_path, *kokkos_link_flags]
-            _run_compile(cmd, "backend production, compile_native")
-        return so_path
+        """Thin wrapper: delegates to pops.codegen.compile.compile_native."""
+        return _cg_compile_native(self, so_path, include=include, name=name, cxx=cxx, std=std,
+                                  target=target, hoist_reciprocals=hoist_reciprocals)
 
     def compile_or_jit(self, so_path, include=None, mode="jit", name=None, cxx=None, std="c++20",
                        target="system", hoist_reciprocals=False):
-        """Unified API (facade of the ideal m.compile_or_jit()) selecting the backend:
-
-        - mode="jit" -> compile_so (IModel, virtual dispatch: host prototyping, to be wired via
-          System.add_dynamic_block);
-        - mode="compile" -> compile_aot (AOT production path, numerically identical to native: to be
-          wired via System.add_compiled_block);
-        - mode="native" -> compile_native (native zero-copy loader: add_compiled_model<> via
-          System.add_native_block or AmrSystem.add_native_block; "production" path).
-
-        @p target: "system" (default) | "amr_system". ONLY consumed by mode="native" (choice of
-        the target facade, cf. compile_native). The other modes (jit/compile) target only System;
-        a target="amr_system" there is rejected (the AMR .so path exists only for the native backend)."""
-        if mode == "jit":
-            if target != "system":
-                raise ValueError("compile_or_jit: target='amr_system' not supported in mode 'jit' "
-                                 "(the AMR path exists only for mode='native')")
-            return self.compile_so(so_path, include, name=name, cxx=cxx, std=std,
-                                   hoist_reciprocals=hoist_reciprocals)
-        if mode == "compile":
-            if target != "system":
-                raise ValueError("compile_or_jit: target='amr_system' not supported in mode 'compile' "
-                                 "(the AMR path exists only for mode='native')")
-            return self.compile_aot(so_path, include, name=name, cxx=cxx, std=std,
-                                    hoist_reciprocals=hoist_reciprocals)
-        if mode == "native":
-            return self.compile_native(so_path, include, name=name, cxx=cxx, std=std, target=target,
-                                       hoist_reciprocals=hoist_reciprocals)
-        raise ValueError("compile_or_jit: mode 'jit' | 'compile' | 'native' (received %r)" % mode)
+        """Thin wrapper: delegates to pops.codegen.compile.compile_or_jit."""
+        return _cg_compile_or_jit(self, so_path, include=include, mode=mode, name=name, cxx=cxx,
+                                  std=std, target=target, hoist_reciprocals=hoist_reciprocals)
 
     # --- production facade: a single entry point per INTENTION (backend) -----------------
     # Routes the compilation backend by INTENTION rather than by implementation detail. Each
@@ -1953,120 +1629,13 @@ class HyperbolicModel:
     #                   marshaling); device-clean by construction (named functors from block_builder).
     #                   To be wired via System.add_native_block (ABI key verified). This is the path
     #                   prepared for a real production backend (Kokkos/CUDA codegen = later PR).
-    _BACKENDS = {
-        "prototype": ("jit", "add_dynamic_block"),
-        "aot": ("compile", "add_compiled_block"),
-        "production": ("native", "add_native_block"),
-    }
+    # Single source of truth now lives in pops.codegen.compile._BACKENDS; class attribute kept
+    # for backward-compat references via HyperbolicModel._BACKENDS or self._BACKENDS.
+    _BACKENDS = _BACKENDS  # noqa: F821 -- re-bound from the module-level import above
 
     def _model_hash(self, params=None):
-        """Stable hash of the model: formulas (flux/eig/source/elliptic/primitives/cons_from) + roles +
-        n_aux + gamma (+ any NAMED params). Single source of the hash, reused by Model._model_hash
-        (which passes its Param). Serves to identify/reuse an already compiled .so (cache key) and to trace
-        the run. Relies on repr(Expr) (stable, structural); insensitive to dict ordering (sorted)."""
-        import hashlib
-        m = self
-        parts = []
-        parts.append("name=%s" % m.name)
-        parts.append("cons=%s" % ",".join(m.cons_names))
-        parts.append("croles=%s" % ",".join(roles_for(m.cons_names, m.cons_roles)))
-        parts.append("prim_state=%s" % ",".join(m.prim_state))
-        parts.append("proles=%s" % ",".join(roles_for(m.prim_state, m.prim_roles)))
-        parts.append("prim=%s" % ";".join("%s=%r" % (k, m.prim_defs[k]) for k in m.prim_defs))
-        for d in ("x", "y"):
-            parts.append("flux_%s=%s" % (d, ";".join(repr(e) for e in m._flux.get(d, []))))
-            parts.append("eig_%s=%s" % (d, ";".join(repr(e) for e in m._eig.get(d, []))))
-        parts.append("source=%s" % (";".join(repr(e) for e in m._source) if m._source else ""))
-        # NAMED sources (source_term, non-default) and LINEAR sources (linear_source) fold into the
-        # hash ONLY when present: a model that never declares them keeps a STRICTLY identical cache
-        # key to the historical one. Sorted by name (order-insensitive); changing a named-source
-        # expression or a linear_source coefficient invalidates the .so cache.
-        if getattr(m, "_source_terms", None):
-            parts.append("source_terms=%s" % ";".join(
-                "%s:[%s]" % (k, ",".join(repr(e) for e in m._source_terms[k]))
-                for k in sorted(m._source_terms)))
-        if getattr(m, "_linear_sources", None):
-            parts.append("linear_sources=%s" % ";".join(
-                "%s:[%s]" % (k, ";".join(repr(e) for row in m._linear_sources[k] for e in row))
-                for k in sorted(m._linear_sources)))
-        # NAMED fluxes (flux_term, ADC-419) fold into the hash ONLY when present: a model that never
-        # declares a named flux keeps a STRICTLY identical cache key to the historical one. Sorted by
-        # name (order-insensitive); changing a named-flux expression invalidates the .so cache.
-        if getattr(m, "_flux_terms", None):
-            parts.append("flux_terms=%s" % ";".join(
-                "%s:x[%s]:y[%s]" % (k,
-                                    ",".join(repr(e) for e in m._flux_terms[k]["x"]),
-                                    ",".join(repr(e) for e in m._flux_terms[k]["y"]))
-                for k in sorted(m._flux_terms)))
-        parts.append("cons_from=%s" % (";".join(repr(e) for e in m.cons_from) if m.cons_from else ""))
-        parts.append("elliptic=%s" % (repr(m._elliptic) if m._elliptic is not None else ""))
-        # NAMED elliptic fields (elliptic_field, ADC-419): same conditional policy -- folded only when
-        # present, so a model without a named elliptic field keeps its historical cache key. Each entry
-        # folds the rhs Expr, the operator and the ordered aux-field list (changing any invalidates the .so).
-        if getattr(m, "_elliptic_fields", None):
-            parts.append("elliptic_fields=%s" % ";".join(
-                "%s:%s:%s:[%s]" % (k, m._elliptic_fields[k]["operator"],
-                                   repr(m._elliptic_fields[k]["rhs"]),
-                                   ",".join(m._elliptic_fields[k]["aux"]))
-                for k in sorted(m._elliptic_fields)))
-        parts.append("stab_speed=%s" % (repr(m._stab_speed) if m._stab_speed is not None else ""))
-        parts.append("stab_dt=%s" % (repr(m._stab_dt) if m._stab_dt is not None else ""))
-        parts.append("src_freq=%s" % (repr(m._src_freq) if m._src_freq is not None else ""))
-        parts.append("src_jac=%s" % (";".join(repr(e) for row in m._src_jac for e in row)
-                                     if m._src_jac is not None else ""))
-        # Projection ponctuelle post-pas (ADC-177) : ajoutee au hash UNIQUEMENT si declaree (sans
-        # appel, hash strictement identique a l'historique -> cle de cache .so preservee).
-        if getattr(m, "_proj", None) is not None:
-            parts.append("proj=%s" % ";".join(repr(e) for e in m._proj))
-        parts.append("hllc=%d" % (1 if m._hllc else 0))
-        # ARBITRARY-formula Riemann hook overrides (ADC-456): folded ONLY if present, so a model
-        # using the role-derived default keeps a STRICTLY identical cache key to the historical one.
-        forms = getattr(m, "_riemann_hook_forms", None)
-        if forms:
-            parts.append("riemann_hooks=%s" % ";".join(
-                "%s=%r" % (k, forms[k]) for k in sorted(forms)))
-        parts.append("roe=%d" % (1 if getattr(m, "_roe", False) else 0))
-        # roe_dissipation PROVIDED: added to the hash ONLY if present (without a call, hash unchanged
-        # -> bit-identity of the cache key for existing models preserved).
-        if getattr(m, "_roe_rows", None) is not None:
-            parts.append("roe_rows=%s" % ";".join(repr(e) for k in ("x", "y")
-                                                  for e in m._roe_rows[k]))
-        # roe_dissipation FROM THE JACOBIAN (roe_from_jacobian): same conditional policy -- folded
-        # only if declared, so a roe_from_jacobian model gets a DISTINCT .so cache key (from a non-roe
-        # model AND from an enable_roe / provided-rows model) without perturbing existing caches.
-        if getattr(m, "_roe_jacobian", None) is not None:
-            parts.append("roe_jac=%s" % ";".join(repr(e) for k in ("x", "y")
-                                                 for row in m._roe_jacobian[k] for e in row))
-        # EXPLICIT signed wave speeds (set_wave_speeds): same conditional policy (without a call,
-        # hash strictly identical to the historical one -> .so cache of existing models preserved).
-        if getattr(m, "_wave_speeds", None) is not None:
-            parts.append("wave_speeds=%s" % ";".join(repr(e) for k in ("x", "y")
-                                                     for e in m._wave_speeds[k]))
-        if getattr(m, "_ws_jacobian", None) is not None:
-            ws = m._ws_jacobian
-            parts.append("ws_jac=%s|%s|%s" % (
-                ws["eig"],
-                "//".join(";".join(",".join(str(i) for i in b) for b in ws["blocks"][k])
-                          for k in ("x", "y")),
-                ";".join(repr(e) for k in ("x", "y") for row in ws["rows"][k] for e in row)
-                if ws["rows"] is not None else ""))
-
-        parts.append("n_aux=%d" % aux_total_n_aux(m.aux_names, m.aux_extra_names))
-        # NAMED aux fields (aux_field, ADC-70): their ORDER fixes the index (AUX_NAMED_BASE + k) -> they
-        # enter the hash (two models differing only by a named-aux name/order are distinct). Adds the key
-        # ONLY if named fields exist: a model without aux_field thus keeps a STRICTLY identical hash to
-        # the historical one (.so cache + traceability preserved).
-        if m.aux_extra_names:
-            parts.append("aux_extra=%s" % ",".join(m.aux_extra_names))
-        parts.append("gamma=%r" % m.gamma)
-        # Params enter the hash via (name, DECLARATION value, kind). The value of a RUNTIME param
-        # (P7-b) appears there because it SEEDS the default of the generated RuntimeParams member (so two
-        # .so with a different default are distinct); the "no recompilation" of P7-b applies to
-        # set_block_params at RUNTIME, not to a new compile() call with a changed declaration value.
-        params = params or {}
-        parts.append("params=%s" % ";".join("%s=%r:%s" % (k, params[k].value, params[k].kind)
-                                             for k in sorted(params)))
-        return hashlib.sha256("\n".join(parts).encode()).hexdigest()
+        """Stable hash of the model; delegates to pops.codegen.compile.model_hash."""
+        return _cg_model_hash(self, params=params)
 
     def _check_require_metadata(self, require_metadata, backend):
         """require_metadata guard rails (pure-Python, deterministic on the model + backend). Factored out
@@ -2095,110 +1664,18 @@ class HyperbolicModel:
 
     def compile(self, so_path=None, include=None, backend="auto", name=None, cxx=None, std=None,
                 require_metadata=False, target="system", hoist_reciprocals=False):
-        """Compilation facade by INTENTION: compiles the model into a .so via the engine designated
-        by @p backend and returns its path. Wraps the existing engines (compile_so / compile_aot /
-        compile_native) WITHOUT changing the numerics; preserves end-to-end names, VariableRole, gamma,
-        n_aux, B_z and T_e (the same bricks + ABI metadata as compile_or_jit).
-
-        ERGONOMICS (does not change the numerics):
-          - @p include None -> auto-detected (pops_include(): $POPS_INCLUDE, installed pops package, neighbor
-            repository); passing include= remains possible (back-compat);
-          - @p so_path None -> compiles into an out-of-source cache (pops_cache_dir()), with a file name
-            keyed on model_hash + abi_key (+ backend/target/name). On a cache HIT (.so already
-            present for this key), NO recompilation: the cached .so is reused as is.
-            On a cache MISS (model/parameter/toolchain change -> different key), recompilation then
-            storage. Passing so_path= forces this path and always compiles (strict back-compat).
-
-        @p backend:
-          "prototype"  -> JIT (compile_so): fast iteration, host virtual dispatch (first-order Rusanov),
-                          to be wired on the System side via add_dynamic_block;
-          "aot"        -> AOT (compile_aot): host-marshaled production path, numerics identical to the
-                          native block, to be wired via add_compiled_block;
-          "production" -> NATIVE (compile_native): .so loader inlining add_compiled_model<ProdModel>, native
-                          zero-copy block (strict parity add_block / add_compiled_model<>), to be wired
-                          via add_native_block (ABI key verified). Device-clean path prepared.
-
-        @p target: "system" (default) | "amr_system". Only the "production" backend targets AmrSystem
-        (System.add_native_block vs AmrSystem.add_native_block); a target="amr_system" on the other
-        backends is rejected (no AMR .so path outside native, cf. compile_or_jit).
-
-        @p std: C++ standard. Default None -> THE LOADER's standard for "production" (loader_cxx_std:
-        c++20 under Kokkos because CUDA 12.x has no -std=c++23, c++23 otherwise; the native loader shares
-        the module's ABI, a different std would change __cplusplus hence the ABI key -> explicit rejection
-        by add_native_block), "c++20" for the others (unchanged).
-
-        @p require_metadata (default False): if True, requires that the .so carry useful physical roles
-        AND an explicit gamma (set_gamma), failing which the System would fall back to the fallback
-        (roles 'custom' / gamma 1.4) -- silent regression of inter-species couplings. Serves a
-        production pipeline that wants an EXPLICIT error rather than a silent fallback.
-
-        Raises ValueError on an unknown backend or a feature incompatible with the requested backend
-        (rather than an obscure failure at runtime). Returns so_path.
-
-        To know which System adder to use: see adder_for(backend)."""
-        import os
-        # DEFAULT 'auto' (ADC-63): production if toolchain parity with the module is established,
-        # aot otherwise (historical default). An explicit backend short-circuits (unchanged).
-        if backend == "auto":
-            backend, _auto_reason = resolve_auto_backend(include)
-        if backend not in self._BACKENDS:
-            raise ValueError("compile: backend %r unknown (expected %s + 'auto')"
-                             % (backend, sorted(self._BACKENDS)))
-        if target not in ("system", "amr_system"):
-            raise ValueError("compile: target 'system' | 'amr_system' (received %r)" % (target,))
-        mode, adder = self._BACKENDS[backend]
-        if target == "amr_system" and mode != "native":
-            raise ValueError("compile: target='amr_system' exists only for backend='production' "
-                             "(native AMR path); received backend=%r" % (backend,))
-        if std is None:  # default per backend: native shares the module's ABI (c++20 under Kokkos,
-            # c++23 otherwise -- derived from the loader, cf. loader_cxx_std), the others stay on c++20.
-            std = loader_cxx_std() if mode == "native" else "c++20"
-        if include is None:  # ergonomics: auto-detection of the pops headers directory
-            include = pops_include()
-
-        # Metadata guard rails (before any cache: they depend only on the model + backend, and a
-        # cache HIT must not mask them).
-        self._check_require_metadata(require_metadata, backend)
-
-        # Out-of-source CACHE when so_path is omitted: file name keyed on model_hash + abi_key
-        # (+ backend/target/name). Cache HIT (.so already present for this key) -> reuse without
-        # recompilation. Cache MISS -> compilation in the keyed path (thus stored for next
-        # time). Explicit so_path -> forced path, always recompiled (strict back-compat).
-        if so_path is None:
-            # The backends that compile the pops headers (native production and aot) follow the real Kokkos
-            # (compiler + kokkos feature-key in the cache key): under Kokkos-only, their .so is
-            # always compiled WITH Kokkos (cf. compile_aot / compile_native), the key must reflect it.
-            kokkos_like = backend in ("production", "aot")
-            eff_cxx = _native_kokkos_compiler(cxx) if kokkos_like else _default_cxx(cxx)
-            abi_key = _abi_key_python(include, eff_cxx, std)
-            cache_backend = (backend + ";" + _native_feature_key()) if kokkos_like else backend
-            if hoist_reciprocals:  # distinct codegen -> distinct key (no collision with the default output)
-                cache_backend += ";hoist"
-            so_path = _cache_so_path(self._model_hash(), abi_key, cache_backend, target, name)
-            if os.path.exists(so_path):
-                _record_so_backend(so_path, backend)
-                return so_path  # cache HIT: .so already compiled for this key, reused as is
-        else:
-            # Explicit so_path: the out-of-source cache does not apply, but the dlopen handle cache (in
-            # process, by path) does -- recompiling another backend ON this path would re-serve the stale
-            # handle. Redirect to a distinct per-backend sibling if needed (cf. _backend_distinct_so_path).
-            so_path = _backend_distinct_so_path(so_path, backend)
-
-        out_path = self.compile_or_jit(so_path, include, mode=mode, name=name, cxx=cxx, std=std,
-                                       target=target, hoist_reciprocals=hoist_reciprocals)
-        _record_so_backend(out_path, backend)
-        return out_path
+        """Thin wrapper: delegates to pops.codegen.compile.compile_model."""
+        return _cg_compile_model(self, so_path=so_path, include=include, backend=backend,
+                                 name=name, cxx=cxx, std=std,
+                                 require_metadata=require_metadata, target=target,
+                                 hoist_reciprocals=hoist_reciprocals)
 
     @classmethod
     def adder_for(cls, backend):
         """Name of the System method to use to wire the .so produced by compile(backend=...):
         'add_dynamic_block' (prototype/JIT), 'add_compiled_block' (aot) or 'add_native_block'
-        (production/native). Couples the compilation backend to its adder to avoid an inconsistent
-        ABI boundary. ValueError if unknown."""
-        if backend not in cls._BACKENDS:
-            raise ValueError("adder_for: backend %r unknown (expected %s)"
-                             % (backend, sorted(cls._BACKENDS)))
-        return cls._BACKENDS[backend][1]
+        (production/native). Delegates to pops.codegen.compile.adder_for."""
+        return _cg_adder_for(backend)
 
     def emit_cpp_elliptic(self, name=None, namespace="pops_generated", cse=True,
                           hoist_reciprocals=False):
@@ -2236,20 +1713,8 @@ class HyperbolicModel:
 # at codegen; CompiledModel packages the .so + the metadata already known on the Python side (no
 # re-reading of the .so). cf. docs/DSL_MODEL_DESIGN.md (Phase A).
 
-# HONEST characteristics per backend (cf. DSL_MODEL_DESIGN.md section 5). Serves diagnostics and
-# the device/MPI/AMR guard rails (checked at wiring/execution, not frozen at compilation).
-_BACKEND_CAPS = {
-    # backend: (cpu, mpi, amr, gpu)  -- True/False according to what the path SUPPORTS today
-    "prototype": {"cpu": True, "mpi": False, "amr": False, "gpu": False},
-    "aot": {"cpu": True, "mpi": False, "amr": False, "gpu": False},
-    # production = NATIVE path (add_native_block, #85): same engine as add_block, hence MPI-capable
-    # by construction (halos fill_boundary). amr=True: the native loader now has an AMR counterpart
-    # (m.compile(backend='production', target='amr_system') -> AmrSystem.add_native_block, DSL Phase D)
-    # which inlines add_compiled_model(AmrSystem&) -> SAME AMR hierarchy as AmrSystem.add_block (reflux,
-    # regrid). gpu=False out of CAUTION: the native path is device-clean in C++ (GH200) but the
-    # end-to-end validation from Python (add_native_block on device) is a dedicated PR (DSL sect. 5).
-    "production": {"cpu": True, "mpi": True, "amr": True, "gpu": False},
-}
+# _BACKEND_CAPS and _BACKENDS: single source of truth is pops.codegen.compile.
+# Re-imported at the top of this file; available as pops.dsl._BACKEND_CAPS etc.
 
 
 class Param:
@@ -2318,338 +1783,16 @@ def RuntimeParam(name, value):
     return Param(name, value, kind="runtime")
 
 
-class CompiledProblem:
-    """Result of `pops.compile_problem(...)`: a generated `problem.so` (a compiled time Program) plus
-    the metadata to install + reproduce it. Install it with `sim.install_program(compiled.so_path)`
-    AFTER the physical block has been added (`sim.add_equation` / `sim.add_block`); the Program then
-    drives `sim.step(dt)` entirely in C++ via `ProgramContext`.
-
-    The `.so` is compiled against the pops headers with the SAME Kokkos toolchain as the loaded _pops
-    module (cf. `pops_loader_build_flags`), so its ABI key matches and `System::install_program`
-    accepts it. `os.fspath(compiled)` returns `so_path` (it can be passed where a path is expected)."""
-
-    def __init__(self, so_path, program, model, abi_key, cxx, std, libraries=None):
-        self.so_path = so_path
-        self.program = program          # the pops.time.Program that was lowered
-        self.model = model              # the physical model (optional; added as a block in the MVP)
-        self.program_name = getattr(program, "name", None)
-        self.program_hash = program._ir_hash() if hasattr(program, "_ir_hash") else None
-        self.abi_key = abi_key          # cache key: header signature | compiler | C++ standard
-        self.cxx = cxx
-        self.std = std
-        # Validated brick libraries (Spec 3 section 21, ADC-464): the LibraryManifests read +
-        # ABI-checked from libraries=[...]. Empty when none were passed. Their bricks (and their
-        # generated symbols) are exposed to the problem; a compiled library .so was already
-        # dlopen'd (and ABI-guarded) by read_library_manifest.
-        self.libraries = list(libraries) if libraries else []
-
-    def __fspath__(self):
-        return self.so_path
-
-    # --- operator introspection (Spec 2, S2-5): metadata read from the carried model,
-    # no need to load or run the .so.
-    def _intro_model(self):
-        if self.model is None:
-            raise ValueError("this CompiledProblem carries no model; operator introspection "
-                             "is unavailable")
-        return self.model
-
-    def list_operators(self):
-        """Names of the typed operators of the compiled module (registration order)."""
-        return self._intro_model().operator_registry().names()
-
-    def list_state_spaces(self):
-        """Names of the compiled module's state spaces."""
-        return self._intro_model().list_state_spaces()
-
-    def list_field_spaces(self):
-        """Names of the compiled module's field spaces."""
-        return self._intro_model().list_field_spaces()
-
-    def operator_signature(self, name):
-        """The pops.model.Signature of operator ``name`` in the compiled module."""
-        return self._intro_model().operator_registry().get(name).signature
-
-    def operator_requirements(self, name):
-        """The requirements dict of operator ``name``."""
-        return dict(self._intro_model().operator_registry().get(name).requirements)
-
-    def operator_capabilities(self, name):
-        """The capabilities dict of operator ``name``."""
-        return dict(self._intro_model().operator_registry().get(name).capabilities)
-
-    def __repr__(self):
-        return "<CompiledProblem %r -> %s>" % (self.program_name, self.so_path)
+# CompiledProblem: re-exported from pops.codegen.loader (imported above)
 
 
-def _module_to_model(module):
-    """Lower an :class:`pops.model.Module` to a :class:`Model` (Spec 2, S2-11), reusing the dsl codegen
-    engine -- a translation, NOT a second backend. The Module's typed operators carry dsl ``Expr``
-    bodies; each is mapped to the dsl method of its kind: a ``grid_operator`` to ``flux`` (or
-    ``flux_term``), a ``local_source`` to ``source_term``, a ``local_linear_operator`` to
-    ``linear_source``, a ``field_operator`` to ``elliptic_rhs`` (or ``elliptic_field``), a
-    ``local_rate`` to ``rate_operator``, a ``projection`` to ``projection``. The state-space
-    components become the conservative variables; the field-space + aux names become the aux channel
-    the bodies read; ``Module.eigenvalues`` becomes the Riemann wave speeds. The operator bodies are
-    plain ``Expr`` trees, so this runs at codegen time only -- never during a step."""
-    states = module.state_spaces()
-    if len(states) != 1:
-        raise ValueError("compile_problem: a Module must declare exactly one StateSpace to compile "
-                         "(got %s)" % sorted(states))
-    state = next(iter(states.values()))
-    m = Model(module.name)
-    # Honor the StateSpace's explicit roles (spec-style lowercase) by mapping them to the dsl
-    # VariableRole names; an unmapped or absent role falls back to None (dsl infers from the name).
-    _spec_role = {"density": "Density", "momentum_x": "MomentumX", "momentum_y": "MomentumY",
-                  "momentum_z": "MomentumZ", "energy": "Energy", "pressure": "Pressure",
-                  "velocity_x": "VelocityX", "velocity_y": "VelocityY", "velocity_z": "VelocityZ",
-                  "temperature": "Temperature"}
-    roles = None
-    if state.roles:
-        roles = [_spec_role.get(state.roles.get(c)) for c in state.components]
-        if all(r is None for r in roles):
-            roles = None  # nothing mapped -> let dsl infer from the canonical names
-    cvars = m.conservative_vars(*state.components, roles=roles)
-    # A pure Module declares no primitives, but the brick codegen (to_primitive / to_conservative)
-    # needs a primitive-state layout. Give it the trivial identity layout Prim = the conservative
-    # variables (operator bodies are written in conservative + aux variables, so no physical
-    # primitive is required); a model needing genuine primitives would author them via dsl.Model.
-    m.primitive_vars(*cvars)
-    m.conservative_from(list(cvars))
-    # Module parameters lower to const params (the runtime-param kind is not yet on ParameterSpace).
-    for p in module.params().values():
-        m.param(p.name, p.default, kind="const")
-    declared = set()
-
-    def _declare_aux(nm):
-        if nm in declared:
-            return
-        declared.add(nm)
-        if nm in AUX_CANONICAL:
-            m.aux(nm)
-        else:
-            m.aux_field(nm)
-
-    for fs in module.field_spaces().values():
-        for comp in fs.components:
-            _declare_aux(comp)
-    for a in module.aux().values():
-        _declare_aux(a.name)
-    if module._eigenvalues is not None:
-        m.eigenvalues(x=module._eigenvalues["x"], y=module._eigenvalues["y"])
-    # Codegen kinds need an IR (Expr) body, supplied via Module.operator(..., expr=...). A
-    # decorator-authored operator stores a Python callable instead, which the dsl methods cannot
-    # lower; reject it loud rather than fail cryptically deep in the codegen.
-    _CODEGEN_KINDS = ("grid_operator", "local_source", "local_linear_operator", "field_operator",
-                      "projection")
-    n_field_ops = 0
-    for op in module.operator_registry():
-        body = op.body
-        if op.kind in _CODEGEN_KINDS and (body is None or callable(body)):
-            raise ValueError(
-                "compile_problem: operator %r (%s) has no IR body; a compilable Module operator "
-                "needs an expression body (Module.operator(..., expr=...))" % (op.name, op.kind))
-        if op.kind == "grid_operator":
-            if op.name in ("flux", "flux_default"):
-                m.flux(x=body["x"], y=body["y"])
-            else:
-                m.flux_term(op.name, x=body["x"], y=body["y"])
-        elif op.kind == "local_source":
-            m.source_term(op.name, body)
-        elif op.kind == "local_linear_operator":
-            m.linear_source(op.name, body)
-        elif op.kind == "field_operator":
-            n_field_ops += 1
-            if n_field_ops > 1:
-                raise ValueError(
-                    "compile_problem: a Module currently supports one field_operator (the default "
-                    "elliptic solve); multiple solved fields are deferred (operator %r)" % op.name)
-            m.elliptic_rhs(body)
-        elif op.kind == "local_rate":
-            low = op.lowering
-            m.rate_operator(op.name, flux=low.get("flux", True),
-                            sources=low.get("sources"), fluxes=low.get("fluxes"))
-        elif op.kind == "projection":
-            m.projection(body)
-        # matrix_free_operator / diagnostic / residual kinds are Program-level, not model codegen.
-    return m
+# _module_to_model: re-exported from pops.codegen.compile (imported above)
 
 
-def compile_problem(so_path=None, *, model=None, time=None, backend="production", target="system",
-                    force=False, cxx=None, include=None, std=None, debug=False, libraries=None):
-    """Compile an `pops.time.Program` into a `problem.so` the runtime loads via `sim.install_program`.
-
-    Lowers the Program IR to C++ (`Program.emit_cpp_program`) and compiles it against the pops headers
-    with the SAME Kokkos toolchain as the loaded _pops module (`pops_loader_build_flags`), so the `.so`
-    is ABI-compatible and runs in-process. Returns a `CompiledProblem` (`.so_path` + metadata).
-
-    The physical `model` is validated here (fail-loud) and carried on the handle, but in this MVP it
-    is added as a normal block (`sim.add_equation`) while the Program drives the step via
-    `ProgramContext` (`ctx.rhs_into` uses the block RHS); a single combined model+program `.so` is a
-    later phase. MVP constraints (spec): `backend` must be "production", `target` "system". Without an
-    explicit `so_path` the `.so` is cached out-of-source keyed by [program source + header signature +
-    compiler + std]; `force=True` recompiles. `debug=True` also writes the generated `.cpp` next to
-    the `.so` for inspection."""
-    import hashlib
-    import os
-    import tempfile
-
-    if backend != "production":
-        raise ValueError("compiled time programs require backend='production'")
-    if target != "system":
-        raise ValueError("compiled time programs currently support target='system' only")
-    # Brick libraries (Spec 3 section 21, ADC-464): each entry is a LibraryManifest, its serialized
-    # dict, or a compiled library .so PATH (str / PathLike). The library reader normalizes each one
-    # (a corrupt manifest is rejected loud; a compiled .so is dlopen'd and its ABI key compared
-    # against the loaded _pops module -- a mismatch is a HARD error here, NOT a silent fallback). The
-    # validated library manifests are carried on the CompiledProblem so the bricks they expose are
-    # known to the problem. Their static-init POPS_REGISTER_BRICK calls populate the in-process
-    # external-brick catalog as a side effect of the dlopen (so pops.lib.*.User(id) resolves).
-    library_manifests = []
-    if libraries:
-        from .library import read_library_manifest
-        for lib_obj in libraries:
-            library_manifests.append(read_library_manifest(lib_obj))  # validate + ABI guard (fail-loud)
-    # A pure operator-first Module (Spec 2, S2-11) lowers to a dsl.Model via the shared codegen.
-    if model is not None and isinstance(model, _model.Module):
-        model = _module_to_model(model)
-    if time is None or not hasattr(time, "emit_cpp_program"):
-        raise ValueError("compile_problem: time must be an pops.time.Program (got %r)" % (time,))
-    if model is not None and hasattr(model, "check"):
-        model.check()  # fail-loud on a malformed physical model, even though it is added separately
-
-    # Thread the physical model so the codegen can lower the Phase-4b split-source / local-linear ops
-    # (it reads the model's symbolic source_term / linear_source coefficients). FE / SSPRK / RK4 lower
-    # with model=None too; a model is required only when the Program uses a Phase-4b op.
-    src = time.emit_cpp_program(model=model)  # validates the IR; NotImplementedError for unsupported ops
-
-    include = include or pops_include()
-    sig = pops_header_signature(include)
-    cc, cflags, lflags = pops_loader_build_flags(cxx)
-    eff_std = _probe_cxx_std(cc, std or loader_cxx_std())
-    abi_key = "%s|%s|%s" % (sig, cc, eff_std)
-
-    if so_path is None:
-        program_hash = hashlib.sha256(src.encode()).hexdigest()
-        so_path = _cache_so_path(program_hash, abi_key, "program-production", target,
-                                 getattr(time, "name", "problem"))
-        if not force and os.path.isfile(so_path):
-            return CompiledProblem(so_path, time, model, abi_key, cc, eff_std,
-                                   libraries=library_manifests)
-
-    optflags = _dsl_optflags()
-    with tempfile.TemporaryDirectory() as tmp:
-        cpp = os.path.join(tmp, "problem.cpp")
-        with open(cpp, "w") as f:
-            f.write(src)
-        if debug:
-            try:
-                with open(os.path.splitext(so_path)[0] + ".cpp", "w") as f:
-                    f.write(src)
-            except OSError:
-                pass
-        flags = ["-shared", "-fPIC", "-std=" + eff_std, *optflags,
-                 "-DPOPS_HEADER_SIG=\"%s\"" % sig, *cflags]
-        cmd = [cc, *flags, "-I", include, cpp, "-o", so_path, *lflags]
-        _run_compile(cmd, "compile_problem (backend production)")
-    return CompiledProblem(so_path, time, model, abi_key, cc, eff_std,
-                           libraries=library_manifests)
+# compile_problem: re-exported from pops.codegen.compile (imported above)
 
 
-class CompiledModel:
-    """Result of `m.compile(...)`: packages the produced `.so` + EVERYTHING needed to wire it
-    correctly (dispatch adder, ABI diagnostic, reproducibility). Replaces the historical pair
-    (str so_path, adder_for(backend)) with a single object.
-
-    The metadata is NOT re-read from the `.so`: Python already holds names/roles/gamma/n_aux/params
-    (the HyperbolicModel carries them); CompiledModel just exposes them for dispatch (add_equation)
-    and diagnostics. cf. DSL_MODEL_DESIGN.md section 3."""
-
-    def __init__(self, so_path, backend, adder, cons_names, cons_roles, prim_names, n_vars,
-                 gamma, n_aux, params, caps, abi_key, model_hash, cxx, std, target="system",
-                 hllc=False, roe=False, aux_extra_names=None, wave_speeds=False):
-        self.has_hllc = bool(hllc)   # HLLC capability emitted (enable_hllc): hllc available beyond 4-var Euler
-        self.has_roe = bool(roe)     # ROE hook emitted (enable_roe roles OR m.roe_dissipation provided): roe available beyond 4-var Euler
-        self.has_wave_speeds = bool(wave_speeds)  # wave_speeds emitted (explicit pair OR 'p'): hll available
-        self.so_path = so_path
-        self.backend = backend       # "prototype" | "aot" | "production"
-        self.target = target         # "system" | "amr_system": targeted facade (native AMR loader if amr_system)
-        self.adder = adder           # method name (Amr)System: add_dynamic_block / add_compiled_block / add_native_block
-        self.cons_names = list(cons_names)
-        self.cons_roles = list(cons_roles)
-        self.prim_names = list(prim_names)
-        self.n_vars = int(n_vars)
-        self.gamma = gamma           # None = historical default 1.4 on the System side
-        self.n_aux = int(n_aux)
-        # Names of the NAMED aux fields (aux_field, ADC-70), ORDERED: component index = position
-        # AUX_NAMED_BASE + k. The System.add_equation facade builds the name -> component table per
-        # block from it, consumed by System.set_aux_field / aux_field. Empty for a model without a named field.
-        self.aux_extra_names = list(aux_extra_names) if aux_extra_names else []
-        self.params = dict(params)   # {name: Param}
-        self.caps = dict(caps)       # {cpu/mpi/amr/gpu: bool}
-        self.abi_key = abi_key       # ABI key mirroring pops_header_signature + compiler/std
-        self.model_hash = model_hash  # stable hash formulas+roles+n_aux+params
-        self.cxx = cxx
-        self.std = std
-
-    @property
-    def runtime_param_names(self):
-        """Names of the model's RUNTIME parameters (kind='runtime'), SORTED: this is the ORDER of the
-        indices on the C++ side (RuntimeParams) AND the order expected by System.set_block_params(name, values) (P7-b).
-        Empty if the model has only const params."""
-        return sorted(k for k, p in self.params.items() if getattr(p, "kind", "const") == "runtime")
-
-    def runtime_param_values(self):
-        """DECLARATION values of the runtime params, parallel to runtime_param_names (default as long
-        as no set_block_params has been called)."""
-        return [self.params[k].value for k in self.runtime_param_names]
-
-    def check_runtime(self, n=16, state=None, raise_on_error=True, rtol=1e-8, atol=1e-10):
-        """RUNTIME re-verification of a CompiledModel ALONE (audit balance, GENERICITY pt 9): without the
-        original dsl.Model, the FORMULAS are no longer re-verifiable (symbolic check_model), but
-        the .so itself is -- we install it in an EPHEMERAL System (n x n periodic, neutral
-        Poisson, minmod+rusanov) and delegate to System.check_model (finite state, residual -div F + S
-        finite, positivity by roles, round-trip of THE MODEL conversions).
-
-        @p state: dict {conservative variable name: ndarray (n, n)} to control the tested state.
-        None -> SMOKE state by ROLES (Density = 1 + gaussian bump, Momentum* = 0,
-        Energy = 2.5, other components = 0.5) -- enough to exercise flux/source/conversions;
-        provide state= for a precise physical regime. @return the dict from System.check_model."""
-        import numpy as np
-        if getattr(self, "target", "system") != "system":
-            raise ValueError(
-                "CompiledModel.check_runtime: only target='system' is re-verifiable in an "
-                "ephemeral System; a target='amr_system' loader is checked installed in its "
-                "AmrSystem (AMR test invariants), not in isolation.")
-        from . import System, FiniteVolume, Explicit
-        sim = System(n=int(n), L=1.0, periodic=True)
-        sim.set_poisson()
-        sim.add_equation("check", model=self,
-                         spatial=FiniteVolume(limiter="minmod", riemann="rusanov"),
-                         time=Explicit())
-        x = (np.arange(n) + 0.5) / float(n)
-        X, Y = np.meshgrid(x, x, indexing="xy")
-        bump = 1.0 + 0.3 * np.exp(-40.0 * ((X - 0.5) ** 2 + (Y - 0.5) ** 2))
-        comps = []
-        for name, role in zip(self.cons_names, self.cons_roles, strict=True):
-            if state is not None and name in state:
-                comps.append(np.asarray(state[name], dtype=float).reshape(n, n))
-            elif role == "Density":
-                comps.append(bump)
-            elif role in ("MomentumX", "MomentumY"):
-                comps.append(np.zeros((n, n)))
-            elif role == "Energy":
-                comps.append(2.5 + 0.0 * bump)
-            else:
-                comps.append(0.5 + 0.0 * bump)
-        sim._s.set_state("check", np.stack(comps).ravel())
-        return sim.check_model("check", raise_on_error=raise_on_error, rtol=rtol, atol=atol)
-
-    def __repr__(self):
-        return ("CompiledModel(backend=%r, target=%r, so_path=%r, n_vars=%d, gamma=%r, n_aux=%d, "
-                "adder=%r, runtime_params=%r, abi_key=%.12s..., model_hash=%.12s...)"
-                % (self.backend, self.target, self.so_path, self.n_vars, self.gamma, self.n_aux,
-                   self.adder, self.runtime_param_names, self.abi_key or "", self.model_hash or ""))
+# CompiledModel: re-exported from pops.codegen.loader (imported above)
 
 
 class Model:
