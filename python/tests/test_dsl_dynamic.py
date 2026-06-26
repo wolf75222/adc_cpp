@@ -1,10 +1,10 @@
 """Dispatch TYPE-ERASED a l'execution : un programme principal compile SANS connaitre le type de la
-brique generee charge un .so qui lui rend un adc::IModel<4>*, et l'utilise polymorphiquement (vtable).
+brique generee charge un .so qui lui rend un pops::IModel<4>*, et l'utilise polymorphiquement (vtable).
 
 C'est l'item (a) du reste (cf. docs/ARCHITECTURE_CIBLE.md) : la brique GENEREE (EulerGen) est enrobee
-dans adc::ModelAdapter, exposee via une fabrique extern "C", chargee a l'execution (dlopen), et
-dispatchee par l'interface virtuelle. Le main ne voit QUE adc::IModel<4> + adc::Euler (l'oracle), pas
-EulerGen. Chemin HOTE (les appels virtuels ne vont pas sur GPU) : pendant compile de adc.PythonFlux.
+dans pops::ModelAdapter, exposee via une fabrique extern "C", chargee a l'execution (dlopen), et
+dispatchee par l'interface virtuelle. Le main ne voit QUE pops::IModel<4> + pops::Euler (l'oracle), pas
+EulerGen. Chemin HOTE (les appels virtuels ne vont pas sur GPU) : pendant compile de pops.PythonFlux.
 """
 import os
 import platform
@@ -17,16 +17,16 @@ from test_dsl_brick import build_euler_brick   # Euler en formules + prim_state 
 INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "include"))
 
 LIB = r"""
-#include <adc/runtime/dynamic/dynamic_model.hpp>
-#include <adc/core/state/variables.hpp>
+#include <pops/runtime/dynamic/dynamic_model.hpp>
+#include <pops/core/state/variables.hpp>
 %s
-extern "C" adc::IModel<4>* adc_make_model() { return new adc::ModelAdapter<adc_generated::EulerGen>(); }
-extern "C" void adc_destroy_model(adc::IModel<4>* p) { delete p; }
+extern "C" pops::IModel<4>* pops_make_model() { return new pops::ModelAdapter<pops_generated::EulerGen>(); }
+extern "C" void pops_destroy_model(pops::IModel<4>* p) { delete p; }
 """
 
 MAIN = r"""
-#include <adc/physics/fluids/euler.hpp>
-#include <adc/runtime/dynamic/dynamic_model.hpp>
+#include <pops/physics/fluids/euler.hpp>
+#include <pops/runtime/dynamic/dynamic_model.hpp>
 #include <dlfcn.h>
 #include <cstdio>
 #include <cmath>
@@ -35,16 +35,16 @@ int main(int argc, char** argv) {
   if (argc < 2) { std::printf("usage: %s lib.so\n", argv[0]); return 4; }
   void* h = dlopen(argv[1], RTLD_NOW);
   if (!h) { std::printf("dlopen: %s\n", dlerror()); return 2; }
-  auto mk  = reinterpret_cast<adc::IModel<4>* (*)()>(dlsym(h, "adc_make_model"));
-  auto del = reinterpret_cast<void (*)(adc::IModel<4>*)>(dlsym(h, "adc_destroy_model"));
+  auto mk  = reinterpret_cast<pops::IModel<4>* (*)()>(dlsym(h, "pops_make_model"));
+  auto del = reinterpret_cast<void (*)(pops::IModel<4>*)>(dlsym(h, "pops_destroy_model"));
   if (!mk || !del) { std::printf("dlsym fail\n"); return 3; }
 
-  adc::IModel<4>* model = mk();    // type concret (EulerGen) INCONNU dans ce TU
-  adc::Euler ref; ref.gamma = 1.4; adc::Aux a{};
+  pops::IModel<4>* model = mk();    // type concret (EulerGen) INCONNU dans ce TU
+  pops::Euler ref; ref.gamma = 1.4; pops::Aux a{};
   const double S[][4] = {{1.0,0.2,-0.1,2.5},{2.0,0.5,0.3,6.0},{0.5,-0.2,0.1,1.8},{1.5,0.0,0.0,3.0}};
   double md = 0.0;
   for (const auto& s : S) {
-    adc::StateVec<4> u{}; for (int i=0;i<4;++i) u[i]=s[i];
+    pops::StateVec<4> u{}; for (int i=0;i<4;++i) u[i]=s[i];
     for (int dir=0; dir<2; ++dir) {
       auto fr = ref.flux(u,a,dir); auto fg = model->flux(u,a,dir);   // dispatch a l'execution
       for (int i=0;i<4;++i) md = std::fmax(md, std::fabs(fr[i]-fg[i]));
@@ -83,8 +83,8 @@ def main():
         out = subprocess.run([exe, so], capture_output=True, text=True, check=True).stdout
 
     md = float(out.strip())
-    assert md < 1e-12, "modele charge a l'execution != adc::Euler (ecart max %.2e)" % md
-    print("OK  brique generee chargee a l'execution (dlopen -> IModel<4>) == adc::Euler (ecart %.1e)"
+    assert md < 1e-12, "modele charge a l'execution != pops::Euler (ecart max %.2e)" % md
+    print("OK  brique generee chargee a l'execution (dlopen -> IModel<4>) == pops::Euler (ecart %.1e)"
           % md)
     print("test_dsl_dynamic : tout est vert")
 

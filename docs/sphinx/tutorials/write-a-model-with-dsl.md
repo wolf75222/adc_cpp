@@ -1,6 +1,6 @@
 # Write a model with the symbolic DSL
 
-Write the reduced diocotron model as symbolic formulas with `adc.dsl.Model`, compile it to a `.so`,
+Write the reduced diocotron model as symbolic formulas with `pops.dsl.Model`, compile it to a `.so`,
 run it, and confirm it produces a result bit-identical to the same model built from native bricks.
 
 ## Prerequisites
@@ -10,7 +10,7 @@ run it, and confirm it produces a result bit-identical to the same model built f
   `cmake --preset python` or `pip install .`; the Kokkos Serial backend is enough.
 - `numpy` and `matplotlib` in the same Python environment.
 - The repository headers on disk, because the DSL compiles a `.so` against them. The `production`
-  backend needs `_adc` and the generated `.so` built with the same adc headers (the ABI guard).
+  backend needs `_pops` and the generated `.so` built with the same adc headers (the ABI guard).
 - Background, if you want it: the [models overview](../models/index.md) explains the three ways to
   write a model, and the [physical model concept](../concepts/physical-model.md) explains the
   `flux` / `max_wave_speed` / `source` / `elliptic_rhs` contract that the DSL fills in.
@@ -42,10 +42,10 @@ export PYTHONPATH=$PWD/build-py/python
 ```
 
 ```bash
-export ADC_INCLUDE=$PWD/include
+export POPS_INCLUDE=$PWD/include
 ```
 
-`ADC_INCLUDE` tells the DSL where the headers are when it compiles the `.so`. Replace `$PWD` only if
+`POPS_INCLUDE` tells the DSL where the headers are when it compiles the `.so`. Replace `$PWD` only if
 you run from another directory; it must point at the repository root.
 
 ## Step 2: Import `adc` and the DSL
@@ -65,8 +65,8 @@ module built in CI runs Kokkos Serial).
 
 ## Step 3: Write the model as formulas
 
-Declare the physics with `adc.dsl.Model`. You declare the conservative variable `n`, the auxiliary
-fields `phi` / `grad_x` / `grad_y` that the solver fills in (the `adc::Aux` channel), the E x B
+Declare the physics with `pops.dsl.Model`. You declare the conservative variable `n`, the auxiliary
+fields `phi` / `grad_x` / `grad_y` that the solver fills in (the `pops::Aux` channel), the E x B
 advection flux, the eigenvalues (here a single wave, the drift speed), and the elliptic right-hand
 side $\alpha (n - n_{i0})$ that couples the block to the system Poisson. The trailing `m.check()`
 verifies that every referenced variable is declared.
@@ -84,7 +84,7 @@ mean of the initial density so the periodic Poisson is solvable. The full list o
 
 ## Step 4: Compile the model to a `.so` and build the System
 
-Compile the symbolic model and wire the resulting `CompiledModel` into a periodic `adc.System`. The
+Compile the symbolic model and wire the resulting `CompiledModel` into a periodic `pops.System`. The
 script first tries the `production` backend (the native zero-copy path, preferred under MPI and AMR),
 then falls back to `aot` (numerically identical, marshaled host-side). The default of `m.compile(...)`
 is `aot`; you ask for `"production"` explicitly. This is also where you choose the spatial scheme
@@ -130,7 +130,7 @@ density.
 
 ## Step 6: Confirm bricks and DSL are bit-identical
 
-The same physics can also be composed from native bricks with `adc.Model(state, transport, source,
+The same physics can also be composed from native bricks with `pops.Model(state, transport, source,
 elliptic)`. The two writing fronts are interchangeable: they describe the same physics and produce an
 identical numerical kernel. The script writes the brick version and replays the same grid, the same
 scheme, and the same number of steps.
@@ -154,17 +154,17 @@ formulas reproduce exactly the conventions of the native `ExB` and `BackgroundDe
 ## Troubleshooting
 
 - Import error on `import adc`: the extension is pinned to the interpreter that built it. Import with
-  the same Python, and run `python -c "import adc; adc.doctor()"` to check the environment.
-- `RuntimeError` about headers when compiling: set `ADC_INCLUDE` to the repository `include`
+  the same Python, and run `python -c "import adc; pops.doctor()"` to check the environment.
+- `RuntimeError` about headers when compiling: set `POPS_INCLUDE` to the repository `include`
   directory (Step 1). The DSL validates it by checking that `adc/mesh/storage/multifab.hpp` exists there.
 - The script reports that the `production` backend is unavailable and continues on `aot`: this is the
-  documented fallback when `_adc` and the `.so` were not built with the same headers. The `aot` run is
+  documented fallback when `_pops` and the `.so` were not built with the same headers. The `aot` run is
   numerically identical; nothing further is required for this tutorial.
 
 ## Next
 
 - Compare a uniform grid against an adaptive hierarchy by reading the `uniform_vs_amr` part of the
-  [A->Z tutorial](../getting-started/tutorial.md), which replays this same model on `adc.AmrSystem`.
+  [A->Z tutorial](../getting-started/tutorial.md), which replays this same model on `pops.AmrSystem`.
 - Browse the [native brick catalog](../reference/native-bricks.md) to see which models you can
   compose without writing formulas.
 - Read the [symbolic DSL reference](../reference/symbolic-dsl.md) for the complete declarator and

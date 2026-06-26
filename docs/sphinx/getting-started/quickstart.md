@@ -12,7 +12,7 @@ follow [Installation](installation.md), then come back here. To confirm the
 module is on your path:
 
 ```bash
-python -c "import adc; print(adc.__file__)"
+python -c "import adc; print(pops.__file__)"
 ```
 
 The command prints the path to the compiled module. If it raises

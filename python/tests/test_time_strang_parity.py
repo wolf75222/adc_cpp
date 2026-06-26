@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Compiled adc.time.std.strang reproduces native adc.Strang on a simple case (ADC-410).
+"""Compiled pops.time.std.strang reproduces native pops.Strang on a simple case (ADC-410).
 
 The Strang splitting macro H(dt/2); S(dt); H(dt/2) is expressed ONCE as Program IR via the
-``adc.time.std.strang`` combinator (no scheme-specific C++ stepper). This test demonstrates that the
+``pops.time.std.strang`` combinator (no scheme-specific C++ stepper). This test demonstrates that the
 COMPILED Strang composition runs end to end C++-side and reproduces the native engine Strang macro-step
 (SystemStepper::step_strang) to BIT precision on a simple, faithfully replicable case.
 
@@ -23,9 +23,9 @@ The matching compiled program: half_flow(P, U, frac) = U + frac*dt*rhs(flux=True
     around the (no-op) source, each a U + (dt/2)*R affine combination -- and emit_cpp_program produces
     the matching C++ (two ctx.rhs_into flux assemblies, two half-step lincombs).
 
-(B) Native bit-parity (skips cleanly without _adc.install_program / numpy / a compiler / a visible
+(B) Native bit-parity (skips cleanly without _pops.install_program / numpy / a compiler / a visible
     Kokkos): set up two identical Systems on the uncoupled model with the same IC; one runs the native
-    adc.Strang scheme (set_time_scheme("strang")), the other installs the compiled std.strang program;
+    pops.Strang scheme (set_time_scheme("strang")), the other installs the compiled std.strang program;
     step BOTH N steps and assert max|native - compiled| is bit-exact (array_equal). A SECOND, fully
     independent reference replays the identical H(dt/2); no-op; H(dt/2) sub-steps offline (set_state +
     eval_rhs) and must match the compiled program to machine precision; a single full Euler step is
@@ -48,7 +48,7 @@ def _skip(msg):
     sys.exit(0)
 
 
-from adc import time as adctime  # noqa: E402  -- IR construction is pure Python, always available
+from pops import time as adctime  # noqa: E402  -- IR construction is pure Python, always available
 
 
 # ============================ (A) IR construction + codegen: pure Python =======================
@@ -67,7 +67,7 @@ def no_op_source(prog, U, frac):  # noqa: ARG001  -- frac unused: S is the ident
 
 
 def strang_program(name="strang_parity", block="ions"):
-    """The compiled Strang program H(dt/2); S(dt); H(dt/2) built via adc.time.std.strang (no special
+    """The compiled Strang program H(dt/2); S(dt); H(dt/2) built via pops.time.std.strang (no special
     Strang class -- the same combinator + affine algebra over dt)."""
     P = adctime.Program(name)
     adctime.std.strang(P, block, half_flow, no_op_source)
@@ -113,10 +113,10 @@ for lc in lcs:
 
 # emit_cpp_program produces the matching C++: two flux RHS assemblies + two half-step lincombs.
 try:
-    import numpy as np  # noqa: F401  -- adc.Model construction pulls in numpy
+    import numpy as np  # noqa: F401  -- pops.Model construction pulls in numpy
 
-    import adc
-except Exception:  # noqa: BLE001  -- numpy / _adc unavailable: (A) codegen is still checked below
+    import pops
+except Exception:  # noqa: BLE001  -- numpy / _pops unavailable: (A) codegen is still checked below
     np = None
     adc = None
 
@@ -124,10 +124,10 @@ if adc is not None:
     def transport_model():
         """Uncoupled isothermal fluid (no field coupling into the flux), NO source brick: native H is a
         pure Euler transport step and native S (run_source_stage) is a no-op."""
-        return adc.Model(state=adc.FluidState("isothermal", cs2=0.5),
-                         transport=adc.IsothermalFlux(),
-                         source=adc.NoSource(),
-                         elliptic=adc.BackgroundDensity(alpha=1.0, n0=0.0))
+        return pops.Model(state=pops.FluidState("isothermal", cs2=0.5),
+                         transport=pops.IsothermalFlux(),
+                         source=pops.NoSource(),
+                         elliptic=pops.BackgroundDensity(alpha=1.0, n0=0.0))
 
     src = strang_program().emit_cpp_program(model=transport_model())
     chk_a(src.count("ctx.rhs_into(") == 2,
@@ -135,7 +135,7 @@ if adc is not None:
     chk_a(src.count("ctx.lincomb(") >= 1 and src.count("ctx.axpy(") >= 2,
           "the half-step updates lower to axpy + a commit lincomb")
 else:
-    print("  -- emit_cpp_program codegen check skipped (numpy/_adc unavailable) --")
+    print("  -- emit_cpp_program codegen check skipped (numpy/_pops unavailable) --")
 
 if fails_a:
     print("FAIL (%d) test_time_strang_parity (A)" % fails_a)
@@ -145,9 +145,9 @@ print("  (A) PASS")
 
 # ============================ (B) native bit-parity: skip without the toolchain ================
 if adc is None:
-    _skip("adc/numpy unavailable (A passed)")
-if not hasattr(adc.System(n=8, L=1.0, periodic=True), "install_program"):
-    _skip("_adc lacks the install_program binding (rebuild _adc) (A passed)")
+    _skip("pops/numpy unavailable (A passed)")
+if not hasattr(pops.System(n=8, L=1.0, periodic=True), "install_program"):
+    _skip("_pops lacks the install_program binding (rebuild _pops) (A passed)")
 
 N = 24
 DT = 2e-3
@@ -165,10 +165,10 @@ def chk_b(cond, label):
 
 def make_sim():
     """A System with ONE uncoupled isothermal block (Forward Euler hyperbolic stage) + inert Poisson."""
-    sim = adc.System(n=N, L=1.0, periodic=True)
+    sim = pops.System(n=N, L=1.0, periodic=True)
     sim.add_block("ions", transport_model(),
-                  spatial=adc.FiniteVolume(limiter="none", riemann="rusanov"),
-                  time=adc.Explicit(method="euler"))
+                  spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                  time=pops.Explicit(method="euler"))
     sim.set_poisson("charge_density", "geometric_mg")  # inert: BackgroundDensity n0=0, flux reads no phi
     x = (np.arange(N) + 0.5) / N
     X, Y = np.meshgrid(x, x, indexing="ij")
@@ -177,11 +177,11 @@ def make_sim():
     return sim
 
 
-print("== (B) compiled std.strang == native adc.Strang (bit-exact) ==")
+print("== (B) compiled std.strang == native pops.Strang (bit-exact) ==")
 
 # Compile the std.strang program (skips cleanly without a compiler / visible Kokkos).
 try:
-    compiled = adc.compile_problem(model=transport_model(), time=strang_program("strang_prog"))
+    compiled = pops.compile_problem(model=transport_model(), time=strang_program("strang_prog"))
 except RuntimeError as exc:  # no compiler / no Kokkos visible / .so compile failed
     _skip("compile_problem could not build the .so: %s (A passed)" % str(exc)[:160])
 
@@ -205,7 +205,7 @@ U_compiled = np.array(sim_compiled.get_state("ions"))
 e_native = float(np.abs(U_native - U_compiled).max())
 print("  native parity: max|native - compiled| = %.2e over %d steps" % (e_native, NSTEP))
 chk_b(np.array_equal(U_native, U_compiled),
-      "compiled std.strang == native adc.Strang BIT-EXACTLY (max|d| = %.2e)" % e_native)
+      "compiled std.strang == native pops.Strang BIT-EXACTLY (max|d| = %.2e)" % e_native)
 
 # Independent OFFLINE reference: replay the identical H(dt/2); no-op; H(dt/2) sub-steps via the runtime
 # primitives the program drives (set_state + eval_rhs). Matches the compiled program to machine eps (the

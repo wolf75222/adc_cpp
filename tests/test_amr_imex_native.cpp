@@ -34,12 +34,12 @@
 //   parite decisive qui ne casse pas nvcc. Les legs .so (add_native_block) AUTO-SAUTENT sous Kokkos
 //   (loader CPU nu, ABI incompatible) ; la parite CPU reste couverte par le chemin direct.
 //
-// CMake injecte ADC_TEST_CXX, ADC_TEST_INCLUDE, ADC_TEST_CXX_STD, ADC_TEST_TMPDIR (meme pattern que
+// CMake injecte POPS_TEST_CXX, POPS_TEST_INCLUDE, POPS_TEST_CXX_STD, POPS_TEST_TMPDIR (meme pattern que
 // test_amr_riemann_native).
-#include <adc/physics/bricks/bricks.hpp>  // CompositeModel, Euler, PotentialForce, ChargeDensity, BackgroundDensity
-#include <adc/runtime/builders/compiled/amr_dsl_block.hpp>
-#include <adc/runtime/amr_system.hpp>
-#include <adc/runtime/config/model_spec.hpp>
+#include <pops/physics/bricks/bricks.hpp>  // CompositeModel, Euler, PotentialForce, ChargeDensity, BackgroundDensity
+#include <pops/runtime/builders/compiled/amr_dsl_block.hpp>
+#include <pops/runtime/amr_system.hpp>
+#include <pops/runtime/config/model_spec.hpp>
 
 #include <cmath>
 #include <cstdio>
@@ -49,11 +49,11 @@
 #include <string>
 #include <vector>
 
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
 #include <Kokkos_Core.hpp>
 #endif
 
-using namespace adc;
+using namespace pops;
 
 namespace {
 
@@ -85,7 +85,7 @@ struct StiffRelax {
   Real inv_eps = Real(0);
   Real u_eq[4] = {Real(1), Real(0), Real(0), Real(2.5)};  // rho, mx, my, E d'equilibre
   template <class State>
-  ADC_HD State apply(const State& u, const Aux&) const {
+  POPS_HD State apply(const State& u, const Aux&) const {
     State s{};
     for (int c = 0; c < State::size(); ++c)
       s[c] = inv_eps * (u_eq[c] - u[c]);
@@ -146,49 +146,49 @@ std::string loader_source() {
   // emitted source verbatim.
   // clang-format off
   return R"CPP(
-#include <adc/runtime/builders/compiled/amr_dsl_block.hpp>
-#include <adc/runtime/dynamic/abi_key.hpp>
-#include <adc/physics/bricks/bricks.hpp>
+#include <pops/runtime/builders/compiled/amr_dsl_block.hpp>
+#include <pops/runtime/dynamic/abi_key.hpp>
+#include <pops/physics/bricks/bricks.hpp>
 #include <cstdlib>
 #include <cstring>
 #include <string>
-namespace adc_generated {
-using PotModel = adc::CompositeModel<adc::Euler, adc::PotentialForce, adc::ChargeDensity>;
+namespace pops_generated {
+using PotModel = pops::CompositeModel<pops::Euler, pops::PotentialForce, pops::ChargeDensity>;
 struct StiffRelax {
-  adc::Real inv_eps = adc::Real(0);
-  adc::Real u_eq[4] = {adc::Real(1), adc::Real(0), adc::Real(0), adc::Real(2.5)};
+  pops::Real inv_eps = pops::Real(0);
+  pops::Real u_eq[4] = {pops::Real(1), pops::Real(0), pops::Real(0), pops::Real(2.5)};
   template <class State>
-  ADC_HD State apply(const State& u, const adc::Aux&) const {
+  POPS_HD State apply(const State& u, const pops::Aux&) const {
     State s{};
     for (int c = 0; c < State::size(); ++c) s[c] = inv_eps * (u_eq[c] - u[c]);
     return s;
   }
 };
-using StiffModel = adc::CompositeModel<adc::Euler, StiffRelax, adc::BackgroundDensity>;
+using StiffModel = pops::CompositeModel<pops::Euler, StiffRelax, pops::BackgroundDensity>;
 }
 // LITTERAL preprocesseur (PAS abi_key_string() : une inline serait interposee, ELF/RTLD_GLOBAL,
 // vers la copie du module deja charge -> cle du module renvoyee -> garde d'ABI tautologique).
-extern "C" const char* adc_native_abi_key() { return ADC_ABI_KEY_LITERAL; }
-extern "C" void adc_install_native_amr(void* sys, const char* name, const char* limiter,
+extern "C" const char* pops_native_abi_key() { return POPS_ABI_KEY_LITERAL; }
+extern "C" void pops_install_native_amr(void* sys, const char* name, const char* limiter,
                                        const char* riemann, const char* recon, const char* time,
                                        double gamma, int substeps) {
-  adc::AmrSystem* s = reinterpret_cast<adc::AmrSystem*>(sys);
+  pops::AmrSystem* s = reinterpret_cast<pops::AmrSystem*>(sys);
   if (std::strncmp(name, "stiff:", 6) == 0) {
     const double eps = std::atof(name + 6);
-    adc_generated::StiffRelax r;
-    r.inv_eps = static_cast<adc::Real>(1.0 / eps);
-    adc::add_compiled_model<adc_generated::StiffModel>(
+    pops_generated::StiffRelax r;
+    r.inv_eps = static_cast<pops::Real>(1.0 / eps);
+    pops::add_compiled_model<pops_generated::StiffModel>(
         *s, name,
-        adc_generated::StiffModel{adc::Euler{static_cast<adc::Real>(gamma)}, r,
-                                  adc::BackgroundDensity{adc::Real(0), adc::Real(0)}},
+        pops_generated::StiffModel{pops::Euler{static_cast<pops::Real>(gamma)}, r,
+                                  pops::BackgroundDensity{pops::Real(0), pops::Real(0)}},
         limiter, riemann, recon, time, gamma, substeps);
     return;
   }
-  adc::add_compiled_model<adc_generated::PotModel>(
+  pops::add_compiled_model<pops_generated::PotModel>(
       *s, name,
-      adc_generated::PotModel{adc::Euler{static_cast<adc::Real>(gamma)},
-                              adc::PotentialForce{static_cast<adc::Real>()CPP" +
-         std::to_string(kQom) + R"CPP()}, adc::ChargeDensity{adc::Real(1)}},
+      pops_generated::PotModel{pops::Euler{static_cast<pops::Real>(gamma)},
+                              pops::PotentialForce{static_cast<pops::Real>()CPP" +
+         std::to_string(kQom) + R"CPP()}, pops::ChargeDensity{pops::Real(1)}},
       limiter, riemann, recon, time, gamma, substeps);
 }
 )CPP";
@@ -199,9 +199,9 @@ bool compile_loader(const std::string& src_path, const std::string& so_path) {
 #if defined(__APPLE__)
   const std::string cc = "/usr/bin/c++";
 #else
-  const std::string cc = ADC_TEST_CXX;
+  const std::string cc = POPS_TEST_CXX;
 #endif
-  std::string cmd = cc + " -shared -fPIC -std=" + ADC_TEST_CXX_STD + " -O2 -I " + ADC_TEST_INCLUDE +
+  std::string cmd = cc + " -shared -fPIC -std=" + POPS_TEST_CXX_STD + " -O2 -I " + POPS_TEST_INCLUDE +
                     " " + src_path + " -o " + so_path;
 #if defined(__APPLE__)
   cmd += " -undefined dynamic_lookup";
@@ -236,7 +236,7 @@ Snap run(int n, const std::vector<double>& rho, int nsteps, double dt, Setup set
 }  // namespace
 
 int main(int argc, char** argv) {
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   Kokkos::ScopeGuard guard(argc, argv);
 #else
   (void)argc;
@@ -355,14 +355,14 @@ int main(int argc, char** argv) {
   // (C) CHEMIN .so : add_native_block(loader) == add_compiled_model, sous IMEX (A potential + B stiff).
   //     Le loader est recompile par un g++ nu -> incompatible avec un module Kokkos : SAUTE.
   // ============================================================================================
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   std::printf("skip (C) loader .so (backend Kokkos : loader CPU nu incompatible)\n");
 #else
-  const char* cxx = ADC_TEST_CXX;
+  const char* cxx = POPS_TEST_CXX;
   if (!cxx || cxx[0] == '\0') {
     std::printf("skip (C) loader .so (aucun compilateur C++ connu du build)\n");
   } else {
-    const std::string tmp = std::string(ADC_TEST_TMPDIR) + "/amr_imex_native_" +
+    const std::string tmp = std::string(POPS_TEST_TMPDIR) + "/amr_imex_native_" +
                             std::to_string(static_cast<long>(std::clock()));
     const std::string src = tmp + ".cpp";
     const std::string so = tmp + ".so";
@@ -424,7 +424,7 @@ int main(int argc, char** argv) {
           "OK (C) add_native_block == add_compiled_model sous IMEX (potential + stiff, dmax==0)\n");
     }
   }
-#endif  // ADC_HAS_KOKKOS
+#endif  // POPS_HAS_KOKKOS
 
   if (fails == 0)
     std::printf(

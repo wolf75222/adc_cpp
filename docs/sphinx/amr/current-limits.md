@@ -10,14 +10,14 @@ What the AMR does not do yet.
   fine, it is not a multi-level composite elliptic solve. This is sufficient for
   the diocotron observable (which lives on a median circle resolved by the coarse) but worth knowing.
 - **Global Schur source stage on AMR: single block only.** The Schur-condensed source splitting
-  (`adc.Split` / `adc.Strang` with `CondensedSchur`) is available on AMR via `AmrSystem.add_equation`,
+  (`pops.Split` / `pops.Strang` with `CondensedSchur`) is available on AMR via `AmrSystem.add_equation`,
   assembled on the coarse level, when the hierarchy has a single block; it raises on a refined
   multi-block one. `AmrSystem.add_block` rejects it (use `add_equation`).
 - **Multirate via the compiled path: restricted.** On the "production" DSL path (`.so`),
   `add_equation` explicitly rejects `stride > 1` and the partial IMEX mask
   (`implicit_vars` / `implicit_roles`): the flat ABI of the loader does not carry them, and they
   would silently be taken at their default values. For a multirate or partial-IMEX-mask `.so`,
-  go through native `add_block` (`adc.Model(...)`), which exposes them.
+  go through native `add_block` (`pops.Model(...)`), which exposes them.
 - **Elliptic solver.** On AMR, the solver is always the geometric multigrid
   (`geometric_mg`); no FFT. The right-hand side is the sum of the elliptic bricks of the blocks.
 - **Validation: what is tested vs ROMEO only.** The multi-block AMR is covered by the

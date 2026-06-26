@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""System POLAIRE multi-box (decoupage en BANDES theta, ADC-67) a travers adc.PolarMesh(theta_boxes=N).
+"""System POLAIRE multi-box (decoupage en BANDES theta, ADC-67) a travers pops.PolarMesh(theta_boxes=N).
 
 theta_boxes=1 (defaut) = mono-box, STRICTEMENT bit-identique a l'historique. theta_boxes>1 = l'anneau
 (r, theta) est decoupe en N bandes azimutales (chaque boite couvre tout le rayon) ; le TRANSPORT polaire
@@ -29,7 +29,7 @@ import sys
 import numpy as np
 
 try:
-    import adc
+    import pops
 except ImportError as e:  # PYTHONPATH non pose : skip CI-safe (comme les autres tests Python)
     print("skip  module adc absent (PYTHONPATH ?) : %s" % e)
     sys.exit(0)
@@ -49,24 +49,24 @@ def _iso_system(theta_boxes):
     """System polaire isotherme NATIF (rho, mom_r, mom_theta) a theta_boxes bandes. AUCUN Poisson n'est
     configure ni resolu : on n'exerce que le TRANSPORT (eval_rhs) -- le flux isotherme est self-contenu
     (cs2 du modele), il ne lit pas grad phi."""
-    sim = adc.System(mesh=adc.PolarMesh(r_min=RMIN, r_max=RMAX, nr=NR, ntheta=NTH, theta_boxes=theta_boxes))
+    sim = pops.System(mesh=pops.PolarMesh(r_min=RMIN, r_max=RMAX, nr=NR, ntheta=NTH, theta_boxes=theta_boxes))
     sim.add_block(
         "iso",
-        model=adc.Model(state=adc.FluidState(kind="isothermal", cs2=1.0),
-                        transport=adc.IsothermalFlux(), source=adc.NoSource(),
-                        elliptic=adc.BackgroundDensity(alpha=1.0, n0=0.0)),
-        spatial=adc.Spatial(minmod=True), time=adc.Explicit())
+        model=pops.Model(state=pops.FluidState(kind="isothermal", cs2=1.0),
+                        transport=pops.IsothermalFlux(), source=pops.NoSource(),
+                        elliptic=pops.BackgroundDensity(alpha=1.0, n0=0.0)),
+        spatial=pops.Spatial(minmod=True), time=pops.Explicit())
     return sim
 
 
 def _exb_system(theta_boxes):
     """System polaire ExB scalaire (1 variable) a theta_boxes bandes. Poisson NON resolu ici (cf. (c))."""
-    sim = adc.System(mesh=adc.PolarMesh(r_min=RMIN, r_max=RMAX, nr=NR, ntheta=NTH, theta_boxes=theta_boxes))
+    sim = pops.System(mesh=pops.PolarMesh(r_min=RMIN, r_max=RMAX, nr=NR, ntheta=NTH, theta_boxes=theta_boxes))
     sim.add_block(
         "ne",
-        model=adc.Model(state=adc.Scalar(), transport=adc.ExB(B0=1.0), source=adc.NoSource(),
-                        elliptic=adc.ChargeDensity(charge=1.0)),
-        spatial=adc.Spatial(minmod=True), time=adc.Explicit())
+        model=pops.Model(state=pops.Scalar(), transport=pops.ExB(B0=1.0), source=pops.NoSource(),
+                        elliptic=pops.ChargeDensity(charge=1.0)),
+        spatial=pops.Spatial(minmod=True), time=pops.Explicit())
     return sim
 
 
@@ -194,7 +194,7 @@ def test_rejections_divisibility_and_direct_poisson():
     # (c1) theta_boxes ne divisant pas ntheta : PolarMesh leve cote Python.
     raised = False
     try:
-        adc.PolarMesh(r_min=RMIN, r_max=RMAX, nr=NR, ntheta=NTH, theta_boxes=5)  # 32 % 5 != 0
+        pops.PolarMesh(r_min=RMIN, r_max=RMAX, nr=NR, ntheta=NTH, theta_boxes=5)  # 32 % 5 != 0
     except ValueError:
         raised = True
     assert raised, "PolarMesh(theta_boxes=5, ntheta=32) doit lever (5 ne divise pas 32)"
@@ -202,20 +202,20 @@ def test_rejections_divisibility_and_direct_poisson():
     # theta_boxes > ntheta : refuse aussi.
     raised = False
     try:
-        adc.PolarMesh(r_min=RMIN, r_max=RMAX, nr=NR, ntheta=8, theta_boxes=16)
+        pops.PolarMesh(r_min=RMIN, r_max=RMAX, nr=NR, ntheta=8, theta_boxes=16)
     except ValueError:
         raised = True
     assert raised, "PolarMesh(theta_boxes=16, ntheta=8) doit lever (theta_boxes > ntheta)"
 
     # (c2) un SystemConfig construit a la main (contourne PolarMesh) est protege cote C++.
-    cfg = adc.SystemConfig()
+    cfg = pops.SystemConfig()
     cfg.geometry = "polar"
     cfg.r_min, cfg.r_max, cfg.nr, cfg.ntheta = RMIN, RMAX, NR, NTH
     cfg.theta_boxes = 5  # 32 % 5 != 0
     cfg.n = NR
     raised = False
     try:
-        adc.System(config=cfg)
+        pops.System(config=cfg)
     except Exception:
         raised = True
     assert raised, "System(theta_boxes=5, ntheta=32) doit lever cote C++ (check_geometry)"
@@ -255,7 +255,7 @@ def test_state_roundtrip_multibox():
 
     # set_primitive_state -> get_primitive_state == identite (conversion modele consistante, multi-box).
     # On passe par le binding bas niveau (tableau (ncomp, ntheta, nr)) pour eviter la reshape carree de
-    # la facade adc.System.set_primitive_state (hypothese n x n, hors-sujet ici).
+    # la facade pops.System.set_primitive_state (hypothese n x n, hors-sujet ici).
     dr = (RMAX - RMIN) / NR
     dth = 2.0 * math.pi / NTH
     P0 = np.empty((3, NTH, NR))

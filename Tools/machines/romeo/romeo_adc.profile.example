@@ -6,17 +6,17 @@
 #   source ~/romeo_adc.profile            # sur le login (x64cpu) ou DANS un job armgpu
 #
 # ROMEO a DEUX architectures incompatibles ; choisir AVANT de sourcer :
-#   ADC_ROMEO_ARCH=x64cpu  -> AMD EPYC 9654 (192 coeurs/noeud), CPU pur, compilable sur le login
-#   ADC_ROMEO_ARCH=armgpu  -> GH200 Grace-Hopper (4x H100/noeud), aarch64 : compiler DANS un job
+#   POPS_ROMEO_ARCH=x64cpu  -> AMD EPYC 9654 (192 coeurs/noeud), CPU pur, compilable sur le login
+#   POPS_ROMEO_ARCH=armgpu  -> GH200 Grace-Hopper (4x H100/noeud), aarch64 : compiler DANS un job
 #                             (salloc --constraint=armgpu ...), JAMAIS sur le login (x86_64).
 # Rappels SLURM (cf. doc ROMEO) : --account, --time, --mem (PAR NOEUD), --constraint obligatoires ;
 # partitions instant (<=1h, prio max) / short (<=24h) / long (<=30j) ; travailler dans
 # /scratch_p/$USER/$SLURM_JOBID. Ne JAMAIS mettre ce profil dans ~/.bashrc.
 
-export ADC_ROMEO_ARCH="${ADC_ROMEO_ARCH:-x64cpu}"
+export POPS_ROMEO_ARCH="${POPS_ROMEO_ARCH:-x64cpu}"
 
 # --- 1. Environnement Spack du site (OBLIGATOIRE : rien n'est charge par defaut, meme pas spack) --
-if [ "$ADC_ROMEO_ARCH" = "armgpu" ]; then
+if [ "$POPS_ROMEO_ARCH" = "armgpu" ]; then
   romeo_load_armgpu_env
 else
   romeo_load_x64cpu_env
@@ -29,8 +29,8 @@ fi
 spack load cmake 2>/dev/null || echo "ATTENTION : cmake indisponible ici (configurer sur le login)"
 spack load ninja 2>/dev/null || true
 
-# --- 3. Compilateur (fige pour la coherence ABI du DSL : le chemin est bake dans _adc) ---------
-if [ "$ADC_ROMEO_ARCH" = "armgpu" ]; then
+# --- 3. Compilateur (fige pour la coherence ABI du DSL : le chemin est bake dans _pops) ---------
+if [ "$POPS_ROMEO_ARCH" = "armgpu" ]; then
   # GH200 : Kokkos CUDA exige nvcc_wrapper COMME compilateur. KOKKOS_ROOT = votre install Kokkos
   # (Kokkos_ENABLE_CUDA=ON, Kokkos_ARCH_HOPPER90 ; cf. docs/GPU_ROMEO.md pour la recette complete).
   export KOKKOS_ROOT="${KOKKOS_ROOT:-$HOME/opt/kokkos-cuda}"   # A ADAPTER
@@ -46,10 +46,10 @@ fi
 # --- 4. DSL backend="production" : parite loader/module ---------------------------------------
 # Le loader .so est compile AU RUNTIME : il doit voir le MEME Kokkos que le module, et le cache
 # de .so doit vivre dans un espace accessible des noeuds (PAS le home sature : quota 20 Go).
-[ -n "${KOKKOS_ROOT:-}" ] && export ADC_KOKKOS_ROOT="$KOKKOS_ROOT"
-[ "$ADC_ROMEO_ARCH" = "armgpu" ] && export ADC_KOKKOS_USE_NVCC_WRAPPER=1
-export ADC_CACHE_DIR="${ADC_CACHE_DIR:-/scratch_p/$USER/adc_cache_$ADC_ROMEO_ARCH}"
-mkdir -p "$ADC_CACHE_DIR" 2>/dev/null || true
+[ -n "${KOKKOS_ROOT:-}" ] && export POPS_KOKKOS_ROOT="$KOKKOS_ROOT"
+[ "$POPS_ROMEO_ARCH" = "armgpu" ] && export POPS_KOKKOS_USE_NVCC_WRAPPER=1
+export POPS_CACHE_DIR="${POPS_CACHE_DIR:-/scratch_p/$USER/pops_cache_$POPS_ROMEO_ARCH}"
+mkdir -p "$POPS_CACHE_DIR" 2>/dev/null || true
 
 # --- 5. Threads / placement (a poser dans le job, par tache SLURM) ----------------------------
 # OMP_NUM_THREADS suit --cpus-per-task ; l'affinite spread/threads est le bon defaut NUMA.
@@ -58,11 +58,11 @@ export OMP_PROC_BIND="${OMP_PROC_BIND:-spread}"
 export OMP_PLACES="${OMP_PLACES:-threads}"
 
 # --- 6. Quick-fix MPI multi-GPU (halos UVM, OpenMPI 4.x ; le fix propre est dans le code #254) --
-[ "$ADC_ROMEO_ARCH" = "armgpu" ] && export OMPI_MCA_btl_smcuda_use_cuda_ipc=0
+[ "$POPS_ROMEO_ARCH" = "armgpu" ] && export OMPI_MCA_btl_smcuda_use_cuda_ipc=0
 
-echo "Profil adc_cpp ROMEO charge : arch=$ADC_ROMEO_ARCH CC=$CC CXX=$CXX"
-echo "  KOKKOS_ROOT=${KOKKOS_ROOT:-'(vide : build serie)'}  ADC_CACHE_DIR=$ADC_CACHE_DIR"
+echo "Profil adc_cpp ROMEO charge : arch=$POPS_ROMEO_ARCH CC=$CC CXX=$CXX"
+echo "  KOKKOS_ROOT=${KOKKOS_ROOT:-'(vide : build serie)'}  POPS_CACHE_DIR=$POPS_CACHE_DIR"
 echo "Build type :"
-echo "  cmake -S . -B build-\$ADC_ROMEO_ARCH -G Ninja -DCMAKE_BUILD_TYPE=Release \\"
+echo "  cmake -S . -B build-\$POPS_ROMEO_ARCH -G Ninja -DCMAKE_BUILD_TYPE=Release \\"
 echo "        \${KOKKOS_ROOT:+-DADC_USE_KOKKOS=ON -DKokkos_ROOT=\$KOKKOS_ROOT} -DADC_USE_MPI=ON"
-echo "  ninja -C build-\$ADC_ROMEO_ARCH    # relancable seul dans l'allocation"
+echo "  ninja -C build-\$POPS_ROMEO_ARCH    # relancable seul dans l'allocation"

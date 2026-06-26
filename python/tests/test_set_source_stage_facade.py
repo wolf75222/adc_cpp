@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""ADC-308 : methode PUBLIQUE adc.System.set_source_stage sur la facade.
+"""ADC-308 : methode PUBLIQUE pops.System.set_source_stage sur la facade.
 
-Le moteur expose set_source_stage cote binding (_adc.System) et la facade
-adc.System l'APPELLE en interne (add_block / add_equation, etage source condense
+Le moteur expose set_source_stage cote binding (_pops.System) et la facade
+pops.System l'APPELLE en interne (add_block / add_equation, etage source condense
 par Schur), mais elle ne la publiait PAS comme methode publique : un cas aval
 devait atteindre l'objet prive (sim._s.set_source_stage(...)). On surface ici un
 mince wrapper public, de meme signature que le binding.
 
 Le test prouve DEUX choses, chacune non triviale :
 
-  1) EXPLICITE -- adc.System.set_source_stage est une vraie methode DEFINIE SUR LA
+  1) EXPLICITE -- pops.System.set_source_stage est une vraie methode DEFINIE SUR LA
      FACADE, pas un simple transfert implicite via __getattr__ vers _s. On le
      verifie avec inspect.getattr_static, qui NE declenche PAS __getattr__ : sur le
      code d'avant ADC-308 il leve AttributeError (le test ECHOUE), la garde est donc
@@ -29,7 +29,7 @@ import sys
 import numpy as np
 
 try:
-    import adc
+    import pops
 except ImportError as e:  # module pas construit : on se saute proprement (comme les freres)
     print("skip  module adc absent (PYTHONPATH ?) : %s" % e)
     sys.exit(0)
@@ -43,11 +43,11 @@ def chk(cond, label):
 
 def iso_fluid_model(cs2=1.0, alpha=1.0):
     """Fluide isotherme natif : modele MINIMAL accepte par set_source_stage."""
-    return adc.Model(
-        state=adc.FluidState(kind="isothermal", cs2=cs2),
-        transport=adc.IsothermalFlux(),
-        source=adc.NoSource(),
-        elliptic=adc.BackgroundDensity(alpha=alpha, n0=0.0),
+    return pops.Model(
+        state=pops.FluidState(kind="isothermal", cs2=cs2),
+        transport=pops.IsothermalFlux(),
+        source=pops.NoSource(),
+        elliptic=pops.BackgroundDensity(alpha=alpha, n0=0.0),
     )
 
 
@@ -62,20 +62,20 @@ def smooth_profile(n, L):
 
 
 def build_block(n, L, B0, alpha, cs2):
-    """System cartesien + 1 bloc isotherme natif en TRANSPORT PUR (adc.Explicit).
+    """System cartesien + 1 bloc isotherme natif en TRANSPORT PUR (pops.Explicit).
 
     L'etage source n'est PAS cable ici : l'appelant decide ensuite (facade publique,
     chemin _s, ou rien). B_z est pose AVANT (prerequis du terme de Lorentz condense).
     """
-    sim = adc.System(n=n, L=L, periodic=False)
+    sim = pops.System(n=n, L=L, periodic=False)
     sim.set_poisson(bc="dirichlet")
     sim.set_magnetic_field(B0 * np.ones((n, n)))
     sim.add_equation(
         "ions",
         model=iso_fluid_model(cs2=cs2, alpha=alpha),
-        spatial=adc.FiniteVolume(limiter="minmod", riemann="rusanov",
+        spatial=pops.FiniteVolume(limiter="minmod", riemann="rusanov",
                                  variables="conservative"),
-        time=adc.Explicit(),
+        time=pops.Explicit(),
     )
     rho0, u0, v0 = smooth_profile(n, L)
     sim.set_primitive_state("ions", rho=rho0, u=u0, v=v0)
@@ -97,11 +97,11 @@ def main():
     #     getattr_static ne declenche PAS __getattr__ : sans le wrapper, AttributeError.
     # ------------------------------------------------------------------
     try:
-        meth = inspect.getattr_static(adc.System, "set_source_stage")
+        meth = inspect.getattr_static(pops.System, "set_source_stage")
     except AttributeError:
         meth = None
     chk(meth is not None,
-        "(1a) adc.System.set_source_stage defini sur la facade (pas seulement __getattr__)")
+        "(1a) pops.System.set_source_stage defini sur la facade (pas seulement __getattr__)")
     chk(callable(meth) and getattr(meth, "__qualname__", "") == "System.set_source_stage",
         "(1b) c'est bien la methode de la facade (qualname=%r)"
         % getattr(meth, "__qualname__", None))

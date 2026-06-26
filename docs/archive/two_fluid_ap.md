@@ -123,7 +123,7 @@ beyond the pure rotation validated here.
 - AP bound and quasi-neutrality at `omega_pe = 1e3`, `dt * omega_pe = 5`, where the explicit
   blows up.
 - Mass conservation per species to roundoff (`~1e-11`), centered and upwind.
-- GPU-portable GH200 (same kernels `for_each_cell` + `ADC_HD`, on-device multigrid),
+- GPU-portable GH200 (same kernels `for_each_cell` + `POPS_HD`, on-device multigrid),
   bit-identical to CPU.
 - Drivable from Python by the scenario `adc_cases/two_fluid_ap/`: the `TwoFluidAP` class
   of `run.py` (config `n`, `omega_pe`, `upwind_continuity`, ...) loads the C ABI compiled on the

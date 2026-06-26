@@ -12,7 +12,7 @@ import sys
 import numpy as np
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-CASES = os.environ.get("ADC_CASES",
+CASES = os.environ.get("POPS_CASES",
                        os.path.join(os.path.dirname(os.path.dirname(HERE)), "adc_cases"))
 sys.path.insert(0, os.path.join(CASES, "hyqmom15"))
 sys.path.insert(0, CASES)

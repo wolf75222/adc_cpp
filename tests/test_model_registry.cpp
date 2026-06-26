@@ -1,4 +1,4 @@
-// Registre UNIQUE des tags de BRIQUES DE MODELE (include/adc/runtime/model_registry.hpp) : source de
+// Registre UNIQUE des tags de BRIQUES DE MODELE (include/pops/runtime/model_registry.hpp) : source de
 // verite partagee par tous les dispatchs modele (detail::dispatch_transport / dispatch_source /
 // dispatch_elliptic, le dispatch polaire, et les seams par-transport de python/system.cpp /
 // python/amr_system.cpp). Pendant de test_dispatch_tags.cpp (limiteurs + flux) pour l'AXE MODELE.
@@ -15,13 +15,13 @@
 // Le routage effectif (chaque tag builtin atteint bien une branche du dispatch) est verifie cote
 // test_config_model_validation.cpp, qui lie la machinerie de dispatch.
 
-#include <adc/runtime/dynamic/model_registry.hpp>
+#include <pops/runtime/dynamic/model_registry.hpp>
 
 #include <cstdio>
 #include <stdexcept>
 #include <string>
 
-using namespace adc;
+using namespace pops;
 
 namespace {
 

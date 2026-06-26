@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Construit + lance le front C++ DIRECT (frontend_cpp) du CAS SUR pour UN backend, et imprime sa
-# ligne JSONL (schema adc_perf_v1). MEMES recettes cmake que run_bench.sh ; le SHA/branche sont
+# ligne JSONL (schema pops_perf_v1). MEMES recettes cmake que run_bench.sh ; le SHA/branche sont
 # injectes a la configuration (le binaire ne lance pas git). ZERO optimisation : on ne fait que MESURER.
 #
 # Usage :

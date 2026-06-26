@@ -1,12 +1,12 @@
 // Geometry : pas d'espace dx/dy, centres de cellule, raffinement.
 
-#include <adc/mesh/index/box2d.hpp>
-#include <adc/mesh/geometry/geometry.hpp>
+#include <pops/mesh/index/box2d.hpp>
+#include <pops/mesh/geometry/geometry.hpp>
 
 #include <cmath>
 #include <cstdio>
 
-using namespace adc;
+using namespace pops;
 
 int main() {
   int fails = 0;

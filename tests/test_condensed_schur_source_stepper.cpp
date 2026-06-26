@@ -1,7 +1,7 @@
 // ETAGE SOURCE condense par Schur (CondensedSchurSourceStepper, niveau 4 de
 // docs/SCHUR_CONDENSATION_DESIGN.md) : test SOURCE-ONLY (transport gele) d'un fluide magnetise sous la
 // source implicite couplee potentiel / vitesse / Lorentz (Hoffart et al., arXiv:2510.11808). Cf.
-// include/adc/coupling/condensed_schur_source_stepper.hpp.
+// include/pops/coupling/condensed_schur_source_stepper.hpp.
 //
 // SYSTEME SOURCE (transport gele), constant en espace (rho = rho0, B_z = B0, alpha) :
 //   d_t v   = -grad phi + v x Omega   (Omega porte par B_z ; (v x Omega)_x = +B0 v_y, _y = -B0 v_x)
@@ -30,23 +30,23 @@
 // les rangs, y compris vides) : iterations et resultat invariants au nombre de rangs. Les verifs
 // (ecarts MAX, normes) sont reduites par all_reduce_max : un FAIL sur un rang -> FAIL partout.
 
-#include <adc/coupling/schur/source/condensed_schur_source_stepper.hpp>
+#include <pops/coupling/schur/source/condensed_schur_source_stepper.hpp>
 
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/layout/distribution_mapping.hpp>
-#include <adc/mesh/execution/for_each.hpp>
-#include <adc/mesh/geometry/geometry.hpp>
-#include <adc/mesh/storage/mf_arith.hpp>
-#include <adc/mesh/storage/multifab.hpp>
-#include <adc/mesh/boundary/physical_bc.hpp>
-#include <adc/numerics/elliptic/mg/geometric_mg.hpp>
-#include <adc/numerics/linalg/lorentz_eliminator.hpp>
-#include <adc/parallel/comm.hpp>
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/layout/distribution_mapping.hpp>
+#include <pops/mesh/execution/for_each.hpp>
+#include <pops/mesh/geometry/geometry.hpp>
+#include <pops/mesh/storage/mf_arith.hpp>
+#include <pops/mesh/storage/multifab.hpp>
+#include <pops/mesh/boundary/physical_bc.hpp>
+#include <pops/numerics/elliptic/mg/geometric_mg.hpp>
+#include <pops/numerics/linalg/lorentz_eliminator.hpp>
+#include <pops/parallel/comm.hpp>
 
 #include <cmath>
 #include <cstdio>
 
-using namespace adc;
+using namespace pops;
 static constexpr double kPi = 3.14159265358979323846;
 
 // ----------------------------------------------------------------------------------------------
@@ -92,7 +92,7 @@ struct InitKernel {
   Array4 st, phi;
   Real rho0;
   int c_rho, c_mx, c_my, c_E;  // c_E < 0 si pas d'energie
-  ADC_HD void operator()(int i, int j) const {
+  POPS_HD void operator()(int i, int j) const {
     const Real x = geom.x_cell(i), y = geom.y_cell(j);
     const Real sx = std::sin(Real(kPi) * x), sy = std::sin(Real(kPi) * y);
     const Real vx = Real(0.6) * sx * sy;                            // v0_x
@@ -111,7 +111,7 @@ struct InitKernel {
 struct ConstBzKernel {
   Array4 bz;
   Real B0;
-  ADC_HD void operator()(int i, int j) const { bz(i, j, 0) = B0; }
+  POPS_HD void operator()(int i, int j) const { bz(i, j, 0) = B0; }
 };
 
 // norme L2 GLOBALE (sqrt sum x^2) de la VITESSE (mx,my)/rho de l'etat : diagnostic de stabilite.
@@ -206,7 +206,7 @@ struct DivVKernel {
   Array4 rhs;
   Real coef;  // alpha rho0
   Real half_idx, half_idy;
-  ADC_HD void operator()(int i, int j) const {
+  POPS_HD void operator()(int i, int j) const {
     const Real divv = (vx(i + 1, j, 0) - vx(i - 1, j, 0)) * half_idx +
                       (vy(i, j + 1, 0) - vy(i, j - 1, 0)) * half_idy;
     rhs(i, j, 0) = coef * divv;
@@ -218,7 +218,7 @@ struct DvKernel {
   ConstArray4 vx, vy, phi;
   Array4 dvx, dvy;
   Real B0, half_idx, half_idy;
-  ADC_HD void operator()(int i, int j) const {
+  POPS_HD void operator()(int i, int j) const {
     const Real gx = (phi(i + 1, j, 0) - phi(i - 1, j, 0)) * half_idx;
     const Real gy = (phi(i, j + 1, 0) - phi(i, j - 1, 0)) * half_idy;
     dvx(i, j, 0) = -gx + B0 * vy(i, j, 0);
@@ -231,14 +231,14 @@ struct AxpyKernel {
   Array4 y;
   ConstArray4 x;
   Real a;
-  ADC_HD void operator()(int i, int j) const { y(i, j, 0) += a * x(i, j, 0); }
+  POPS_HD void operator()(int i, int j) const { y(i, j, 0) += a * x(i, j, 0); }
 };
 // z <- base + a x (composante 0). Foncteur nomme.
 struct ScaleAddKernel {
   Array4 z;
   ConstArray4 base, x;
   Real a;
-  ADC_HD void operator()(int i, int j) const { z(i, j, 0) = base(i, j, 0) + a * x(i, j, 0); }
+  POPS_HD void operator()(int i, int j) const { z(i, j, 0) = base(i, j, 0) + a * x(i, j, 0); }
 };
 
 // Integrateur de reference : porte (vx, vy, phi), avance par RK4 a pas dt sur le systeme discret.

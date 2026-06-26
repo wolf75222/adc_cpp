@@ -10,7 +10,7 @@ see [Installation](../getting-started/installation.md) if you do not. For the fu
 parallel configurations, see the [parallel backends](../backends/index.md) page.
 
 A multi-thread (Kokkos OpenMP) Python module is available too: build it with the
-`python-parallel` CMake preset, then set the thread count from Python with `adc.set_threads(n)`
+`python-parallel` CMake preset, then set the thread count from Python with `pops.set_threads(n)`
 called right after `import adc`. The remaining caveats are real: there is no nvcc/CUDA Python
 module (GPU runs are C++-only), and the Python `adc` module does not exercise the MPI code paths
 (MPI is validated through the C++/ctest path).
@@ -50,17 +50,17 @@ for a fixed thread count but not bit-identical to a lexicographic sum; the max r
 
 ## Threading from Python (set_threads)
 
-The Python module sets its thread count with `adc.set_threads(n)`, which writes `OMP_NUM_THREADS`
+The Python module sets its thread count with `pops.set_threads(n)`, which writes `OMP_NUM_THREADS`
 and `KOKKOS_NUM_THREADS` for you instead of exporting them in the shell. It is pure Python: no
 C++ call, so the value must be in place before Kokkos initializes.
 
 ```python
-import adc
+import pops
 
-adc.set_threads(8)          # or adc.set_threads() for all cores (os.cpu_count())
-print(adc.parallel_info())  # {'has_kokkos': True, 'omp_num_threads': '8', 'first_system_built': False}
+pops.set_threads(8)          # or pops.set_threads() for all cores (os.cpu_count())
+print(pops.parallel_info())  # {'has_kokkos': True, 'omp_num_threads': '8', 'first_system_built': False}
 
-sim = adc.System(n=256)     # Kokkos initializes here and reads the thread count once
+sim = pops.System(n=256)     # Kokkos initializes here and reads the thread count once
 ```
 
 Three rules:
@@ -71,11 +71,11 @@ Three rules:
 2. Call `set_threads` right after `import adc` and before the first `System` or `AmrSystem`. Kokkos
    reads the thread count once at that first object, so a later call cannot change it.
 3. A Serial-only module or a late call only emits a `RuntimeWarning` and is ignored; it never
-   raises. Confirm the state with `adc.has_kokkos()`, `adc.parallel_info()`, or `adc.doctor()`.
+   raises. Confirm the state with `pops.has_kokkos()`, `pops.parallel_info()`, or `pops.doctor()`.
 
 The floating-point note above applies to the Python path too: the per-tile sum reduction is
 deterministic for a fixed thread count but not bit-identical to the serial sum; the max is exact.
-`ADC_FOREACH_SERIAL_THRESHOLD` keeps small grids on a serial loop, so small problems may not speed
+`POPS_FOREACH_SERIAL_THRESHOLD` keeps small grids on a serial loop, so small problems may not speed
 up regardless of the thread count.
 
 ## Next steps

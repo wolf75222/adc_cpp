@@ -14,8 +14,8 @@ import tempfile
 
 import numpy as np
 
-import adc
-from adc import dsl
+import pops
+from pops import dsl
 
 INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "include"))
 
@@ -36,9 +36,9 @@ def build_te_scalar():
 
 def euler_gas(gamma=1.4):
     """Bloc fluide compressible (4 var) : source de T_e via T = p/rho."""
-    return adc.Model(state=adc.FluidState(kind="compressible", gamma=gamma),
-                     transport=adc.CompressibleFlux(), source=adc.NoSource(),
-                     elliptic=adc.ChargeDensity(charge=1.0))
+    return pops.Model(state=pops.FluidState(kind="compressible", gamma=gamma),
+                     transport=pops.CompressibleFlux(), source=pops.NoSource(),
+                     elliptic=pops.ChargeDensity(charge=1.0))
 
 
 def main():
@@ -54,7 +54,7 @@ def main():
     try:
         so = m.compile_so(os.path.join(tmp, "tescalar.so"), INCLUDE)
 
-        sim = adc.System(n=n, L=L, periodic=True)
+        sim = pops.System(n=n, L=L, periodic=True)
         sim.add_dynamic_block("te", so, names=["n"])  # IModel.n_aux()=5 -> ensure_aux_width(5)
         sim.add_block("gas", model=euler_gas(gamma))  # bloc fluide source de T_e
         sim.set_poisson(rhs="charge_density", solver="geometric_mg")

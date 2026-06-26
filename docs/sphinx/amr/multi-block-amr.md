@@ -10,21 +10,21 @@ treatment (`explicit` or `imex`), and its multirate (`substeps` / `stride`). The
 single-level engine of `System`.
 
 ```python
-sim = adc.AmrSystem(n=96, L=1.0, periodic=True)
+sim = pops.AmrSystem(n=96, L=1.0, periodic=True)
 
-electrons = adc.Model(state=adc.FluidState("compressible", gamma=1.4),
-                      transport=adc.CompressibleFlux(),
-                      source=adc.PotentialForce(charge=-1.0),
-                      elliptic=adc.ChargeDensity(charge=-1.0))
-ions = adc.Model(state=adc.FluidState("isothermal", cs2=0.5),
-                 transport=adc.IsothermalFlux(),
-                 source=adc.PotentialForce(charge=+1.0),
-                 elliptic=adc.ChargeDensity(charge=+1.0))
+electrons = pops.Model(state=pops.FluidState("compressible", gamma=1.4),
+                      transport=pops.CompressibleFlux(),
+                      source=pops.PotentialForce(charge=-1.0),
+                      elliptic=pops.ChargeDensity(charge=-1.0))
+ions = pops.Model(state=pops.FluidState("isothermal", cs2=0.5),
+                 transport=pops.IsothermalFlux(),
+                 source=pops.PotentialForce(charge=+1.0),
+                 elliptic=pops.ChargeDensity(charge=+1.0))
 
 sim.add_block("electrons", model=electrons,
-              spatial=adc.Spatial(vanleer=True, flux="hllc"), time=adc.IMEX(substeps=10))
+              spatial=pops.Spatial(vanleer=True, flux="hllc"), time=pops.IMEX(substeps=10))
 sim.add_block("ions", model=ions,
-              spatial=adc.Spatial(minmod=True), time=adc.Explicit())
+              spatial=pops.Spatial(minmod=True), time=pops.Explicit())
 sim.set_refinement(0.05)
 sim.set_poisson(rhs="charge_density", solver="geometric_mg")
 sim.set_density("electrons", ne0)

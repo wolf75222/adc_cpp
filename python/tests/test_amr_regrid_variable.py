@@ -8,11 +8,11 @@ le bloc 0 avec une DENSITE uniforme et une bosse d'ENERGIE (composante 3) en bas
 que refiner sur l'energie deplace le patch fin vers la bosse, la ou le selecteur par defaut (densite
 uniforme < seuil) garde le seed central : les layouts DIFFERENT, preuve que la composante lue a change.
 
-Chemin natif (adc.Model) : aucun compilateur requis (cf. test_amr_conservative_state gardes pre-build).
+Chemin natif (pops.Model) : aucun compilateur requis (cf. test_amr_conservative_state gardes pre-build).
 """
 import numpy as np
 
-import adc
+import pops
 
 fails = 0
 
@@ -35,9 +35,9 @@ def raises(fn):
 # Euler compressible pur (sans source), elliptique de fond trivial (alpha=0) : Poisson a second membre
 # nul -> aucune contrainte de solvabilite periodique (le regrid tague sur le champ conservatif).
 def _comp():
-    return adc.Model(state=adc.FluidState("compressible", gamma=1.4),
-                     transport=adc.CompressibleFlux(), source=adc.NoSource(),
-                     elliptic=adc.BackgroundDensity(alpha=0.0, n0=0.0))
+    return pops.Model(state=pops.FluidState("compressible", gamma=1.4),
+                     transport=pops.CompressibleFlux(), source=pops.NoSource(),
+                     elliptic=pops.BackgroundDensity(alpha=0.0, n0=0.0))
 
 
 # Etat conservatif (rho, rho_u, rho_v, E), shape (4, n, n) attendu par set_conservative_state. Au repos
@@ -56,9 +56,9 @@ def _min_fine_corner(boxes):
 
 
 def _run(n, thr, variable, role, s0):
-    sim = adc.AmrSystem(n=n, L=1.0, periodic=True, regrid_every=1)
-    sim.add_block("gas0", _comp(), time=adc.Explicit())
-    sim.add_block("gas1", _comp(), time=adc.Explicit())
+    sim = pops.AmrSystem(n=n, L=1.0, periodic=True, regrid_every=1)
+    sim.add_block("gas0", _comp(), time=pops.Explicit())
+    sim.add_block("gas1", _comp(), time=pops.Explicit())
     sim.set_poisson(bc="periodic")
     sim.set_refinement(thr, variable=variable, role=role)
     sim.set_conservative_state("gas0", s0)
@@ -95,8 +95,8 @@ chk(raises(lambda: _run(N, 6.0, "", "temperature", s_energy)),
 def _solo_with_selector():
     # Bloc UNIQUE + selecteur : le selecteur n'est cable que sur le moteur multi-blocs ; refuse au
     # build (pas de repli silencieux vers la composante 0).
-    sim = adc.AmrSystem(n=N, L=1.0, periodic=True, regrid_every=1)
-    sim.add_block("solo", _comp(), time=adc.Explicit())
+    sim = pops.AmrSystem(n=N, L=1.0, periodic=True, regrid_every=1)
+    sim.add_block("solo", _comp(), time=pops.Explicit())
     sim.set_poisson(bc="periodic")
     sim.set_refinement(6.0, role="energy")
     sim.set_density("solo", np.full((N, N), 1.0))
@@ -104,7 +104,7 @@ def _solo_with_selector():
 
 
 chk(raises(_solo_with_selector), "bloc unique + selecteur -> leve au build (multi-blocs only)")
-chk(raises(lambda: adc.AmrSystem(n=N, L=1.0, periodic=True, regrid_every=1)
+chk(raises(lambda: pops.AmrSystem(n=N, L=1.0, periodic=True, regrid_every=1)
            .set_refinement(6.0, variable="E", role="energy")),
     "variable ET role -> leve immediatement")
 

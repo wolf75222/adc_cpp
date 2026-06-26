@@ -7,25 +7,25 @@
 #SBATCH --cpus-per-task=16
 #SBATCH --mem=32G
 #SBATCH --time=00:30:00
-#SBATCH --job-name=adc_perf_frontends
-#SBATCH --output=/home/rmdraux/adc_perf_20260608/logs/frontends_cpu_%j.out
-#SBATCH --error=/home/rmdraux/adc_perf_20260608/logs/frontends_cpu_%j.err
+#SBATCH --job-name=pops_perf_frontends
+#SBATCH --output=/home/rmdraux/pops_perf_20260608/logs/frontends_cpu_%j.out
+#SBATCH --error=/home/rmdraux/pops_perf_20260608/logs/frontends_cpu_%j.err
 
 set -u
 
-BASE="${ADC_PERF_BASE:-$HOME/adc_perf_20260608}"
+BASE="${POPS_PERF_BASE:-$HOME/pops_perf_20260608}"
 SRC="$BASE/adc_cpp"
 RESULTS="$BASE/results"
 LOGS="$BASE/logs"
 FRONT="$BASE/frontend_cpu"
-SCRIPT_DIR="${ADC_PERF_SCRIPT_DIR:-$BASE/scripts}"
+SCRIPT_DIR="${POPS_PERF_SCRIPT_DIR:-$BASE/scripts}"
 PY_HARNESS="$SCRIPT_DIR/frontend_bench_romeo.py"
 CPP_HARNESS="$SCRIPT_DIR/frontend_bench.cpp"
 CPP_CMAKE="$SCRIPT_DIR/frontend_CMakeLists.txt"
-KOKKOS_SRC="${ADC_KOKKOS_SRC:-$HOME/adc_cpu_mpiomp/kokkos}"
-KROOT="${ADC_KOKKOS_CPU_PIC_ROOT:-$BASE/kinstall_omp_pic}"
-KBUILD="${ADC_KOKKOS_CPU_PIC_BUILD:-$BASE/kbuild_omp_pic}"
-TARGET_COMMIT="${ADC_CPP_TARGET_COMMIT:-1f9fb4a}"
+KOKKOS_SRC="${POPS_KOKKOS_SRC:-$HOME/pops_cpu_mpiomp/kokkos}"
+KROOT="${POPS_KOKKOS_CPU_PIC_ROOT:-$BASE/kinstall_omp_pic}"
+KBUILD="${POPS_KOKKOS_CPU_PIC_BUILD:-$BASE/kbuild_omp_pic}"
+TARGET_COMMIT="${POPS_CPP_TARGET_COMMIT:-1f9fb4a}"
 RUN_CPP_FRONTEND="${RUN_CPP_FRONTEND:-1}"
 
 mkdir -p "$RESULTS" "$LOGS" "$FRONT"
@@ -62,11 +62,11 @@ git -C "$SRC" checkout --detach "$TARGET_COMMIT"
 BASE_COMMIT="$(git -C "$SRC" rev-parse --short HEAD)"
 PATCH_TAG=""
 if [ -f "$SCRIPT_DIR/dsl.py" ]; then
-  cp "$SCRIPT_DIR/dsl.py" "$SRC/python/adc/dsl.py"
+  cp "$SCRIPT_DIR/dsl.py" "$SRC/python/pops/dsl.py"
   PATCH_TAG="+localdsl"
 fi
 if [ -f "$SCRIPT_DIR/abi_key.hpp" ]; then
-  cp "$SCRIPT_DIR/abi_key.hpp" "$SRC/include/adc/runtime/abi_key.hpp"
+  cp "$SCRIPT_DIR/abi_key.hpp" "$SRC/include/pops/runtime/abi_key.hpp"
   if [ -z "$PATCH_TAG" ]; then
     PATCH_TAG="+localabi"
   else
@@ -77,8 +77,8 @@ if [ -n "$PATCH_TAG" ]; then
   echo "APPLY_LOCAL_PATCHES tag=$PATCH_TAG"
   git -C "$SRC" diff --stat || true
 fi
-ADC_CPP_COMMIT="${ADC_CPP_RUN_LABEL:-${BASE_COMMIT}${PATCH_TAG}}"
-echo "ADC_CPP_COMMIT=$ADC_CPP_COMMIT"
+POPS_CPP_COMMIT="${POPS_CPP_RUN_LABEL:-${BASE_COMMIT}${PATCH_TAG}}"
+echo "POPS_CPP_COMMIT=$POPS_CPP_COMMIT"
 
 if [ ! -f "$FRONT/frontend_bench.cpp" ] && [ -f "$CPP_HARNESS" ]; then
   cp "$CPP_HARNESS" "$FRONT/frontend_bench.cpp"
@@ -125,11 +125,11 @@ else
   echo "REUSE_KOKKOS_PIC $KROOT"
 fi
 
-FRONTEND_CSV="$RESULTS/perf_frontends_cpu_pic_${ADC_CPP_COMMIT}_${SLURM_JOBID}.csv"
+FRONTEND_CSV="$RESULTS/perf_frontends_cpu_pic_${POPS_CPP_COMMIT}_${SLURM_JOBID}.csv"
 printf "commit,case,frontend,backend,n,steps,dt,cache_state,setup_ms,compile_ms,advance_ms,step_loop_ms,extract_ms,total_ms,ratio_vs_cpp,notes\n" > "$FRONTEND_CSV"
 
 if [ "$RUN_CPP_FRONTEND" = "0" ]; then
-  PREV_COMMIT="${ADC_CPP_PREVIOUS_COMMIT:-$BASE_COMMIT}"
+  PREV_COMMIT="${POPS_CPP_PREVIOUS_COMMIT:-$BASE_COMMIT}"
   prev="$(find "$RESULTS" -maxdepth 1 \( -name "perf_frontends_cpu_pic_${PREV_COMMIT}_*.csv" -o -name "perf_frontends_cpu_${PREV_COMMIT}_*.csv" \) -print 2>/dev/null | sort | while read -r f; do
     if grep -q ',cpp-native,' "$f"; then
       printf '%s\n' "$f"
@@ -138,7 +138,7 @@ if [ "$RUN_CPP_FRONTEND" = "0" ]; then
   done)"
   if [ -n "$prev" ]; then
     echo "REUSE_CPP_FRONTEND_ROWS $prev"
-    awk -F, -v OFS=, -v commit="$ADC_CPP_COMMIT" '$3=="cpp-native" {$1=commit; print}' "$prev" >> "$FRONTEND_CSV"
+    awk -F, -v OFS=, -v commit="$POPS_CPP_COMMIT" '$3=="cpp-native" {$1=commit; print}' "$prev" >> "$FRONTEND_CSV"
   else
     echo "NO_PREVIOUS_CPP_FRONTEND_ROWS"
   fi
@@ -161,7 +161,7 @@ else
     export KOKKOS_NUM_THREADS="$thr"
     log="$LOGS/frontend_cpp_pic_thr${thr}_${SLURM_JOBID}.log"
     "$BUILD_FRONT_CPP/frontend_cpp" 128 40 5 1e-4 > "$log" 2>&1
-    python3 - "$log" "$FRONTEND_CSV" "$ADC_CPP_COMMIT" "$thr" <<'PY'
+    python3 - "$log" "$FRONTEND_CSV" "$POPS_CPP_COMMIT" "$thr" <<'PY'
 import csv, re, sys
 log, out, commit, thr = sys.argv[1:]
 text = open(log, errors="replace").read()
@@ -186,20 +186,20 @@ cmake -S "$SRC" -B "$BUILD_PY" \
 rc=$?
 echo "CONFIG python_pic rc=$rc"
 [ $rc -eq 0 ] || { tail -120 "$LOGS/python_pic_cfg_${SLURM_JOBID}.log"; exit $rc; }
-cmake --build "$BUILD_PY" --target _adc -j 16 > "$LOGS/python_pic_build_${SLURM_JOBID}.log" 2>&1
+cmake --build "$BUILD_PY" --target _pops -j 16 > "$LOGS/python_pic_build_${SLURM_JOBID}.log" 2>&1
 rc=$?
 echo "BUILD python_pic rc=$rc"
 [ $rc -eq 0 ] || { tail -160 "$LOGS/python_pic_build_${SLURM_JOBID}.log"; exit $rc; }
 
 export PYTHONPATH="$BUILD_PY/python:$SRC/python:${PYTHONPATH:-}"
-export ADC_INCLUDE="$SRC/include"
-export ADC_KOKKOS_ROOT="$KROOT"
+export POPS_INCLUDE="$SRC/include"
+export POPS_KOKKOS_ROOT="$KROOT"
 
 for thr in 1 4 8; do
   export OMP_NUM_THREADS="$thr"
   export KOKKOS_NUM_THREADS="$thr"
   log="$LOGS/frontend_python_pic_thr${thr}_${SLURM_JOBID}.log"
-  python3 "$FRONT/frontend_bench.py" "$FRONTEND_CSV" "$ADC_CPP_COMMIT" "$thr" > "$log" 2>&1
+  python3 "$FRONT/frontend_bench.py" "$FRONTEND_CSV" "$POPS_CPP_COMMIT" "$thr" > "$log" 2>&1
   rc=$?
   echo "PY_FRONTEND_PIC thr=$thr rc=$rc log=$log"
   [ $rc -eq 0 ] || tail -160 "$log"

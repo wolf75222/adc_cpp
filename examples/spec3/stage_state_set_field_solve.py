@@ -9,7 +9,7 @@ is equivalent and lighter for a few blocks.
 
 Run: python3 examples/spec3/stage_state_set_field_solve.py
 """
-from adc.time import Program
+from pops.time import Program
 
 
 def main():

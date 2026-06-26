@@ -12,20 +12,20 @@
 //
 // Probleme : lap(phi) = -4 dans le disque r < R, phi = 0 sur r = R. Solution exacte R^2 - r^2.
 
-#include <adc/numerics/elliptic/mg/geometric_mg.hpp>
-#include <adc/numerics/elliptic/eb/cut_fraction.hpp>
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/layout/distribution_mapping.hpp>
-#include <adc/mesh/geometry/geometry.hpp>
-#include <adc/mesh/storage/multifab.hpp>
-#include <adc/mesh/boundary/physical_bc.hpp>
+#include <pops/numerics/elliptic/mg/geometric_mg.hpp>
+#include <pops/numerics/elliptic/eb/cut_fraction.hpp>
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/layout/distribution_mapping.hpp>
+#include <pops/mesh/geometry/geometry.hpp>
+#include <pops/mesh/storage/multifab.hpp>
+#include <pops/mesh/boundary/physical_bc.hpp>
 
 #include <cmath>
 #include <cstdio>
 #include <functional>
 #include <vector>
 
-using namespace adc;
+using namespace pops;
 static constexpr double kCx = 0.5, kCy = 0.5, kR = 0.4;
 
 // Oracle : ancienne formule inline (lambda 'cut' + 2/(axm*(axm+axp)) ...) reproduite a l'identique.

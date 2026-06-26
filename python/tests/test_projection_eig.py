@@ -1,23 +1,23 @@
 """Temoin de VALEURS PROPRES dans la DSL de projection (ADC-289) : extension ADDITIVE du hook
 m.projection (ADC-177). dsl.eig_max_im(rows) / eig_lmin / eig_lmax rendent une valeur scalaire (Expr)
 du spectre d'une PETITE matrice dense construite a partir d'expressions de moments, via
-``adc::real_eig_minmax`` (dense_eig.hpp, ADC_HD, device-safe, repli Gershgorin). max_im = plus grande
+``pops::real_eig_minmax`` (dense_eig.hpp, POPS_HD, device-safe, repli Gershgorin). max_im = plus grande
 |Im(lambda)| = TEMOIN de VP complexes (0 = spectre reel). Sert la branche "suppression des VP
 complexes" de relaxation15 (ADC-275) : "si une matrice de moments a une VP complexe, corriger" s'ecrit
 en masque max/min/sign sur max_im, SANS branche dynamique (contrat pointwise / idempotent d'ADC-177).
 
-Codegen device-clean : un FONCTEUR NOMME (methode statique ADC_HD de la brique) remplit M[k][k] et
+Codegen device-clean : un FONCTEUR NOMME (methode statique POPS_HD de la brique) remplit M[k][k] et
 appelle real_eig_minmax -- jamais de lambda etendue cross-TU (casse nvcc).
 
 On verifie :
  (1) eval numpy de eig_max_im / eig_lmin / eig_lmax == reference np.linalg.eigvals (champ par champ,
      matrices 2x2 et 3x3 ; tolerance 1e-12) ;
- (2) codegen : la brique #include dense_eig.hpp et declare le foncteur nomme adc_eig_max_im_KxK
+ (2) codegen : la brique #include dense_eig.hpp et declare le foncteur nomme pops_eig_max_im_KxK
      (pas de lambda ; appel scalaire compatible CSE) ;
  (3) [compilateur] la brique GENEREE compile contre les en-tetes adc et son hook project(U, aux),
      execute sur un CHAMP de matrices construites des vars, reproduit la reference numpy CELLULE PAR
      CELLULE : projection jouet "si max_im > tol alors q <- cible" branchless == numpy (atol 1e-10) ;
- (4) [_adc] semantique POST-PAS de bout en bout (production + aot) : le hook tourne dans le System et
+ (4) [_pops] semantique POST-PAS de bout en bout (production + aot) : le hook tourne dans le System et
      l'etat post-pas == transport-sans-hook puis projection numpy (mirroir projection_value) ;
  (5) le hook m.projection sans temoin VP (ADC-177) reste INCHANGE : aucun include dense_eig, aucun
      foncteur emis (extension strictement additive, test_projection_hook reste vert).
@@ -32,9 +32,9 @@ import tempfile
 import numpy as np
 
 # Import DIRECT du module dsl (pur Python) : le temoin VP, son eval numpy et son codegen ne dependent
-# pas de l'extension compilee _adc. La partie System (4) est gardee par la disponibilite de _adc.
+# pas de l'extension compilee _pops. La partie System (4) est gardee par la disponibilite de _pops.
 _DSL_PATH = os.path.join(os.path.dirname(__file__), "..", "adc", "dsl.py")
-_spec = importlib.util.spec_from_file_location("adc_dsl_eig", os.path.abspath(_DSL_PATH))
+_spec = importlib.util.spec_from_file_location("pops_dsl_eig", os.path.abspath(_DSL_PATH))
 dsl = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(dsl)
 
@@ -111,11 +111,11 @@ def test_codegen():
     print("== (2) codegen : include dense_eig + foncteur nomme (pas de lambda) ==")
     m, _, _ = build_eig_model("cg")
     src = m.emit_cpp_brick(name="ToyEigCg")
-    chk("#include <adc/numerics/linalg/dense_eig.hpp>" in src, "brique inclut dense_eig.hpp")
-    chk("static ADC_HD adc::Real adc_eig_max_im_2x2(" in src, "foncteur nomme adc_eig_max_im_2x2 declare")
-    chk("adc::real_eig_minmax(M).max_im" in src, "le foncteur appelle real_eig_minmax(M).max_im")
+    chk("#include <pops/numerics/linalg/dense_eig.hpp>" in src, "brique inclut dense_eig.hpp")
+    chk("static POPS_HD pops::Real pops_eig_max_im_2x2(" in src, "foncteur nomme pops_eig_max_im_2x2 declare")
+    chk("pops::real_eig_minmax(M).max_im" in src, "le foncteur appelle real_eig_minmax(M).max_im")
     chk("[&]" not in src and "[=]" not in src, "aucune lambda etendue (device-clean)")
-    chk("adc_eig_max_im_2x2(" in src.split("State project")[1], "project() appelle le foncteur")
+    chk("pops_eig_max_im_2x2(" in src.split("State project")[1], "project() appelle le foncteur")
 
 
 def test_cpp_brick_vs_numpy(cxx, tmp):
@@ -136,16 +136,16 @@ def test_cpp_brick_vs_numpy(cxx, tmp):
     with open(main, "w") as f:
         f.write(
             "#include <cstdio>\n"
-            "#include <adc/core/foundation/types.hpp>\n"
-            "#include <adc/core/state/state.hpp>\n"
-            "#include <adc/core/state/variables.hpp>\n"
+            "#include <pops/core/foundation/types.hpp>\n"
+            "#include <pops/core/state/state.hpp>\n"
+            "#include <pops/core/state/variables.hpp>\n"
             '#include "eig_brick.hpp"\n'
             "int main(int argc, char** argv) {\n"
-            "  adc_generated::ToyEigCpp m;\n"
-            "  adc::Aux a{};\n"
+            "  pops_generated::ToyEigCpp m;\n"
+            "  pops::Aux a{};\n"
             "  std::FILE* fp = std::fopen(argv[1], \"w\");\n"
             "  for (int i = 2; i < argc; i += 3) {\n"
-            "    adc::StateVec<3> U{atof(argv[i]), atof(argv[i+1]), atof(argv[i+2])};\n"
+            "    pops::StateVec<3> U{atof(argv[i]), atof(argv[i+1]), atof(argv[i+2])};\n"
             "    auto P = m.project(U, a);\n"
             "    std::fprintf(fp, \"%.17g\\n\", (double)P[2]);\n"
             "  }\n"
@@ -198,18 +198,18 @@ def test_additive():
     m.projection([(q0 + dsl.abs_(q0)) / 2.0, q1])  # clamp ADC-177, aucun temoin VP
     src = m.emit_cpp_brick(name="ToyPlain")
     chk("dense_eig.hpp" not in src, "aucun include dense_eig sans temoin VP")
-    chk("adc_eig_" not in src, "aucun foncteur eig sans temoin VP (additif)")
+    chk("pops_eig_" not in src, "aucun foncteur eig sans temoin VP (additif)")
 
 
 def test_system_end_to_end():
-    """(4) Bout en bout via _adc : le hook tourne dans le System, etat post-pas == projection numpy.
+    """(4) Bout en bout via _pops : le hook tourne dans le System, etat post-pas == projection numpy.
     Garde sur la disponibilite de l'extension compilee (import adc) ; sinon ignore."""
-    print("== (4) [_adc] semantique POST-PAS (production + aot) == reference numpy ==")
+    print("== (4) [_pops] semantique POST-PAS (production + aot) == reference numpy ==")
     try:
-        import adc
-        from adc import dsl as dsl_pkg
+        import pops
+        from pops import dsl as dsl_pkg
     except Exception as ex:  # noqa: BLE001
-        print("  skip  extension _adc absente (%s) -- (3) couvre deja la numerique compilee"
+        print("  skip  extension _pops absente (%s) -- (3) couvre deja la numerique compilee"
               % type(ex).__name__)
         return
     cxx = shutil.which("c++") or shutil.which("g++") or shutil.which("clang++")
@@ -241,7 +241,7 @@ def test_system_end_to_end():
         return np.stack([q0, q1, q2])
 
     def make_sys(so, adder):
-        s = adc.System(n=N, L=L, periodic=True)
+        s = pops.System(n=N, L=L, periodic=True)
         if adder == "native":
             s._s.add_native_block("toy", so, limiter="minmod", riemann="rusanov",
                                   recon="conservative", time="explicit", gamma=1.4, substeps=1)

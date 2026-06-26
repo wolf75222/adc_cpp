@@ -6,7 +6,7 @@ simple transport :
 (A) couplage elliptique : le elliptic_rhs genere est cable dans le Poisson de systeme et donne le MEME
     potentiel que le euler_poisson COMPILE (add_block + briques manuelles GravityCoupling). Le solve de
     Poisson ne depend pas du schema de flux, donc l'egalite isole le second membre par bloc.
-(B) terme source : eval_rhs(bloc dynamique) == residu de flux (adc.PythonFlux, a_max GLOBAL, comme le
+(B) terme source : eval_rhs(bloc dynamique) == residu de flux (pops.PythonFlux, a_max GLOBAL, comme le
     chemin hote) + source_value(U, grad phi) evaluee depuis les MEMES formules. Isole la source (le flux
     a deja ete valide contre PythonFlux dans test_dsl_block). On ne compare PAS le flux au bloc compile :
     le bloc dynamique dissipe avec un a_max global, le compile avec des vitesses d'onde locales.
@@ -19,8 +19,8 @@ import tempfile
 
 import numpy as np
 
-import adc
-from adc import dsl
+import pops
+from pops import dsl
 
 GAMMA = 1.4
 INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "include"))
@@ -73,7 +73,7 @@ def main():
         Uflat = U.reshape(-1).tolist()
 
         # --- bloc DYNAMIQUE (JIT) euler_poisson ---
-        dyn = adc.System(n=n, L=L, periodic=True)
+        dyn = pops.System(n=n, L=L, periodic=True)
         dyn.add_dynamic_block("gas", so, names=["rho", "rho_u", "rho_v", "E"])
         dyn.set_poisson(rhs="charge_density", solver="geometric_mg")
         dyn.set_state("gas", Uflat)
@@ -82,13 +82,13 @@ def main():
         R_dyn = np.array(dyn.eval_rhs("gas")).reshape(4, n, n)
 
         # --- euler_poisson COMPILE de reference (memes briques manuelles) ---
-        spec = adc.Model(state=adc.FluidState("compressible", gamma=GAMMA),
-                         transport=adc.CompressibleFlux(),
-                         source=adc.GravityForce(),
-                         elliptic=adc.GravityCoupling(sign=-1.0, four_pi_G=1.0, rho0=1.0))
-        cmp = adc.System(n=n, L=L, periodic=True)
-        cmp.add_block("gas", spec, spatial=adc.Spatial(none=True, flux="rusanov"),
-                      time=adc.Explicit())
+        spec = pops.Model(state=pops.FluidState("compressible", gamma=GAMMA),
+                         transport=pops.CompressibleFlux(),
+                         source=pops.GravityForce(),
+                         elliptic=pops.GravityCoupling(sign=-1.0, four_pi_G=1.0, rho0=1.0))
+        cmp = pops.System(n=n, L=L, periodic=True)
+        cmp.add_block("gas", spec, spatial=pops.Spatial(none=True, flux="rusanov"),
+                      time=pops.Explicit())
         cmp.set_poisson(rhs="charge_density", solver="geometric_mg")
         cmp.set_state("gas", Uflat)
         cmp.solve_fields()

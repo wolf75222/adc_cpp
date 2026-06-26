@@ -2,17 +2,17 @@
 // interpolate (injection grossier->fin), identite average_down(interpolate(.)) et
 // conservation de la somme.
 
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/layout/distribution_mapping.hpp>
-#include <adc/mesh/storage/fab2d.hpp>
-#include <adc/mesh/execution/for_each.hpp>
-#include <adc/mesh/storage/multifab.hpp>
-#include <adc/mesh/layout/refinement.hpp>
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/layout/distribution_mapping.hpp>
+#include <pops/mesh/storage/fab2d.hpp>
+#include <pops/mesh/execution/for_each.hpp>
+#include <pops/mesh/storage/multifab.hpp>
+#include <pops/mesh/layout/refinement.hpp>
 
 #include <cmath>
 #include <cstdio>
 
-using namespace adc;
+using namespace pops;
 
 int main() {
   int fails = 0;

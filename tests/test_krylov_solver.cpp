@@ -20,35 +20,35 @@
 // critere d'arret BiCGStab se declenche a la MEME iteration sur tous les rangs : le nombre
 // d'iterations et la convergence sont invariants au nombre de rangs (verifie par all_reduce).
 
-#include <adc/numerics/elliptic/mg/geometric_mg.hpp>
-#include <adc/numerics/elliptic/linear/krylov_solver.hpp>
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/execution/for_each.hpp>
-#include <adc/mesh/geometry/geometry.hpp>
-#include <adc/mesh/storage/mf_arith.hpp>
-#include <adc/mesh/storage/multifab.hpp>
-#include <adc/mesh/boundary/physical_bc.hpp>
-#include <adc/parallel/comm.hpp>
+#include <pops/numerics/elliptic/mg/geometric_mg.hpp>
+#include <pops/numerics/elliptic/linear/krylov_solver.hpp>
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/execution/for_each.hpp>
+#include <pops/mesh/geometry/geometry.hpp>
+#include <pops/mesh/storage/mf_arith.hpp>
+#include <pops/mesh/storage/multifab.hpp>
+#include <pops/mesh/boundary/physical_bc.hpp>
+#include <pops/parallel/comm.hpp>
 
 #include <cmath>
 #include <cstdio>
 
-using namespace adc;
+using namespace pops;
 static constexpr double kPi = 3.14159265358979323846;
 
-// ADC_HD : phi_exact est appelee depuis PoissonRhsKernel::operator() (ADC_HD), donc DEPUIS UN KERNEL
-// DEVICE. Sans ADC_HD c'est un __host__ appele depuis un __host__ __device__ : sous Kokkos Cuda, nvcc
+// POPS_HD : phi_exact est appelee depuis PoissonRhsKernel::operator() (POPS_HD), donc DEPUIS UN KERNEL
+// DEVICE. Sans POPS_HD c'est un __host__ appele depuis un __host__ __device__ : sous Kokkos Cuda, nvcc
 // emet le kernel SANS cet appel (warning #20011-D "calling a __host__ function ... is not allowed") et
 // le rhs reste a 0 sur device. Le MG resout alors Lap(phi)=0 a Dirichlet V => phi=V plat, d'ou le cas
 // (C) DIRICHLET err vs exact ~= max(sin sin) ~= 0.999 sur GH200 (mais 2e-4 sur l'oracle Serial, ou
 // l'appel hote est licite). MmsRhsKernel (cas B) inline deja sin/cos SANS passer par phi_exact, d'ou
-// son succes device. ADC_HD rend phi_exact device-callable ; corps inchange (sin sin) -> hote
+// son succes device. POPS_HD rend phi_exact device-callable ; corps inchange (sin sin) -> hote
 // bit-identique, device desormais correct (rhs rempli, MG -> V + sin sin).
-ADC_HD static double phi_exact(double x, double y) {
+POPS_HD static double phi_exact(double x, double y) {
   return std::sin(kPi * x) * std::sin(kPi * y);
 }
 
-// FONCTEURS NOMMES (et non lambdas ADC_HD) pour les noyaux de remplissage : ce test premiere-instancie
+// FONCTEURS NOMMES (et non lambdas POPS_HD) pour les noyaux de remplissage : ce test premiere-instancie
 // le V-cycle MG / la matvec depuis une UNITE DE TRADUCTION externe, ou nvcc n'emet pas fiablement une
 // lambda etendue (meme recette #64/#97 que physical_bc.hpp / les foncteurs InitKernel du repo). Le corps
 // est IDENTIQUE aux anciennes lambdas (memes types double, meme arithmetique) -> numerique bit-identique.
@@ -58,7 +58,7 @@ struct MmsRhsKernel {
   Array4 af;
   Geometry geom;
   double axx, ayy, csum;
-  ADC_HD void operator()(int i, int j) const {
+  POPS_HD void operator()(int i, int j) const {
     const double x = geom.x_cell(i), y = geom.y_cell(j);
     const double s = std::sin(kPi * x) * std::sin(kPi * y);
     const double cc = std::cos(kPi * x) * std::cos(kPi * y);
@@ -70,7 +70,7 @@ struct MmsRhsKernel {
 struct PoissonRhsKernel {
   Array4 af;
   Geometry geom;
-  ADC_HD void operator()(int i, int j) const {
+  POPS_HD void operator()(int i, int j) const {
     const double x = geom.x_cell(i), y = geom.y_cell(j);
     af(i, j) = -2.0 * kPi * kPi * phi_exact(x, y);
   }

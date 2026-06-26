@@ -6,7 +6,7 @@ commit) to a problem.so. This test builds SSPRK2 and RK4 Programs, compiles + in
 and checks parity against an OFFLINE stage-by-stage reference computed from the same runtime
 primitives (`set_state` + `solve_fields` + `eval_rhs`) -- the exact stages the compiled program
 drives -- so the match is to machine precision. SSPRK2 is additionally checked against the native
-`adc.Explicit("ssprk2")` step (spec test 32).
+`pops.Explicit("ssprk2")` step (spec test 32).
 
 Uses a pure-transport (isothermal, no field coupling) model so the per-stage `solve_fields` is inert
 and identical along both paths (the compiled codegen now lowers each solve_fields to a per-stage
@@ -26,10 +26,10 @@ def _skip(msg):
 try:
     import numpy as np
 
-    import adc
-    from adc import time as adctime
+    import pops
+    from pops import time as adctime
 except Exception as exc:  # noqa: BLE001
-    _skip("adc/numpy unavailable: %s" % exc)
+    _skip("pops/numpy unavailable: %s" % exc)
 
 fails = 0
 
@@ -42,20 +42,20 @@ def chk(cond, label):
 
 
 def transport_model():
-    return adc.Model(state=adc.FluidState("isothermal", cs2=0.5),
-                     transport=adc.IsothermalFlux(),
-                     source=adc.NoSource(),
-                     elliptic=adc.BackgroundDensity(alpha=1.0, n0=0.0))
+    return pops.Model(state=pops.FluidState("isothermal", cs2=0.5),
+                     transport=pops.IsothermalFlux(),
+                     source=pops.NoSource(),
+                     elliptic=pops.BackgroundDensity(alpha=1.0, n0=0.0))
 
 
 N = 24
 
 
 def make_sim(method="euler"):
-    sim = adc.System(n=N, L=1.0, periodic=True)
+    sim = pops.System(n=N, L=1.0, periodic=True)
     sim.add_block("ions", transport_model(),
-                  spatial=adc.FiniteVolume(limiter="none", riemann="rusanov"),
-                  time=adc.Explicit(method=method))
+                  spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                  time=pops.Explicit(method=method))
     sim.set_poisson("charge_density", "geometric_mg")
     x = (np.arange(N) + 0.5) / N
     X, Y = np.meshgrid(x, x, indexing="ij")
@@ -78,7 +78,7 @@ def offline_rhs(ref, U):
 def run_compiled(P, dt):
     """compile_problem(P) -> install -> one step; returns the advanced state (or None to skip)."""
     try:
-        compiled = adc.compile_problem(model=transport_model(), time=P)
+        compiled = pops.compile_problem(model=transport_model(), time=P)
     except RuntimeError as exc:  # no compiler / no Kokkos visible / compile failed
         _skip("compile_problem could not build the .so: %s" % str(exc)[:160])
     sim = make_sim()
@@ -116,8 +116,8 @@ def rk4_program():
     return P
 
 
-if not hasattr(adc.System(n=8, L=1.0, periodic=True), "install_program"):
-    _skip("_adc lacks the install_program binding (rebuild _adc)")
+if not hasattr(pops.System(n=8, L=1.0, periodic=True), "install_program"):
+    _skip("_pops lacks the install_program binding (rebuild _pops)")
 
 dt = 2e-3
 U0 = initial_state()
@@ -132,11 +132,11 @@ ssprk2_prog = run_compiled(ssprk2_program(), dt)
 e = float(np.abs(ssprk2_prog - ssprk2_ref).max())
 chk(e < 1e-12, "compiled SSPRK2 == offline stage reference (max|d| = %.2e)" % e)
 
-# Native cross-check: the compiled SSPRK2 reproduces adc.Explicit("ssprk2") (spec test 32).
+# Native cross-check: the compiled SSPRK2 reproduces pops.Explicit("ssprk2") (spec test 32).
 nat = make_sim("ssprk2")
 nat.step(dt)
 en = float(np.abs(ssprk2_prog - np.array(nat.get_state("ions"))).max())
-chk(en < 1e-12, "compiled SSPRK2 == native adc.Explicit('ssprk2') (max|d| = %.2e)" % en)
+chk(en < 1e-12, "compiled SSPRK2 == native pops.Explicit('ssprk2') (max|d| = %.2e)" % en)
 
 print("== RK4 ==")
 k1 = offline_rhs(ref, U0)

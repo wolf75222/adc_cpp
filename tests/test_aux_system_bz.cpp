@@ -6,46 +6,46 @@
 //   (B) le bloc qui lit B_z voit la source S = B_z u (residu = c) ;
 //   (C) le bloc de base, sur le meme aux elargi, reste a residu nul (comp 3 ignoree).
 
-#include <adc/core/model/coupled_system.hpp>
-#include <adc/core/model/physical_model.hpp>
-#include <adc/core/state/state.hpp>
-#include <adc/coupling/system/system_coupler.hpp>
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/layout/distribution_mapping.hpp>
-#include <adc/mesh/storage/mf_arith.hpp>
-#include <adc/mesh/storage/multifab.hpp>
-#include <adc/parallel/comm.hpp>
+#include <pops/core/model/coupled_system.hpp>
+#include <pops/core/model/physical_model.hpp>
+#include <pops/core/state/state.hpp>
+#include <pops/coupling/system/system_coupler.hpp>
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/layout/distribution_mapping.hpp>
+#include <pops/mesh/storage/mf_arith.hpp>
+#include <pops/mesh/storage/multifab.hpp>
+#include <pops/parallel/comm.hpp>
 
 #include <cmath>
 #include <cstdio>
 
-using namespace adc;
+using namespace pops;
 
 // Bloc A : lit B_z. flux nul, source S = B_z u, pas de couplage elliptique.
 struct BzGrow {
   using State = StateVec<1>;
-  using Aux = adc::Aux;
+  using Aux = pops::Aux;
   static constexpr int n_vars = 1;
   static constexpr int n_aux = 4;
-  ADC_HD State flux(const State&, const Aux&, int) const { return State{}; }
-  ADC_HD Real max_wave_speed(const State&, const Aux&, int) const { return Real(0); }
-  ADC_HD State source(const State& u, const Aux& a) const {
+  POPS_HD State flux(const State&, const Aux&, int) const { return State{}; }
+  POPS_HD Real max_wave_speed(const State&, const Aux&, int) const { return Real(0); }
+  POPS_HD State source(const State& u, const Aux& a) const {
     State s{};
     s[0] = a.B_z * u[0];
     return s;
   }
-  ADC_HD Real elliptic_rhs(const State&) const { return Real(0); }
+  POPS_HD Real elliptic_rhs(const State&) const { return Real(0); }
 };
 
 // Bloc B : modele de BASE (n_aux=3). flux et source nuls -> residu nul.
 struct Scalar {
   using State = StateVec<1>;
-  using Aux = adc::Aux;
+  using Aux = pops::Aux;
   static constexpr int n_vars = 1;
-  ADC_HD State flux(const State&, const Aux&, int) const { return State{}; }
-  ADC_HD Real max_wave_speed(const State&, const Aux&, int) const { return Real(0); }
-  ADC_HD State source(const State&, const Aux&) const { return State{}; }
-  ADC_HD Real elliptic_rhs(const State&) const { return Real(0); }
+  POPS_HD State flux(const State&, const Aux&, int) const { return State{}; }
+  POPS_HD Real max_wave_speed(const State&, const Aux&, int) const { return Real(0); }
+  POPS_HD State source(const State&, const Aux&) const { return State{}; }
+  POPS_HD Real elliptic_rhs(const State&) const { return Real(0); }
 };
 
 static_assert(PhysicalModel<BzGrow> && PhysicalModel<Scalar>);

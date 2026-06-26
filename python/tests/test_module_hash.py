@@ -10,8 +10,8 @@ Pure Python; skips if adc is not importable.
 import sys
 
 try:
-    from adc import model
-    from adc import dsl
+    from pops import model
+    from pops import dsl
 except Exception as exc:  # adc not importable here -> skip, never fake
     print("skip test_module_hash (adc unavailable: %s)" % exc)
     sys.exit(0)

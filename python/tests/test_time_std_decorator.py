@@ -1,21 +1,21 @@
 #!/usr/bin/env python3
-"""adc.time.Program.step decorator mode (epic ADC-399 / ADC-423).
+"""pops.time.Program.step decorator mode (epic ADC-399 / ADC-423).
 
 ``@P.step`` records a Program's IR by calling the decorated function ONCE at build time. It is sugar for
 an inline builder body: it must produce byte-identical IR (same ``_ir_hash``) to writing the body
 directly, and it must NEVER run the function numerically during a step (it runs exactly once, here, to
 populate the SSA value list -- the compiled ``.so`` owns the runtime step).
 
-Pure Python (IR construction only); skips cleanly if adc.time is unavailable, never fakes.
+Pure Python (IR construction only); skips cleanly if pops.time is unavailable, never fakes.
 """
 import sys
 
 
 def _adc_time():
     try:
-        import adc.time as t
+        import pops.time as t
     except Exception as exc:  # adc not importable here -> skip, never fake
-        print("skip test_time_std_decorator (adc.time unavailable: %s)" % exc)
+        print("skip test_time_std_decorator (pops.time unavailable: %s)" % exc)
         sys.exit(0)
     return t
 

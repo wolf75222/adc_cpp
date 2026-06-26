@@ -7,21 +7,21 @@
 //
 // dispatch_model construit CompositeModel<CompressibleFlux, GravityForce, GravityCoupling> ; on passe
 // au chemin compile le MEME type (CompressibleFlux == Euler, cf. hyperbolic.hpp) -> parite exacte.
-#include <adc/physics/bricks/bricks.hpp>  // CompositeModel, GravityForce, GravityCoupling
-#include <adc/physics/fluids/euler.hpp>   // Euler (= CompressibleFlux)
-#include <adc/runtime/builders/compiled/amr_dsl_block.hpp>
-#include <adc/runtime/amr_system.hpp>
-#include <adc/runtime/config/model_spec.hpp>
+#include <pops/physics/bricks/bricks.hpp>  // CompositeModel, GravityForce, GravityCoupling
+#include <pops/physics/fluids/euler.hpp>   // Euler (= CompressibleFlux)
+#include <pops/runtime/builders/compiled/amr_dsl_block.hpp>
+#include <pops/runtime/amr_system.hpp>
+#include <pops/runtime/config/model_spec.hpp>
 
 #include <cmath>
 #include <cstdio>
 #include <vector>
 
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
 #include <Kokkos_Core.hpp>
 #endif
 
-using namespace adc;
+using namespace pops;
 
 static std::vector<double> bubble(int n) {  // bulle de densite lisse, periodique
   std::vector<double> rho(static_cast<std::size_t>(n) * n);
@@ -34,7 +34,7 @@ static std::vector<double> bubble(int n) {  // bulle de densite lisse, periodiqu
 }
 
 int main(int argc, char** argv) {
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   Kokkos::ScopeGuard guard(argc, argv);
 #else
   (void)argc;

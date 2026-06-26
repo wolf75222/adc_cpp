@@ -1,5 +1,5 @@
 """Predicat REEL/COMPLEXE du spectre dans la DSL de projection (ADC-362) : surface DSL du predicat
-C++ ``adc::EigBounds::all_real`` ajoute par ADC-276. ``dsl.eig_all_real(rows, im_tol=1e-5)`` rend une
+C++ ``pops::EigBounds::all_real`` ajoute par ADC-276. ``dsl.eig_all_real(rows, im_tol=1e-5)`` rend une
 valeur scalaire DSL valant 1.0 si le spectre de la PETITE matrice dense @c rows est REEL (et le bloc a
 CONVERGE), 0.0 sinon -- paire complexe OU non-convergence. Compose sans branche dans m.projection
 (ADC-177) : "si le bloc a une paire complexe, corriger" s'ecrit ``complexe = 1 - eig_all_real(...)``,
@@ -23,8 +23,8 @@ On verifie :
      RELATIVE max_im <= im_tol*max(|lmin|,|lmax|,1) ;
  (2) contrat de tolerance RELATIVE + parametre im_tol : une vraie paire complexe sous im_tol*scale est
      rendue reelle PAR DESIGN (asymetrie documentee de all_real), et im_tol fait basculer le verdict ;
- (3) codegen : la brique #include dense_eig.hpp, declare le foncteur adc_eig_all_real_KxK abaisse sur
-     ``adc::Real(adc::real_eig_minmax(M).all_real(<im_tol>))`` (verrou de surete : PAS un comparatif
+ (3) codegen : la brique #include dense_eig.hpp, declare le foncteur pops_eig_all_real_KxK abaisse sur
+     ``pops::Real(pops::real_eig_minmax(M).all_real(<im_tol>))`` (verrou de surete : PAS un comparatif
      ``.max_im``), passe im_tol en argument, pas de lambda ; project() appelle le foncteur ;
  (4) [compilateur] non-convergence CONSERVATRICE : ``real_eig_minmax(companion3x3, /*max_iter=*/0)``
      -> converged == false, max_im == 0 (le piege), all_real() == false (0.0, JAMAIS reel) ;
@@ -46,9 +46,9 @@ import tempfile
 import numpy as np
 
 # Import DIRECT du module dsl (pur Python) : le predicat, son eval numpy et son codegen ne dependent
-# pas de l'extension compilee _adc.
+# pas de l'extension compilee _pops.
 _DSL_PATH = os.path.join(os.path.dirname(__file__), "..", "adc", "dsl.py")
-_spec = importlib.util.spec_from_file_location("adc_dsl_eig_pred", os.path.abspath(_DSL_PATH))
+_spec = importlib.util.spec_from_file_location("pops_dsl_eig_pred", os.path.abspath(_DSL_PATH))
 dsl = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(dsl)
 
@@ -68,7 +68,7 @@ def chk(cond, label):
 
 def ref_all_real(M, im_tol):
     """Reference numpy de all_real sur un champ (..., k, k) -> champ {0.0, 1.0} (...). MEME formule
-    RELATIVE que adc::EigBounds::all_real : max_im <= im_tol*max(|lmin|,|lmax|,1) (hote = toujours
+    RELATIVE que pops::EigBounds::all_real : max_im <= im_tol*max(|lmin|,|lmax|,1) (hote = toujours
     converge -> pas de kUnknown)."""
     ev = np.linalg.eigvals(M)
     max_im = np.max(np.abs(ev.imag), axis=-1)
@@ -157,16 +157,16 @@ def test_codegen():
     print("== (3) codegen : foncteur all_real abaisse sur EigBounds::all_real (PAS .max_im) ==")
     m, im_tol, _ = build_pred_model("cg")
     src = m.emit_cpp_brick(name="ToyPredCg")
-    chk("#include <adc/numerics/linalg/dense_eig.hpp>" in src, "brique inclut dense_eig.hpp")
-    chk("static ADC_HD adc::Real adc_eig_all_real_2x2(" in src,
-        "foncteur nomme adc_eig_all_real_2x2 declare")
-    chk("adc::real_eig_minmax(M).all_real(" in src,
+    chk("#include <pops/numerics/linalg/dense_eig.hpp>" in src, "brique inclut dense_eig.hpp")
+    chk("static POPS_HD pops::Real pops_eig_all_real_2x2(" in src,
+        "foncteur nomme pops_eig_all_real_2x2 declare")
+    chk("pops::real_eig_minmax(M).all_real(" in src,
         "le foncteur abaisse sur EigBounds::all_real (verrou de surete : converged)")
     chk(".max_im" not in src,
         "le predicat n'est PAS abaisse sur un comparatif .max_im (repli => 0.0, jamais reel)")
     chk(repr(float(im_tol)) in src, "im_tol passe en argument du foncteur (seuil relatif)")
     chk("[&]" not in src and "[=]" not in src, "aucune lambda etendue (device-clean)")
-    chk("adc_eig_all_real_2x2(" in src.split("State project")[1], "project() appelle le foncteur")
+    chk("pops_eig_all_real_2x2(" in src.split("State project")[1], "project() appelle le foncteur")
 
 
 def test_cse_im_tol():
@@ -191,7 +191,7 @@ def test_additive():
     m.projection([(q0 + dsl.abs_(q0)) / 2.0, q1])  # clamp ADC-177, aucun predicat
     src = m.emit_cpp_brick(name="ToyPlainPred")
     chk("dense_eig.hpp" not in src, "aucun include dense_eig sans predicat")
-    chk("adc_eig_" not in src, "aucun foncteur eig sans predicat (additif)")
+    chk("pops_eig_" not in src, "aucun foncteur eig sans predicat (additif)")
 
 
 def test_fallback_conservative(cxx, tmp):
@@ -200,13 +200,13 @@ def test_fallback_conservative(cxx, tmp):
     with open(main, "w") as f:
         f.write(
             "#include <cstdio>\n"
-            "#include <adc/numerics/linalg/dense_eig.hpp>\n"
+            "#include <pops/numerics/linalg/dense_eig.hpp>\n"
             "int main() {\n"
             # companion 3x3 plein (ne deflate pas en 1x1/2x2) -> cap QR 0 force le repli Gershgorin.
-            "  const adc::Real A[3][3] = {{0,0,-6},{1,0,11},{0,1,-6}};\n"
-            "  const adc::EigBounds b = adc::real_eig_minmax(A, /*max_iter=*/0);\n"
+            "  const pops::Real A[3][3] = {{0,0,-6},{1,0,11},{0,1,-6}};\n"
+            "  const pops::EigBounds b = pops::real_eig_minmax(A, /*max_iter=*/0);\n"
             "  std::printf(\"%d %d %d\\n\", (int)b.converged,\n"
-            "              (int)(b.max_im == adc::Real(0)), (int)b.all_real());\n"
+            "              (int)(b.max_im == pops::Real(0)), (int)b.all_real());\n"
             "  return 0;\n"
             "}\n")
     exe = os.path.join(tmp, "fallback_main")
@@ -240,16 +240,16 @@ def test_cpp_brick_vs_numpy(cxx, tmp):
     with open(main, "w") as f:
         f.write(
             "#include <cstdio>\n"
-            "#include <adc/core/foundation/types.hpp>\n"
-            "#include <adc/core/state/state.hpp>\n"
-            "#include <adc/core/state/variables.hpp>\n"
+            "#include <pops/core/foundation/types.hpp>\n"
+            "#include <pops/core/state/state.hpp>\n"
+            "#include <pops/core/state/variables.hpp>\n"
             '#include "pred_brick.hpp"\n'
             "int main(int argc, char** argv) {\n"
-            "  adc_generated::ToyPredCpp m;\n"
-            "  adc::Aux a{};\n"
+            "  pops_generated::ToyPredCpp m;\n"
+            "  pops::Aux a{};\n"
             "  std::FILE* fp = std::fopen(argv[1], \"w\");\n"
             "  for (int i = 2; i < argc; i += 3) {\n"
-            "    adc::StateVec<3> U{atof(argv[i]), atof(argv[i+1]), atof(argv[i+2])};\n"
+            "    pops::StateVec<3> U{atof(argv[i]), atof(argv[i+1]), atof(argv[i+2])};\n"
             "    auto P = m.project(U, a);\n"
             "    std::fprintf(fp, \"%.17g\\n\", (double)P[2]);\n"
             "  }\n"

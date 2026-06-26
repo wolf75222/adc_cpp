@@ -20,22 +20,22 @@
 // deux blocs ExB scalaires (1 var, role density) sur la hierarchie partagee, puis on enregistre des sources
 // couplees minimales et on assertit le succes / la levee. Backend CPU/Kokkos (ctor sous ScopeGuard).
 
-#include <adc/coupling/source/coupled_source_program.hpp>  // CsOp (opcodes du bytecode P5)
-#include <adc/runtime/builders/compiled/amr_dsl_block.hpp>  // detail::make_shared_amr_layout / dispatch_amr_block
-#include <adc/runtime/amr/amr_runtime.hpp>    // AmrRuntime, AmrRuntimeBlock
-#include <adc/runtime/builders/factory/model_factory.hpp>  // detail::dispatch_model
-#include <adc/runtime/config/model_spec.hpp>
+#include <pops/coupling/source/coupled_source_program.hpp>  // CsOp (opcodes du bytecode P5)
+#include <pops/runtime/builders/compiled/amr_dsl_block.hpp>  // detail::make_shared_amr_layout / dispatch_amr_block
+#include <pops/runtime/amr/amr_runtime.hpp>    // AmrRuntime, AmrRuntimeBlock
+#include <pops/runtime/builders/factory/model_factory.hpp>  // detail::dispatch_model
+#include <pops/runtime/config/model_spec.hpp>
 
 #include <cstdio>
 #include <stdexcept>
 #include <string>
 #include <vector>
 
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
 #include <Kokkos_Core.hpp>
 #endif
 
-using namespace adc;
+using namespace pops;
 
 // Spec ExB scalaire (1 var, role density) a charge q. Bloc scalaire : conservative_vars() == {density},
 // donc momentum_x est CANONIQUE mais NON EXPOSE -> support du cas (B).
@@ -125,7 +125,7 @@ static void add_source_with_io_role(AmrRuntime& rt, const std::string& io_role) 
 }
 
 int main(int argc, char** argv) {
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   Kokkos::ScopeGuard guard(argc, argv);
 #else
   (void)argc;

@@ -4,7 +4,7 @@
 Builds a matrix-free operator ``A x = x - alpha*Lap(x)`` (a symmetric-positive-definite Helmholtz
 operator) whose ``apply`` is an IR sub-block (``P.set_apply``, written with ``P.laplacian`` + the
 affine algebra), then solves ``A phi = b`` with ``P.solve_linear`` -- which lowers to the runtime's
-matrix-free Krylov loop (``adc::cg_solve``). The dynamic iteration runs entirely C++-side; the IR
+matrix-free Krylov loop (``pops::cg_solve``). The dynamic iteration runs entirely C++-side; the IR
 carries only the apply, the right-hand side, and the solver options. Nothing re-enters Python.
 
 The block has a single conservative variable, so its state doubles as the scalar field: the Program
@@ -16,7 +16,7 @@ available). Run::
 
     python examples/time_programs/matrix_free_solve.py
 
-Requires a C++ compiler and a visible Kokkos (``ADC_KOKKOS_ROOT``); prints a skip notice and exits 0
+Requires a C++ compiler and a visible Kokkos (``POPS_KOKKOS_ROOT``); prints a skip notice and exits 0
 otherwise. cf. docs/sphinx/reference/time-program.md.
 """
 import sys
@@ -24,9 +24,9 @@ import sys
 try:
     import numpy as np
 
-    import adc
-    from adc import dsl
-    from adc import time as adctime
+    import pops
+    from pops import dsl
+    from pops import time as adctime
 except Exception as exc:  # noqa: BLE001  -- adc/numpy unavailable in this interpreter
     print("skip matrix_free_solve (adc/numpy unavailable: %s)" % exc)
     sys.exit(0)
@@ -65,7 +65,7 @@ def solve_program(method="cg", tol=1e-10, max_iter=200):
 
 
 def discrete_helmholtz(n, alpha):
-    """A x = x - alpha*Lap(x), the discrete periodic 5-point matvec matching adc::apply_laplacian."""
+    """A x = x - alpha*Lap(x), the discrete periodic 5-point matvec matching pops::apply_laplacian."""
     h2 = (1.0 / n) ** 2
 
     def apply(x):
@@ -103,21 +103,21 @@ def offline_cg(apply, b, tol=1e-10, max_iter=2000):
 
 def main():
     n = 16
-    if not hasattr(adc.System(n=8, L=1.0, periodic=True), "install_program"):
-        print("skip matrix_free_solve (_adc lacks the install_program binding; rebuild _adc)")
+    if not hasattr(pops.System(n=8, L=1.0, periodic=True), "install_program"):
+        print("skip matrix_free_solve (_pops lacks the install_program binding; rebuild _pops)")
         return 0
 
     try:
-        compiled = adc.compile_problem(model=passive_model("mf_prog"), time=solve_program())
+        compiled = pops.compile_problem(model=passive_model("mf_prog"), time=solve_program())
         block_model = passive_model("mf_blk").compile(backend="production")
     except RuntimeError as exc:  # no compiler / no Kokkos visible / compile failed
         print("skip matrix_free_solve (compile_problem could not build the .so: %s)" % str(exc)[:160])
         return 0
 
-    sim = adc.System(n=n, L=1.0, periodic=True)
+    sim = pops.System(n=n, L=1.0, periodic=True)
     sim.add_equation("blk", block_model,
-                     spatial=adc.FiniteVolume(limiter="none", riemann="rusanov"),
-                     time=adc.Explicit(method="euler"))
+                     spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                     time=pops.Explicit(method="euler"))
     x = (np.arange(n) + 0.5) / n
     X, Y = np.meshgrid(x, x, indexing="ij")
     b = 1.0 + 0.3 * np.sin(2 * np.pi * X) * np.cos(2 * np.pi * Y)  # the right-hand side (= U)

@@ -1,4 +1,4 @@
-"""Spec 2 (S2-3): the public adc.model.Module API and dsl.Model as its PDE facade.
+"""Spec 2 (S2-3): the public pops.model.Module API and dsl.Model as its PDE facade.
 
 A Module is the model-free view: typed spaces + a registry of typed operators. dsl.Model
 encapsulates a Module (its source_term / linear_source / elliptic_field / flux register
@@ -9,8 +9,8 @@ is not importable.
 import sys
 
 try:
-    from adc import dsl, model
-    from adc import time as adctime
+    from pops import dsl, model
+    from pops import time as adctime
 except Exception as exc:  # adc not importable here -> skip, never fake
     print("skip test_operator_module (adc unavailable: %s)" % exc)
     sys.exit(0)
@@ -128,7 +128,7 @@ def test_same_program_two_modules():
     pb = adctime.Program("pc")
     _build_predictor(pb, mb)
     src_b = pb.emit_cpp_program(model=mb)
-    assert "adc_install_program" in src_a and "adc_install_program" in src_b
+    assert "pops_install_program" in src_a and "pops_install_program" in src_b
     # The SAME generic function produced a valid, distinct program for each module
     # (the electric gain differs), proving reuse without mentioning any physics.
     assert src_a != src_b

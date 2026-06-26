@@ -1,5 +1,5 @@
 #pragma once
-// Shared surface for the split pybind11 bindings of `_adc` (ADC-365). bindings.cpp is the thin
+// Shared surface for the split pybind11 bindings of `_pops` (ADC-365). bindings.cpp is the thin
 // PYBIND11_MODULE that calls init_core / init_system / init_amr; each lives in its own TU so the
 // py::class_/.def template instantiations compile in parallel (better incremental, lower peak pybind
 // memory per TU). This header carries the common includes, the small array/POD helpers (moved verbatim
@@ -10,11 +10,11 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
-#include <adc/core/foundation/kokkos_env.hpp>  // Kokkos_Core under ADC_HAS_KOKKOS (kokkos_is_initialized)
-#include <adc/parallel/comm.hpp>  // adc::my_rank / n_ranks: rank-0 guard of the multi-rank IO facade
-#include <adc/runtime/dynamic/abi_key.hpp>  // adc::abi_key: ABI key exposed to the DSL ("production" path)
-#include <adc/runtime/amr_system.hpp>
-#include <adc/runtime/system.hpp>
+#include <pops/core/foundation/kokkos_env.hpp>  // Kokkos_Core under POPS_HAS_KOKKOS (kokkos_is_initialized)
+#include <pops/parallel/comm.hpp>  // pops::my_rank / n_ranks: rank-0 guard of the multi-rank IO facade
+#include <pops/runtime/dynamic/abi_key.hpp>  // pops::abi_key: ABI key exposed to the DSL ("production" path)
+#include <pops/runtime/amr_system.hpp>
+#include <pops/runtime/system.hpp>
 
 #include <cstring>
 #include <stdexcept>
@@ -23,7 +23,7 @@
 #include <vector>
 
 namespace py = pybind11;
-using namespace adc;
+using namespace pops;
 
 // field (ny*nx row-major, j slow / i fast) -> numpy array (ny, nx) (copy). We size the buffer
 // with BOTH real extents of the index domain (rows = ny, cols = nx): square n x n in Cartesian

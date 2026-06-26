@@ -9,8 +9,8 @@ the .so source text without compiling); skips cleanly if adc is not importable.
 import sys
 
 try:
-    from adc import dsl
-    from adc import time as adctime
+    from pops import dsl
+    from pops import time as adctime
 except Exception as exc:  # adc not importable here -> skip, never fake
     print("skip test_operator_call (adc unavailable: %s)" % exc)
     sys.exit(0)

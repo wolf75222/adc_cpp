@@ -2,7 +2,7 @@
   "__comment": "Problem matcher GCC/Clang : transforme 'fichier:ligne:col: warning|error: message' en annotation GitHub. Enregistre par quality.yml (::add-matcher::) autour des builds warnings/sanitizers.",
   "problemMatcher": [
     {
-      "owner": "adc-gcc-warnings",
+      "owner": "pops-gcc-warnings",
       "severity": "warning",
       "pattern": [
         {

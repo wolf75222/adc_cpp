@@ -26,7 +26,7 @@
 ///   dette CONNUE, a resorber aux prochaines passes en pointant vers les briques d'ici. Aucun
 ///   changement de comportement attendu a chaque migration (meme sortie chronometree, meme JSON).
 
-#include <adc/core/foundation/kokkos_env.hpp>  // device_fence (seam backend : no-op serie/OpenMP, fence sous Cuda)
+#include <pops/core/foundation/kokkos_env.hpp>  // device_fence (seam backend : no-op serie/OpenMP, fence sous Cuda)
 
 #include <algorithm>
 #include <chrono>
@@ -36,7 +36,7 @@
 #include <type_traits>
 #include <vector>
 
-namespace adc::bench {
+namespace pops::bench {
 
 /// Horloge monotone des harnais (insensible aux ajustements d'horloge murale).
 using Clock = std::chrono::steady_clock;
@@ -115,4 +115,4 @@ bool eat(int argc, char** argv, int& a, const char* key, T& out) {
   return false;
 }
 
-}  // namespace adc::bench
+}  // namespace pops::bench

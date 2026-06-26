@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Strang splitting H(dt/2); S(dt); H(dt/2) as a compiled time Program (epic ADC-399 / ADC-410).
 
-Builds the Strang composition ONCE as Program IR via the ``adc.time.std.strang`` combinator (no
+Builds the Strang composition ONCE as Program IR via the ``pops.time.std.strang`` combinator (no
 scheme-specific C++ stepper), compiles it to a ``problem.so``, installs it, advances N steps
 C++-side, and checks it reproduces the native engine Strang macro-step
-(``adc.Strang`` via ``set_time_scheme("strang")``) BIT-for-bit. Mirrors
+(``pops.Strang`` via ``set_time_scheme("strang")``) BIT-for-bit. Mirrors
 python/tests/test_time_strang_parity.py, which proves max|d| = 0.00e+00.
 
 The simple case where the compiled half-flow EXACTLY mirrors native H: an UNCOUPLED isothermal
@@ -18,7 +18,7 @@ Run::
 
     python examples/time_programs/strang_program.py
 
-Requires a compiler + a visible Kokkos (``ADC_KOKKOS_ROOT``); prints a skip notice and exits 0
+Requires a compiler + a visible Kokkos (``POPS_KOKKOS_ROOT``); prints a skip notice and exits 0
 otherwise. cf. docs/sphinx/reference/time-program.md.
 """
 import sys
@@ -26,8 +26,8 @@ import sys
 try:
     import numpy as np
 
-    import adc
-    from adc import time as adctime
+    import pops
+    from pops import time as adctime
 except Exception as exc:  # noqa: BLE001
     print("skip strang_program (adc/numpy unavailable: %s)" % exc)
     sys.exit(0)
@@ -36,10 +36,10 @@ except Exception as exc:  # noqa: BLE001
 def transport_model():
     """Uncoupled isothermal fluid (no field coupling into the flux), NO source brick: native H is a
     pure Euler transport step and native S (run_source_stage) is a no-op."""
-    return adc.Model(state=adc.FluidState("isothermal", cs2=0.5),
-                     transport=adc.IsothermalFlux(),
-                     source=adc.NoSource(),
-                     elliptic=adc.BackgroundDensity(alpha=1.0, n0=0.0))
+    return pops.Model(state=pops.FluidState("isothermal", cs2=0.5),
+                     transport=pops.IsothermalFlux(),
+                     source=pops.NoSource(),
+                     elliptic=pops.BackgroundDensity(alpha=1.0, n0=0.0))
 
 
 def half_flow(prog, U, frac):
@@ -56,7 +56,7 @@ def no_op_source(prog, U, frac):  # noqa: ARG001  -- frac unused: S is the ident
 
 
 def strang_program(name="strang_example", block="ions"):
-    """The compiled Strang program H(dt/2); S(dt); H(dt/2) built via adc.time.std.strang."""
+    """The compiled Strang program H(dt/2); S(dt); H(dt/2) built via pops.time.std.strang."""
     P = adctime.Program(name)
     adctime.std.strang(P, block, half_flow, no_op_source)
     return P
@@ -64,10 +64,10 @@ def strang_program(name="strang_example", block="ions"):
 
 def make_sim():
     n = 24
-    sim = adc.System(n=n, L=1.0, periodic=True)
+    sim = pops.System(n=n, L=1.0, periodic=True)
     sim.add_block("ions", transport_model(),
-                  spatial=adc.FiniteVolume(limiter="none", riemann="rusanov"),
-                  time=adc.Explicit(method="euler"))
+                  spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                  time=pops.Explicit(method="euler"))
     sim.set_poisson("charge_density", "geometric_mg")  # inert: BackgroundDensity n0=0, flux reads no phi
     x = (np.arange(n) + 0.5) / n
     X, Y = np.meshgrid(x, x, indexing="ij")
@@ -77,11 +77,11 @@ def make_sim():
 
 
 def main():
-    if not hasattr(adc.System(n=8, L=1.0, periodic=True), "install_program"):
-        print("skip strang_program (_adc lacks install_program; rebuild _adc)")
+    if not hasattr(pops.System(n=8, L=1.0, periodic=True), "install_program"):
+        print("skip strang_program (_pops lacks install_program; rebuild _pops)")
         return 0
     try:
-        compiled = adc.compile_problem(model=transport_model(), time=strang_program())
+        compiled = pops.compile_problem(model=transport_model(), time=strang_program())
     except RuntimeError as exc:
         print("skip strang_program (compile_problem could not build the .so: %s)" % str(exc)[:160])
         return 0
@@ -105,7 +105,7 @@ def main():
     U_native = np.array(native.get_state("ions"))
     U_prog = np.array(prog.get_state("ions"))
     err = float(np.abs(U_native - U_prog).max())
-    print("compiled std.strang vs native adc.Strang over %d steps: max|d| = %.2e" % (nstep, err))
+    print("compiled std.strang vs native pops.Strang over %d steps: max|d| = %.2e" % (nstep, err))
     ok = np.array_equal(U_native, U_prog)
     print("OK" if ok else "MISMATCH")
     return 0 if ok else 1

@@ -17,7 +17,7 @@ set -u
 module load cuda/12.6
 romeo_load_armgpu_env
 spack load openmpi +cuda
-cd "$HOME/adc_gpu_p1" || exit 3
+cd "$HOME/pops_gpu_p1" || exit 3
 echo "noeud=$(hostname) arch=$(uname -m)"
 NW="$PWD/kinstall/bin/nvcc_wrapper"
 INC="$PWD/gpuval2_include"

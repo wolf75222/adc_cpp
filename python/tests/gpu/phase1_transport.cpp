@@ -3,29 +3,29 @@
 // Sous un build Kokkos+CUDA, les Fab sont en memoire unifiee (ManagedAllocator) et assemble_rhs
 // dispatche via for_each_cell -> Kokkos::parallel_for sur le device. On imprime un checksum
 // (masse, energie) pour comparer CPU vs GPU. Compiler seriel (sans -DADC_HAS_KOKKOS) ou Kokkos+CUDA.
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/layout/distribution_mapping.hpp>
-#include <adc/mesh/boundary/fill_boundary.hpp>
-#include <adc/mesh/execution/for_each.hpp>
-#include <adc/mesh/geometry/geometry.hpp>
-#include <adc/mesh/storage/multifab.hpp>
-#include <adc/mesh/boundary/physical_bc.hpp>
-#include <adc/numerics/fv/numerical_flux.hpp>
-#include <adc/numerics/fv/reconstruction.hpp>
-#include <adc/numerics/spatial_operator.hpp>
-#include <adc/physics/bricks/bricks.hpp>  // Euler + CompositeModel + NoSource + ChargeDensity
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/layout/distribution_mapping.hpp>
+#include <pops/mesh/boundary/fill_boundary.hpp>
+#include <pops/mesh/execution/for_each.hpp>
+#include <pops/mesh/geometry/geometry.hpp>
+#include <pops/mesh/storage/multifab.hpp>
+#include <pops/mesh/boundary/physical_bc.hpp>
+#include <pops/numerics/fv/numerical_flux.hpp>
+#include <pops/numerics/fv/reconstruction.hpp>
+#include <pops/numerics/spatial_operator.hpp>
+#include <pops/physics/bricks/bricks.hpp>  // Euler + CompositeModel + NoSource + ChargeDensity
 
 #include <cmath>
 #include <cstdio>
 
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
 #include <Kokkos_Core.hpp>
 #endif
 
-using namespace adc;
+using namespace pops;
 
 int main(int argc, char** argv) {
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   Kokkos::initialize(argc, argv);
 #else
   (void)argc;
@@ -72,7 +72,7 @@ int main(int argc, char** argv) {
       assemble_rhs<NoSlope, RusanovFlux>(model, U, aux, geom, R, false);  // for_each -> GPU
       Array4 uu = U.fab(0).array();
       Array4 rr = R.fab(0).array();
-      for_each_cell(U.box(0), [=] ADC_HD(int i, int j) {  // U += dt R, sur le device
+      for_each_cell(U.box(0), [=] POPS_HD(int i, int j) {  // U += dt R, sur le device
         for (int c = 0; c < 4; ++c)
           uu(i, j, c) += dt * rr(i, j, c);
       });
@@ -89,7 +89,7 @@ int main(int argc, char** argv) {
         rmin = std::fmin(rmin, a(i, j, 0));
         rmax = std::fmax(rmax, a(i, j, 0));
       }
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
     const char* space = Kokkos::DefaultExecutionSpace::name();
 #else
     const char* space = "Serial(host)";
@@ -97,7 +97,7 @@ int main(int argc, char** argv) {
     std::printf("exec=%s n=%d steps=%d  mass=%.12f  energy=%.12f  rho[min,max]=[%.6f,%.6f]\n",
                 space, n, steps, mass, energy, rmin, rmax);
   }
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   Kokkos::finalize();
 #endif
   return 0;

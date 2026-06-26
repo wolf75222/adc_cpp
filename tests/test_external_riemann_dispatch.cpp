@@ -10,17 +10,17 @@
 // VALIDATIONS:
 //   1. ExternalBrickHandle dlopens the .so, reads its manifest, and exposes the brick's id +
 //      requirements (the manifest is visible in the same registry native bricks would use).
-//   2. The resolved residual entry point runs the brick's flux. The brick wraps adc::RusanovFlux, so
+//   2. The resolved residual entry point runs the brick's flux. The brick wraps pops::RusanovFlux, so
 //      its residual is compared BIT-FOR-BIT against the native rusanov path (make_block "rusanov"):
 //      the external brick is dispatched into identical numerics -> dmax == 0.
 //   3. An unknown id is rejected with a clear error.
 
-#include <adc/runtime/program/external_riemann_brick.hpp>
+#include <pops/runtime/program/external_riemann_brick.hpp>
 
-#include <adc/runtime/builders/compiled/compiled_block_abi.hpp>  // compiled_block::residual (native ref)
-#include <adc/physics/bricks/bricks.hpp>                         // CompositeModel / Euler / ...
+#include <pops/runtime/builders/compiled/compiled_block_abi.hpp>  // compiled_block::residual (native ref)
+#include <pops/physics/bricks/bricks.hpp>                         // CompositeModel / Euler / ...
 
-#include "test_harness.hpp"  // adc::test::Checker
+#include "test_harness.hpp"  // pops::test::Checker
 
 #include <cmath>
 #include <cstdio>
@@ -29,7 +29,7 @@
 #include <string>
 #include <vector>
 
-using adc::runtime::program::ExternalBrickHandle;
+using pops::runtime::program::ExternalBrickHandle;
 
 namespace {
 
@@ -42,27 +42,27 @@ constexpr double kGamma = 1.4;
 std::string brick_source() {
   // clang-format off
   return R"CPP(
-#include <adc/runtime/program/external_riemann_brick.hpp>
-#include <adc/physics/bricks/bricks.hpp>
+#include <pops/runtime/program/external_riemann_brick.hpp>
+#include <pops/physics/bricks/bricks.hpp>
 
-// The user's flux: same single-interface contract as adc::RusanovFlux (numerical_flux.hpp). Here it
+// The user's flux: same single-interface contract as pops::RusanovFlux (numerical_flux.hpp). Here it
 // forwards to RusanovFlux so the test can assert bit-identical dispatch; a real brick would compute
-// its own interface flux. ADC_HD: device-callable, no virtuals.
+// its own interface flux. POPS_HD: device-callable, no virtuals.
 struct UserRusanov {
   template <class Model>
-  ADC_HD typename Model::State operator()(const Model& m, const typename Model::State& UL,
-                                          const adc::Aux& AL, const typename Model::State& UR,
-                                          const adc::Aux& AR, int dir) const {
-    return adc::RusanovFlux{}(m, UL, AL, UR, AR, dir);
+  POPS_HD typename Model::State operator()(const Model& m, const typename Model::State& UL,
+                                          const pops::Aux& AL, const typename Model::State& UR,
+                                          const pops::Aux& AR, int dir) const {
+    return pops::RusanovFlux{}(m, UL, AL, UR, AR, dir);
   }
 };
 
 namespace user_brick {
-using Model = adc::CompositeModel<adc::Euler, adc::NoSource, adc::BackgroundDensity>;
+using Model = pops::CompositeModel<pops::Euler, pops::NoSource, pops::BackgroundDensity>;
 }
 
-ADC_DEFINE_EXTERNAL_RIEMANN_BRICK("my_riemann", UserRusanov, user_brick::Model, "max_wave_speed");
-ADC_DEFINE_BRICK_MANIFEST();
+POPS_DEFINE_EXTERNAL_RIEMANN_BRICK("my_riemann", UserRusanov, user_brick::Model, "max_wave_speed");
+POPS_DEFINE_BRICK_MANIFEST();
 )CPP";
   // clang-format on
 }
@@ -88,30 +88,30 @@ std::string include_flags(const char* dirs) {
 // Compile the brick to a .so (g++/c++ at run time). Returns true on success. Mirrors
 // test_amr_native_loader.cpp::compile_loader (same SDK / std handling on macOS) AND, under Kokkos,
 // adds this module's Kokkos interface include dirs / defines / options so the brick .so is ABI-
-// compatible with the test binary (for_each.hpp #errors without ADC_HAS_KOKKOS).
+// compatible with the test binary (for_each.hpp #errors without POPS_HAS_KOKKOS).
 bool compile_brick(const std::string& src, const std::string& so) {
 #if defined(__APPLE__)
   const std::string cc = "/usr/bin/c++";
 #else
-  const std::string cc = ADC_TEST_CXX;
+  const std::string cc = POPS_TEST_CXX;
 #endif
-  std::string cmd = cc + " -shared -fPIC -std=" + ADC_TEST_CXX_STD + " -O2 -I " + ADC_TEST_INCLUDE +
+  std::string cmd = cc + " -shared -fPIC -std=" + POPS_TEST_CXX_STD + " -O2 -I " + POPS_TEST_INCLUDE +
                     " " + src + " -o " + so;
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   // Match the module's Kokkos ABI: its interface includes (Kokkos + libomp), defines and options.
-  cmd += include_flags(ADC_TEST_KOKKOS_INC);
+  cmd += include_flags(POPS_TEST_KOKKOS_INC);
   // INTERFACE_COMPILE_OPTIONS may carry CMake's `SHELL:` escape (e.g. "SHELL:-Xpreprocessor -fopenmp
   // -I.../libomp/include" for AppleClang OpenMP); strip the literal `SHELL:` token, the rest is a
   // plain flag list the compiler accepts as-is.
   {
-    std::string opts = ADC_TEST_KOKKOS_OPTS;
+    std::string opts = POPS_TEST_KOKKOS_OPTS;
     for (std::size_t p = opts.find("SHELL:"); p != std::string::npos; p = opts.find("SHELL:"))
       opts.erase(p, 6);
     cmd += " " + opts;
   }
   // INTERFACE_COMPILE_DEFINITIONS are bare tokens (KOKKOS_DEPENDENCE, ...); prefix each with -D.
   {
-    const std::string defs = ADC_TEST_KOKKOS_DEFS;
+    const std::string defs = POPS_TEST_KOKKOS_DEFS;
     std::string token;
     for (std::size_t i = 0; i <= defs.size(); ++i) {
       if (i == defs.size() || defs[i] == ' ') {
@@ -150,18 +150,18 @@ std::vector<double> euler_state(int n) {
   return U;
 }
 
-using RefModel = adc::CompositeModel<adc::Euler, adc::NoSource, adc::BackgroundDensity>;
+using RefModel = pops::CompositeModel<pops::Euler, pops::NoSource, pops::BackgroundDensity>;
 
 }  // namespace
 
 int main() {
-  const char* cxx = ADC_TEST_CXX;
+  const char* cxx = POPS_TEST_CXX;
   if (cxx == nullptr || cxx[0] == '\0') {
     std::printf("skip test_external_riemann_dispatch (no C++ compiler known to the build)\n");
     return 0;
   }
 
-  const std::string tmp = std::string(ADC_TEST_TMPDIR) + "/external_riemann_" +
+  const std::string tmp = std::string(POPS_TEST_TMPDIR) + "/external_riemann_" +
                           std::to_string(static_cast<long>(std::clock()));
   const std::string src = tmp + ".cpp", so = tmp + ".so";
   {
@@ -174,7 +174,7 @@ int main() {
     return 0;  // self-skip on a toolchain that cannot build the brick (cf. test_amr_native_loader)
   }
 
-  adc::test::Checker chk;
+  pops::test::Checker chk;
 
   // (1) dlopen + manifest visibility + requirements surface.
   ExternalBrickHandle handle(so, "my_riemann");
@@ -182,7 +182,7 @@ int main() {
   chk(handle.requirements() == "max_wave_speed", "requirements_surface");
   chk(handle.residual() != nullptr, "residual_resolved");
   // The dlopen registered the manifest in this image's process catalog too.
-  const auto* entry = adc::runtime::program::BrickRegistry::instance().lookup("my_riemann");
+  const auto* entry = pops::runtime::program::BrickRegistry::instance().lookup("my_riemann");
   chk(entry != nullptr && entry->category == "riemann", "manifest_visible_in_registry");
 
   // (2) BIT-IDENTICAL dispatch: external brick residual == native rusanov residual.
@@ -196,7 +196,7 @@ int main() {
   handle.residual()(U.data(), Rext.data(), /*aux=*/nullptr, n, dx, dy, /*periodic=*/1, "minmod",
                     /*recon_prim=*/0, /*pos_floor=*/0.0);
   // Native reference: the SAME path with the native rusanov flux (compiled_block::residual -> make_block).
-  adc::compiled_block::residual<RefModel>(U.data(), Rnat.data(), /*aux=*/nullptr, n, dx, dy,
+  pops::compiled_block::residual<RefModel>(U.data(), Rnat.data(), /*aux=*/nullptr, n, dx, dy,
                                           /*periodic=*/true, "minmod", "rusanov",
                                           /*recon_prim=*/false);
   double dmax = 0.0, nrm = 0.0;

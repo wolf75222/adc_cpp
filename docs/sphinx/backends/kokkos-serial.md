@@ -24,5 +24,5 @@ ctest --test-dir build --output-on-failure
 
 **Validation: CI (required gate of every PR).** This is the `build-and-test` job
 (`ubuntu-latest`, Kokkos Serial), triggered on every `pull_request`. Covers the 109 non-MPI
-ctest targets plus the 60 Python tests (built via `-DADC_BUILD_PYTHON=ON`, `_adc`
+ctest targets plus the 60 Python tests (built via `-DADC_BUILD_PYTHON=ON`, `_pops`
 Kokkos Serial module). Status `ci-fast` in the matrix.

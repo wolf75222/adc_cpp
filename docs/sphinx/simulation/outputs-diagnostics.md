@@ -46,12 +46,12 @@ The facade also writes files directly:
   `h5py` is absent). `step` adds a numbered suffix; `fields` selects a subset of blocks (`None` =
   all). `parallel=True` is valid only with `format="hdf5"` (else `ValueError`): per-rank hyperslabs
   via `h5py` MPI plus `mpi4py`, with true parallelism only for multi-box runs (a cartesian `System`
-  is mono-box, so rank 0 writes it). The backend / format gate matrix is `adc.capabilities()["io"]`.
+  is mono-box, so rank 0 writes it). The backend / format gate matrix is `pops.capabilities()["io"]`.
 - `sim.checkpoint(path, parallel=False)`: restartable npz checkpoint (full conservative state of
   every block plus the clock). Reload it with `sim.restart(path)` after replaying the same
   composition.
 
-`adc.AmrSystem` exposes the same surface with slightly different signatures: `write(path,
+`pops.AmrSystem` exposes the same surface with slightly different signatures: `write(path,
 format="npz", step=None)` (npz default, coarse per-block fields plus fine-patch footprints) and
 `checkpoint(path)` (single-block, single-rank restartable npz).
 

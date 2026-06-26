@@ -7,16 +7,16 @@
 // Erreur apres n pas : |u_n - u_eq| = |u0 - u_eq| / (1 + dt/eps)^n  -> 0 quand eps -> 0.
 // L'explicite, lui, a un facteur |1 - dt/eps| >> 1 des que dt >> eps : il explose.
 
-#include <adc/numerics/time/schemes/imex.hpp>
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/layout/distribution_mapping.hpp>
-#include <adc/mesh/storage/multifab.hpp>
+#include <pops/numerics/time/schemes/imex.hpp>
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/layout/distribution_mapping.hpp>
+#include <pops/mesh/storage/multifab.hpp>
 
 #include <cmath>
 #include <cstdio>
 #include <vector>
 
-using namespace adc;
+using namespace pops;
 
 static void no_transport(MultiFab&, Real) {}
 

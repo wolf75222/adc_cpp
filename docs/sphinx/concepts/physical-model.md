@@ -7,7 +7,7 @@ emerges as a composition of generic bricks.
 
 ## What a PhysicalModel is
 
-`PhysicalModel` (`adc::PhysicalModel`, in `core/physical_model.hpp`) is the contract for "what to
+`PhysicalModel` (`pops::PhysicalModel`, in `core/physical_model.hpp`) is the contract for "what to
 compute". A type that satisfies it exposes a handful of pure functions of pointwise states:
 
 - `flux(U, aux, dir)`: the physical flux in direction `dir` (0 = x, 1 = y);
@@ -18,12 +18,12 @@ compute". A type that satisfies it exposes a handful of pure functions of pointw
   mass density, depending on the model).
 
 That is the whole interface. A `PhysicalModel` sees a single cell at a time. It has no access to
-storage, to the mesh, or to parallelism, and the methods called in kernels carry `ADC_HD` so they
+storage, to the mesh, or to parallelism, and the methods called in kernels carry `POPS_HD` so they
 remain callable on a GPU device. There is no allocation in hot loops, no `std::function`, no dynamic
 polymorphism. This locality is why the same model runs unchanged on Serial, OpenMP, Kokkos Cuda,
 MPI, and AMR.
 
-A complete hyperbolic brick additionally satisfies `adc::HyperbolicPhysicalModel`: it carries its
+A complete hyperbolic brick additionally satisfies `pops::HyperbolicPhysicalModel`: it carries its
 conservative and primitive variables and the conversions `to_primitive` / `to_conservative`, because
 the variable layout and the flux are physically linked. A flux is written for one specific layout.
 
@@ -60,7 +60,7 @@ discretization layer (`numerics/numerical_flux.hpp`), not in the model. The thir
 solver that closes the Poisson coupling. None of the three knows the internals of the others.
 
 The link between the two hyperbolic axes is the `aux` channel. `flux` and `source` both receive
-`adc::Aux`, which carries the potential `phi`, its gradient `grad_x` / `grad_y`, and the optional
+`pops::Aux`, which carries the potential `phi`, its gradient `grad_x` / `grad_y`, and the optional
 extended fields `B_z` and `T_e`. The same spatial operator can therefore host a drift transport, where
 `aux` is read inside the flux, and a self-gravitating compressible fluid, where `aux` is read inside
 the source.
@@ -79,8 +79,8 @@ elliptic brick for `GravityCoupling`, and the same machinery describes a self-gr
 scenario lives in the choice of bricks, never in the core.
 
 From Python you assemble the same object three ways, all producing the same compiled C++ model: native
-bricks (`adc.Model`), symbolic formulas compiled to a `.so` (`adc.dsl.Model`), or a mix of the two
-within one model (`adc.CompositeModel`). The cell-by-cell computation stays compiled either way, so
+bricks (`pops.Model`), symbolic formulas compiled to a `.so` (`pops.dsl.Model`), or a mix of the two
+within one model (`pops.CompositeModel`). The cell-by-cell computation stays compiled either way, so
 MPI, AMR, and GPU are preserved.
 
 ## Where to go next

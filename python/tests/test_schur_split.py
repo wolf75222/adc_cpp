@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Test de la politique temporelle adc.Split(hyperbolic=Explicit, source=CondensedSchur) : le binding
+"""Test de la politique temporelle pops.Split(hyperbolic=Explicit, source=CondensedSchur) : le binding
 Python qui cable l'etage SOURCE condense par Schur (CondensedSchurSourceStepper, #126) dans System via
 set_source_stage. cf. docs/SCHUR_CONDENSATION_DESIGN.md sections 5-6, roadmap PR5.
 
 On valide :
   (a) RUN sans callback Python par cellule : un fluide isotherme magnetise (DSL compile AOT, roles
-      Density/MomentumX/MomentumY, lit B_z) tourne avec time=adc.Split(...). L'etage source est en
+      Density/MomentumX/MomentumY, lit B_z) tourne avec time=pops.Split(...). L'etage source est en
       C++ (aucune PythonFlux / source numpy) ; on verifie que le run produit un etat FINI et que la
       densite (gelee dans la source) est conservee, et que la quantite de mouvement EVOLUE (l'etage
       source a engage le couplage potentiel / Lorentz).
@@ -15,9 +15,9 @@ On valide :
       meme ordre, la ou un schema explicite exploserait.
   (c) ERREURS CLAIRES : (c1) role manquant (Density/MomentumX/MomentumY) -> erreur a add_equation ;
       (c2) pas de B_z (set_magnetic_field non appele) -> erreur ; (c3) kind / theta invalides.
-  (d) DEFAUT INCHANGE : adc.Explicit / adc.IMEX restent BIT-IDENTIQUES (le seul fait d'avoir Split /
-      CondensedSchur dans le module ne perturbe pas le chemin par defaut), et un bloc adc.Split sur une
-      espece NE perturbe PAS une espece voisine en adc.Explicit (le defaut est strictement opt-in).
+  (d) DEFAUT INCHANGE : pops.Explicit / pops.IMEX restent BIT-IDENTIQUES (le seul fait d'avoir Split /
+      CondensedSchur dans le module ne perturbe pas le chemin par defaut), et un bloc pops.Split sur une
+      espece NE perturbe PAS une espece voisine en pops.Explicit (le defaut est strictement opt-in).
 
 Lance avec python3. Saute proprement (skip) si aucun compilateur C++ n'est disponible (le modele
 magnetise a roles passe par le DSL compile -- pas de modele natif a roles rho/mx/my accessible sinon).
@@ -28,8 +28,8 @@ import tempfile
 
 import numpy as np
 
-import adc
-from adc import dsl
+import pops
+from pops import dsl
 
 INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "include"))
 
@@ -46,7 +46,7 @@ def chk(cond, label):
 def isothermal_magnetized(cs2=1.0):
     """Fluide isotherme 2D (rho, mx, my) magnetise : flux d'Euler isotherme (pression cs2*rho), roles
     canoniques Density/MomentumX/MomentumY, lit le champ aux B_z (-> n_aux=4, canal B_z present). La
-    source LOCALE est nulle : l'etage SOURCE est porte par adc.CondensedSchur (electrostatique + Lorentz)."""
+    source LOCALE est nulle : l'etage SOURCE est porte par pops.CondensedSchur (electrostatique + Lorentz)."""
     m = dsl.Model("iso_mag")
     rho, mx, my = m.conservative_vars("rho", "mx", "my",
                                       roles=["Density", "MomentumX", "MomentumY"])
@@ -79,21 +79,21 @@ def build_sim(compiled, n=32, L=1.0, B0=4.0, alpha=3.0, theta=1.0, with_bz=True,
               with_source_stage=True):
     """System non periodique (Dirichlet pour le Poisson condense), un bloc isotherme magnetise. Pose
     B_z AVANT add_equation (set_source_stage exige le champ B_z) si with_bz."""
-    sim = adc.System(n=n, L=L, periodic=False)
+    sim = pops.System(n=n, L=L, periodic=False)
     sim.set_poisson(bc="dirichlet")
     if with_bz:
         sim.set_magnetic_field(B0 * np.ones((n, n)))  # B_z constant ; doit preceder set_source_stage
     if with_source_stage:
-        time = adc.Split(hyperbolic=adc.Explicit(),
-                         source=adc.CondensedSchur(kind="electrostatic_lorentz", theta=theta,
+        time = pops.Split(hyperbolic=pops.Explicit(),
+                         source=pops.CondensedSchur(kind="electrostatic_lorentz", theta=theta,
                                                    alpha=alpha,
-                                                   density=adc.Role.Density,
-                                                   momentum=(adc.Role.MomentumX, adc.Role.MomentumY),
+                                                   density=pops.Role.Density,
+                                                   momentum=(pops.Role.MomentumX, pops.Role.MomentumY),
                                                    magnetic_field="B_z", potential="phi"))
     else:
-        time = adc.Explicit()
+        time = pops.Explicit()
     sim.add_equation("ions", model=compiled,
-                     spatial=adc.FiniteVolume(limiter="minmod", riemann="rusanov",
+                     spatial=pops.FiniteVolume(limiter="minmod", riemann="rusanov",
                                               variables="conservative"),
                      time=time)
     rho0, u0, v0 = smooth_init(n, L)
@@ -121,72 +121,72 @@ def raises(exc_types, fn, *args, **kw):
 
 def scalar_native_model():
     """Modele natif (ModelSpec) diocotron-like (Scalar + ExB), valide sur AmrSystem (cf. test_bindings).
-    Sert a exercer les gardes de facade (rejet de adc.Split sur AmrSystem) SANS compilateur C++ : la
+    Sert a exercer les gardes de facade (rejet de pops.Split sur AmrSystem) SANS compilateur C++ : la
     garde Split leve AVANT tout usage du modele (juste apres les defauts), le modele reste un argument
     valide pour ne pas masquer le rejet par une autre erreur."""
-    return adc.Model(state=adc.Scalar(), transport=adc.ExB(B0=1.0),
-                     source=adc.NoSource(),
-                     elliptic=adc.BackgroundDensity(alpha=1.0, n0=0.0))
+    return pops.Model(state=pops.Scalar(), transport=pops.ExB(B0=1.0),
+                     source=pops.NoSource(),
+                     elliptic=pops.BackgroundDensity(alpha=1.0, n0=0.0))
 
 
 def check_condensed_schur_descriptors():
-    """(e) Descripteurs roles / champs de adc.CondensedSchur. Les roles density / momentum / energy sont
+    """(e) Descripteurs roles / champs de pops.CondensedSchur. Les roles density / momentum / energy sont
     TRANSPORTES a l'ABI C++ (audit vague 2 : *_spec resolus au build contre les VariableRole du bloc ;
-    couverture de transport dediee dans test_schur_roles.py), donc un adc.Role.* / nom != defaut est
+    couverture de transport dediee dans test_schur_roles.py), donc un pops.Role.* / nom != defaut est
     desormais ACCEPTE au constructeur (la facade ne valide plus la semantique : le build C++ leve si le
     role/nom est introuvable). Seuls magnetic_field (champ aux CANONIQUE obligatoire) et potential (fige
     a 'phi' : pas de solveur derriere un autre champ) sont REJETES des le constructeur."""
     # Defaut explicite ET implicite : doivent construire SANS lever (parite stricte avec l'existant).
-    adc.CondensedSchur()
-    adc.CondensedSchur(kind="electrostatic_lorentz", theta=0.5, alpha=1.0,
-                       density=adc.Role.Density,
-                       momentum=(adc.Role.MomentumX, adc.Role.MomentumY),
+    pops.CondensedSchur()
+    pops.CondensedSchur(kind="electrostatic_lorentz", theta=0.5, alpha=1.0,
+                       density=pops.Role.Density,
+                       momentum=(pops.Role.MomentumX, pops.Role.MomentumY),
                        energy=None, magnetic_field="B_z", potential="phi")
     chk(True, "(e) CondensedSchur defaut (explicite + implicite) construit sans lever")
-    # energy=adc.Role.Energy est tolere (c'est la valeur que le C++ utilise pour l'energie optionnelle).
-    adc.CondensedSchur(energy=adc.Role.Energy)
-    chk(True, "(e) CondensedSchur(energy=adc.Role.Energy) tolere (valeur hardcodee C++)")
+    # energy=pops.Role.Energy est tolere (c'est la valeur que le C++ utilise pour l'energie optionnelle).
+    pops.CondensedSchur(energy=pops.Role.Energy)
+    chk(True, "(e) CondensedSchur(energy=pops.Role.Energy) tolere (valeur hardcodee C++)")
 
     # Roles density / momentum != defaut TRANSPORTES (vague 2) : ACCEPTES, exposent un *_spec non vide
     # (resolution role -> composante cote C++) ; les defauts canoniques gardent des specs VIDES (chemin
     # historique C++ bit-identique).
-    cs = adc.CondensedSchur(density=adc.Role.Energy,
-                            momentum=(adc.Role.VelocityX, adc.Role.VelocityY),
-                            energy=adc.Role.Scalar)
+    cs = pops.CondensedSchur(density=pops.Role.Energy,
+                            momentum=(pops.Role.VelocityX, pops.Role.VelocityY),
+                            energy=pops.Role.Scalar)
     chk(bool(cs.density_spec) and bool(cs.momentum_x_spec) and bool(cs.momentum_y_spec)
         and bool(cs.energy_spec),
         "(e) CondensedSchur(density/momentum/energy != defaut) -> accepte et transporte (*_spec non vides)")
-    chk(adc.CondensedSchur().density_spec == "" and adc.CondensedSchur().momentum_x_spec == "",
+    chk(pops.CondensedSchur().density_spec == "" and pops.CondensedSchur().momentum_x_spec == "",
         "(e) CondensedSchur defaut -> specs VIDES (chemin canonique C++ inchange)")
 
     # magnetic_field non canonique ET potential != 'phi' restent REJETES au constructeur (messages clairs).
-    e_bz = raises(ValueError, lambda: adc.CondensedSchur(magnetic_field="B_custom"))
-    e_phi = raises(ValueError, lambda: adc.CondensedSchur(potential="psi"))
+    e_bz = raises(ValueError, lambda: pops.CondensedSchur(magnetic_field="B_custom"))
+    e_phi = raises(ValueError, lambda: pops.CondensedSchur(potential="psi"))
     chk("magnetic_field" in str(e_bz) and "potential" in str(e_phi),
         "(e) magnetic_field non canonique / potential != 'phi' -> ValueError (messages clairs)")
 
 
 def check_amr_split_rejected():
-    """(f) adc.Split / adc.Strang (etage source condense par Schur) n'est cable QUE par add_equation
+    """(f) pops.Split / pops.Strang (etage source condense par Schur) n'est cable QUE par add_equation
     (qui branche set_source_stage APRES l'ajout du bloc). AmrSystem.add_block doit donc le REJETER
     explicitement (sinon Split, exposant .kind/.substeps, passerait comme un transport seul et la source
     condensee serait perdue en silence) -- MEME rejet que System.add_block. Depuis le chemin amr-schur
-    (#265), AmrSystem.add_equation(time=adc.Split(...)) est au contraire SUPPORTE (set_source_stage +
+    (#265), AmrSystem.add_equation(time=pops.Split(...)) est au contraire SUPPORTE (set_source_stage +
     set_time_scheme ; couverture positive dans test_amr_schur_via_system.py) : seul add_block rejette."""
     n, L = 16, 1.0
-    split = adc.Split(hyperbolic=adc.Explicit(),
-                      source=adc.CondensedSchur(kind="electrostatic_lorentz", theta=0.5))
+    split = pops.Split(hyperbolic=pops.Explicit(),
+                      source=pops.CondensedSchur(kind="electrostatic_lorentz", theta=0.5))
     model = scalar_native_model()
 
-    amr1 = adc.AmrSystem(n=n, L=L, periodic=True)
+    amr1 = pops.AmrSystem(n=n, L=L, periodic=True)
     e1 = raises((TypeError, ValueError), amr1.add_block, "ne", model=model, time=split)
     chk("Split" in str(e1) or "Schur" in str(e1),
-        "(f) AmrSystem.add_block(time=adc.Split(...)) -> rejet explicite (Split/Schur)")
+        "(f) AmrSystem.add_block(time=pops.Split(...)) -> rejet explicite (Split/Schur)")
 
-    # DEFAUT INCHANGE : un bloc AMR en adc.Explicit pur s'ajoute toujours sans lever.
-    amr_ok = adc.AmrSystem(n=n, L=L, periodic=True)
-    amr_ok.add_block("ne", model=scalar_native_model(), time=adc.Explicit())
-    chk(True, "(f) AmrSystem.add_block(time=adc.Explicit()) defaut inchange (pas de rejet)")
+    # DEFAUT INCHANGE : un bloc AMR en pops.Explicit pur s'ajoute toujours sans lever.
+    amr_ok = pops.AmrSystem(n=n, L=L, periodic=True)
+    amr_ok.add_block("ne", model=scalar_native_model(), time=pops.Explicit())
+    chk(True, "(f) AmrSystem.add_block(time=pops.Explicit()) defaut inchange (pas de rejet)")
 
 
 def main():
@@ -206,7 +206,7 @@ def main():
 
     n, L = 32, 1.0
     # adc_cpp est Kokkos-only (#263) : le .so AOT inclut les en-tetes adc (multifab/for_each) qui ne
-    # compilent QUE sous ADC_HAS_KOKKOS, donc compile_aot exige un Kokkos installe (ADC_KOKKOS_ROOT).
+    # compilent QUE sous POPS_HAS_KOKKOS, donc compile_aot exige un Kokkos installe (POPS_KOKKOS_ROOT).
     # Sans lui, on saute proprement la portion compilee -- meme convention que test_time_euler.py.
     try:
         compiled = isothermal_magnetized().compile(backend="aot", include=INCLUDE)
@@ -269,26 +269,26 @@ def main():
     scal.primitive_vars(q=q)
     scal.conservative_from([q])
     scal_c = scal.compile(backend="aot", include=INCLUDE)
-    sim_c1 = adc.System(n=n, L=L, periodic=False)
+    sim_c1 = pops.System(n=n, L=L, periodic=False)
     sim_c1.set_poisson(bc="dirichlet")
     sim_c1.set_magnetic_field(np.ones((n, n)))
     raised = False
     try:
         sim_c1.add_equation("q", model=scal_c,
-                            time=adc.Split(hyperbolic=adc.Explicit(),
-                                           source=adc.CondensedSchur(theta=0.5)))
+                            time=pops.Split(hyperbolic=pops.Explicit(),
+                                           source=pops.CondensedSchur(theta=0.5)))
     except Exception as e:
         raised = "role" in str(e).lower() or "momentum" in str(e).lower()
     chk(raised, "(c1) role requis manquant -> erreur claire a add_equation")
 
     # (c2) pas de B_z (set_magnetic_field non appele) -> erreur a add_equation.
-    sim_c2 = adc.System(n=n, L=L, periodic=False)
+    sim_c2 = pops.System(n=n, L=L, periodic=False)
     sim_c2.set_poisson(bc="dirichlet")
     raised = False
     try:
         sim_c2.add_equation("ions", model=compiled,
-                            time=adc.Split(hyperbolic=adc.Explicit(),
-                                           source=adc.CondensedSchur(theta=0.5)))
+                            time=pops.Split(hyperbolic=pops.Explicit(),
+                                           source=pops.CondensedSchur(theta=0.5)))
     except Exception as e:
         raised = "b_z" in str(e).lower() or "magnetic" in str(e).lower()
     chk(raised, "(c2) B_z absent -> erreur claire a add_equation")
@@ -296,23 +296,23 @@ def main():
     # (c3) kind / theta invalides -> erreur a la construction de CondensedSchur (cote Python).
     raised = False
     try:
-        adc.CondensedSchur(kind="nimporte_quoi")
+        pops.CondensedSchur(kind="nimporte_quoi")
     except ValueError:
         raised = True
     chk(raised, "(c3) kind inconnu -> ValueError")
     raised = False
     try:
-        adc.CondensedSchur(theta=1.5)
+        pops.CondensedSchur(theta=1.5)
     except ValueError:
         raised = True
     chk(raised, "(c3) theta hors (0, 1] -> ValueError")
 
     # ------------------------------------------------------------------------------------------
-    # (d) DEFAUT INCHANGE : un bloc adc.Explicit donne le MEME resultat avec ou sans l'existence de
+    # (d) DEFAUT INCHANGE : un bloc pops.Explicit donne le MEME resultat avec ou sans l'existence de
     #     l'etage source dans le module, ET un bloc Split sur une espece ne perturbe pas une espece
-    #     voisine en adc.Explicit (opt-in strict).
+    #     voisine en pops.Explicit (opt-in strict).
     # ------------------------------------------------------------------------------------------
-    # Reference : modele isotherme magnetise SANS etage source (adc.Explicit pur). Deterministe.
+    # Reference : modele isotherme magnetise SANS etage source (pops.Explicit pur). Deterministe.
     ref = build_sim(compiled, n=n, L=L, with_source_stage=False)
     for _ in range(4):
         ref.step(2.0e-3)
@@ -327,13 +327,13 @@ def main():
     # IDENTIQUE a un run ou "bg" est seul (le Split d'ions ne le perturbe pas via le couplage Poisson au
     # dela du couplage physique attendu -- ici on compare le bloc bg a son run SOLO, memes pas).
     # On verifie au minimum que "bg" reste FINI et que retirer l'etage source d'ions NE casse PAS bg.
-    sim_two = adc.System(n=n, L=L, periodic=False)
+    sim_two = pops.System(n=n, L=L, periodic=False)
     sim_two.set_poisson(bc="dirichlet")
     sim_two.set_magnetic_field(4.0 * np.ones((n, n)))
     sim_two.add_equation("ions", model=compiled,
-                         time=adc.Split(hyperbolic=adc.Explicit(),
-                                        source=adc.CondensedSchur(theta=1.0, alpha=3.0)))
-    sim_two.add_equation("bg", model=compiled, time=adc.Explicit())  # voisin Explicit pur
+                         time=pops.Split(hyperbolic=pops.Explicit(),
+                                        source=pops.CondensedSchur(theta=1.0, alpha=3.0)))
+    sim_two.add_equation("bg", model=compiled, time=pops.Explicit())  # voisin Explicit pur
     rho0, u0, v0 = smooth_init(n, L)
     sim_two.set_primitive_state("ions", rho=rho0, u=u0, v=v0)
     sim_two.set_primitive_state("bg", rho=rho0, u=u0, v=v0)
@@ -349,26 +349,26 @@ def main():
     #     PAS evolve (force a true cote C++). On exige un REJET explicite (ValueError) nommant le
     #     backend, et on verifie que evolve=True (defaut) passe toujours sur ces memes backends.
     # ------------------------------------------------------------------------------------------
-    sim_aot = adc.System(n=n, L=L, periodic=False)
+    sim_aot = pops.System(n=n, L=L, periodic=False)
     sim_aot.set_poisson(bc="dirichlet")
     sim_aot.set_magnetic_field(np.ones((n, n)))
     e_aot = raises(ValueError, sim_aot.add_equation, "frozen", model=compiled,
-                   time=adc.Explicit(), evolve=False)
+                   time=pops.Explicit(), evolve=False)
     chk("aot" in str(e_aot) and "evolve" in str(e_aot),
         "(g) backend 'aot' : evolve=False -> ValueError (nomme le backend)")
     # evolve=True (defaut) : meme backend, meme bloc -> aucun rejet (chemin nominal inchange).
-    sim_aot.add_equation("ok", model=compiled, time=adc.Explicit())  # evolve True par defaut
+    sim_aot.add_equation("ok", model=compiled, time=pops.Explicit())  # evolve True par defaut
     chk(True, "(g) backend 'aot' : evolve=True (defaut) passe toujours (pas de rejet)")
 
     proto = isothermal_magnetized().compile(backend="prototype", include=INCLUDE)
-    sim_proto = adc.System(n=n, L=L, periodic=False)
+    sim_proto = pops.System(n=n, L=L, periodic=False)
     sim_proto.set_poisson(bc="dirichlet")
     sim_proto.set_magnetic_field(np.ones((n, n)))
     e_proto = raises(ValueError, sim_proto.add_equation, "frozen", model=proto,
-                     time=adc.Explicit(), evolve=False)
+                     time=pops.Explicit(), evolve=False)
     chk("prototype" in str(e_proto) and "evolve" in str(e_proto),
         "(g) backend 'prototype' : evolve=False -> ValueError (nomme le backend)")
-    sim_proto.add_equation("ok", model=proto, time=adc.Explicit())  # evolve True par defaut
+    sim_proto.add_equation("ok", model=proto, time=pops.Explicit())  # evolve True par defaut
     chk(True, "(g) backend 'prototype' : evolve=True (defaut) passe toujours (pas de rejet)")
 
     if fails == 0:

@@ -47,7 +47,7 @@ reviewed = "6f84dc22b95d6f69edd347e153ae037f6dfe1401"
 [docs."docs/sphinx/getting-started/first-run.md"]
 owner = "Romain"
 mode = "strict"
-depends_on = ["python/adc/__init__.py", "include/adc/physics/bricks/bricks.hpp", "include/adc/runtime/system.hpp"]
+depends_on = ["python/pops/__init__.py", "include/pops/physics/bricks/bricks.hpp", "include/pops/runtime/system.hpp"]
 tested_by = []
 testable = false
 reviewed = "01b42b27eadfa359827987f9c85348901188cc28"
@@ -55,7 +55,7 @@ reviewed = "01b42b27eadfa359827987f9c85348901188cc28"
 [docs."docs/sphinx/getting-started/tutorial.md"]
 owner = "Romain"
 mode = "strict"
-depends_on = ["docs/sphinx/tutorials/diocotron_tutorial.py", "python/adc/dsl.py", "include/adc/physics/bricks/hyperbolic.hpp", "include/adc/physics/bricks/elliptic.hpp", "include/adc/runtime/builders/compiled/dsl_block.hpp"]
+depends_on = ["docs/sphinx/tutorials/diocotron_tutorial.py", "python/pops/dsl.py", "include/pops/physics/bricks/hyperbolic.hpp", "include/pops/physics/bricks/elliptic.hpp", "include/pops/runtime/builders/compiled/dsl_block.hpp"]
 tested_by = ["docs/sphinx/tutorials/diocotron_tutorial.py"]
 testable = true
 reviewed = "368437789a46"
@@ -63,7 +63,7 @@ reviewed = "368437789a46"
 [docs."docs/sphinx/getting-started/backend.md"]
 owner = "Romain"
 mode = "warning"
-depends_on = ["CMakePresets.json", "scripts/kokkos_openmp_conda.sh", "python/adc/__init__.py"]
+depends_on = ["CMakePresets.json", "scripts/kokkos_openmp_conda.sh", "python/pops/__init__.py"]
 tested_by = []
 testable = false
 reviewed = "86526007676c737380d0e76c01f68c8de1fcaeb5"
@@ -71,7 +71,7 @@ reviewed = "86526007676c737380d0e76c01f68c8de1fcaeb5"
 [docs."docs/sphinx/getting-started/repository-layout.md"]
 owner = "Romain"
 mode = "warning"
-depends_on = ["CMakeLists.txt", "include/adc", "python/adc"]
+depends_on = ["CMakeLists.txt", "include/adc", "python/pops"]
 tested_by = []
 testable = false
 reviewed = "d51a01e30b393075abedaa76ef82768e88df9a4b"
@@ -119,7 +119,7 @@ testable = false
 [docs."docs/sphinx/advanced/index.md"]
 owner = "Romain"
 mode = "warning"
-depends_on = ["include/adc/runtime"]
+depends_on = ["include/pops/runtime"]
 tested_by = []
 testable = false
 reviewed = "6f84dc22b95d6f69edd347e153ae037f6dfe1401"
@@ -127,7 +127,7 @@ reviewed = "6f84dc22b95d6f69edd347e153ae037f6dfe1401"
 [docs."docs/sphinx/amr/index.md"]
 owner = "Romain"
 mode = "warning"
-depends_on = ["include/adc/amr", "include/adc/runtime/amr_system.hpp"]
+depends_on = ["include/pops/amr", "include/pops/runtime/amr_system.hpp"]
 tested_by = []
 testable = false
 reviewed = "6f84dc22b95d6f69edd347e153ae037f6dfe1401"
@@ -135,7 +135,7 @@ reviewed = "6f84dc22b95d6f69edd347e153ae037f6dfe1401"
 [docs."docs/sphinx/backends/index.md"]
 owner = "Romain"
 mode = "warning"
-depends_on = ["CMakePresets.json", "include/adc/parallel", "scripts/kokkos_openmp_conda.sh"]
+depends_on = ["CMakePresets.json", "include/pops/parallel", "scripts/kokkos_openmp_conda.sh"]
 tested_by = []
 testable = false
 reviewed = "6f84dc22b95d6f69edd347e153ae037f6dfe1401"
@@ -143,7 +143,7 @@ reviewed = "6f84dc22b95d6f69edd347e153ae037f6dfe1401"
 [docs."docs/sphinx/models/index.md"]
 owner = "Romain"
 mode = "warning"
-depends_on = ["include/adc/physics"]
+depends_on = ["include/pops/physics"]
 tested_by = []
 testable = false
 reviewed = "6f84dc22b95d6f69edd347e153ae037f6dfe1401"
@@ -151,7 +151,7 @@ reviewed = "6f84dc22b95d6f69edd347e153ae037f6dfe1401"
 [docs."docs/sphinx/simulation/index.md"]
 owner = "Romain"
 mode = "warning"
-depends_on = ["include/adc/runtime", "include/adc/runtime/system.hpp"]
+depends_on = ["include/pops/runtime", "include/pops/runtime/system.hpp"]
 tested_by = []
 testable = false
 reviewed = "6f84dc22b95d6f69edd347e153ae037f6dfe1401"
@@ -177,7 +177,7 @@ reviewed = "6f84dc22b95d6f69edd347e153ae037f6dfe1401"
 [docs."docs/sphinx/reference/python-api.md"]
 owner = "Romain"
 mode = "warning"
-depends_on = ["python/adc", "python/bindings/core/bindings.cpp", "python/bindings/system/base/system.cpp", "python/bindings/amr/amr_system.cpp"]
+depends_on = ["python/pops", "python/bindings/core/bindings.cpp", "python/bindings/system/base/system.cpp", "python/bindings/amr/amr_system.cpp"]
 tested_by = []
 testable = false
 reviewed = "3052304085221bd1ac3c61166881ea3710d60b41"
@@ -193,7 +193,7 @@ reviewed = "6f84dc22b95d6f69edd347e153ae037f6dfe1401"
 [docs."docs/sphinx/reference/native-bricks.md"]
 owner = "Romain"
 mode = "warning"
-depends_on = ["include/adc/physics", "include/adc/physics/bricks/bricks.hpp"]
+depends_on = ["include/pops/physics", "include/pops/physics/bricks/bricks.hpp"]
 tested_by = []
 testable = false
 reviewed = "6f84dc22b95d6f69edd347e153ae037f6dfe1401"
@@ -201,7 +201,7 @@ reviewed = "6f84dc22b95d6f69edd347e153ae037f6dfe1401"
 [docs."docs/sphinx/reference/symbolic-dsl.md"]
 owner = "Romain"
 mode = "warning"
-depends_on = ["python/adc/dsl.py", "include/adc/runtime/builders/compiled/dsl_block.hpp"]
+depends_on = ["python/pops/dsl.py", "include/pops/runtime/builders/compiled/dsl_block.hpp"]
 tested_by = []
 testable = false
 reviewed = "d51a01e30b393075abedaa76ef82768e88df9a4b"
@@ -209,7 +209,7 @@ reviewed = "d51a01e30b393075abedaa76ef82768e88df9a4b"
 [docs."docs/sphinx/reference/time-program.md"]
 owner = "Romain"
 mode = "warning"
-depends_on = ["python/adc/time.py"]
+depends_on = ["python/pops/time.py"]
 tested_by = []
 testable = false
 reviewed = "116be4f"
@@ -217,7 +217,7 @@ reviewed = "116be4f"
 [docs."docs/sphinx/reference/operator-modules.md"]
 owner = "Romain"
 mode = "warning"
-depends_on = ["python/adc/model/__init__.py", "python/adc/dsl.py", "python/adc/time.py"]
+depends_on = ["python/pops/model/__init__.py", "python/pops/dsl.py", "python/pops/time.py"]
 tested_by = ["python/tests/test_operator_module.py", "python/tests/test_operator_macros.py"]
 testable = false
 reviewed = "3052304085221bd1ac3c61166881ea3710d60b41"
@@ -225,37 +225,37 @@ reviewed = "3052304085221bd1ac3c61166881ea3710d60b41"
 [docs."docs/sphinx/reference/board-like-dsl.md"]
 owner = "Romain"
 mode = "warning"
-depends_on = ["python/adc/physics.py", "python/adc/math.py", "python/adc/lib.py", "python/adc/model/__init__.py", "python/adc/time.py"]
+depends_on = ["python/pops/physics.py", "python/pops/math.py", "python/pops/lib.py", "python/pops/model/__init__.py", "python/pops/time.py"]
 tested_by = ["python/tests/test_physics_board.py", "python/tests/test_time_board.py", "python/tests/test_lib_descriptors.py", "python/tests/test_invariants.py"]
 testable = false
 
 [docs."docs/sphinx/reference/typed-ir.md"]
 owner = "Romain"
 mode = "warning"
-depends_on = ["python/adc/model/__init__.py", "python/adc/time.py", "python/adc/physics.py"]
+depends_on = ["python/pops/model/__init__.py", "python/pops/time.py", "python/pops/physics.py"]
 tested_by = ["python/tests/test_inspection.py", "python/tests/test_physics_board.py"]
 testable = false
 
 [docs."docs/sphinx/reference/spec2-builder-layer.md"]
 owner = "Romain"
 mode = "warning"
-depends_on = ["python/adc/model/__init__.py", "python/adc/time.py"]
+depends_on = ["python/pops/model/__init__.py", "python/pops/time.py"]
 tested_by = ["python/tests/test_inspection.py", "python/tests/test_time_board.py"]
 testable = false
 
 [docs."docs/sphinx/reference/native-numerics.md"]
 owner = "Romain"
 mode = "warning"
-depends_on = ["include/adc/numerics/fv/numerical_flux.hpp", "include/adc/numerics/fv/reconstruction.hpp", "python/adc/lib.py"]
+depends_on = ["include/pops/numerics/fv/numerical_flux.hpp", "include/pops/numerics/fv/reconstruction.hpp", "python/pops/lib.py"]
 tested_by = ["python/tests/test_lib_descriptors.py"]
 testable = false
 
 [docs."docs/sphinx/reference/typed-bricks.md"]
 owner = "Romain"
 mode = "warning"
-depends_on = ["python/adc/lib.py", "python/adc/time.py", "python/adc/library.py",
-              "python/adc/library_codegen.py", "include/adc/runtime/program/external_brick.hpp",
-              "include/adc/runtime/program/external_riemann_brick.hpp"]
+depends_on = ["python/pops/lib.py", "python/pops/time.py", "python/pops/library.py",
+              "python/pops/library_codegen.py", "include/pops/runtime/program/external_brick.hpp",
+              "include/pops/runtime/program/external_riemann_brick.hpp"]
 tested_by = ["python/tests/test_lib_descriptors.py", "python/tests/test_external_bricks.py",
              "python/tests/test_compile_library.py", "tests/test_external_riemann_dispatch.cpp",
              "tests/test_external_brick_json.cpp"]
@@ -264,28 +264,28 @@ testable = false
 [docs."docs/sphinx/reference/multispecies.md"]
 owner = "Romain"
 mode = "warning"
-depends_on = ["python/adc/model/__init__.py", "python/adc/time.py", "python/adc/physics.py"]
+depends_on = ["python/pops/model/__init__.py", "python/pops/time.py", "python/pops/physics.py"]
 tested_by = ["python/tests/test_time_board.py", "python/tests/test_board_multispecies.py"]
 testable = false
 
 [docs."docs/sphinx/reference/program-scheduler.md"]
 owner = "Romain"
 mode = "warning"
-depends_on = ["python/adc/time.py"]
+depends_on = ["python/pops/time.py"]
 tested_by = ["python/tests/test_schedule_authoring.py", "python/tests/test_time_policy.py"]
 testable = false
 
 [docs."docs/sphinx/reference/custom-solvers.md"]
 owner = "Romain"
 mode = "warning"
-depends_on = ["python/adc/lib.py", "include/adc/numerics/elliptic/linear/generic_krylov.hpp"]
+depends_on = ["python/pops/lib.py", "include/pops/numerics/elliptic/linear/generic_krylov.hpp"]
 tested_by = ["python/tests/test_lib_descriptors.py"]
 testable = false
 
 [docs."docs/sphinx/reference/moment-models.md"]
 owner = "Romain"
 mode = "warning"
-depends_on = ["python/adc/moments.py", "python/adc/dsl.py"]
+depends_on = ["python/pops/moments.py", "python/pops/dsl.py"]
 tested_by = []
 testable = false
 reviewed = "d51a01e30b393075abedaa76ef82768e88df9a4b"
@@ -293,7 +293,7 @@ reviewed = "d51a01e30b393075abedaa76ef82768e88df9a4b"
 [docs."docs/sphinx/concepts/moments-and-closures.md"]
 owner = "Romain"
 mode = "warning"
-depends_on = ["python/adc/moments.py"]
+depends_on = ["python/pops/moments.py"]
 tested_by = []
 testable = false
 reviewed = "3bee206eda53f45318dd46a20ab05597ca783da8"
@@ -301,7 +301,7 @@ reviewed = "3bee206eda53f45318dd46a20ab05597ca783da8"
 [docs."docs/sphinx/tutorials/moment-model-hyqmom15.md"]
 owner = "Romain"
 mode = "warning"
-depends_on = ["python/adc/moments.py", "python/adc/dsl.py"]
+depends_on = ["python/pops/moments.py", "python/pops/dsl.py"]
 tested_by = []
 testable = false
 reviewed = "d51a01e30b393075abedaa76ef82768e88df9a4b"
@@ -327,7 +327,7 @@ testable = false
 [docs."docs/ARCHITECTURE.md"]
 owner = "Romain"
 mode = "warning"
-depends_on = ["include/adc", "include/adc/runtime"]
+depends_on = ["include/adc", "include/pops/runtime"]
 tested_by = []
 testable = false
 reviewed = "6f84dc22b95d6f69edd347e153ae037f6dfe1401"
@@ -335,7 +335,7 @@ reviewed = "6f84dc22b95d6f69edd347e153ae037f6dfe1401"
 [docs."docs/ALGORITHMS.md"]
 owner = "Romain"
 mode = "warning"
-depends_on = ["include/adc/numerics"]
+depends_on = ["include/pops/numerics"]
 tested_by = []
 testable = false
 reviewed = "6f84dc22b95d6f69edd347e153ae037f6dfe1401"
@@ -358,7 +358,7 @@ testable = false
 [docs."docs/DSL_API.md"]
 owner = "Romain"
 mode = "warning"
-depends_on = ["python/adc/dsl.py", "include/adc/runtime/builders/compiled/dsl_block.hpp"]
+depends_on = ["python/pops/dsl.py", "include/pops/runtime/builders/compiled/dsl_block.hpp"]
 tested_by = []
 testable = false
 reviewed = "d51a01e30b393075abedaa76ef82768e88df9a4b"
@@ -366,7 +366,7 @@ reviewed = "d51a01e30b393075abedaa76ef82768e88df9a4b"
 [docs."docs/CONSERVATION_SUMMARY.md"]
 owner = "Romain"
 mode = "warning"
-depends_on = ["include/adc/numerics"]
+depends_on = ["include/pops/numerics"]
 tested_by = []
 testable = false
 reviewed = "6f84dc22b95d6f69edd347e153ae037f6dfe1401"

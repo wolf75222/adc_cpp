@@ -1,12 +1,12 @@
 // BoxArray::from_domain : decoupage en tuiles disjointes et couvrantes,
 // reparties egalement (cas divisible et non divisible).
 
-#include <adc/mesh/layout/box_array.hpp>
+#include <pops/mesh/layout/box_array.hpp>
 
 #include <cstdio>
 #include <vector>
 
-using namespace adc;
+using namespace pops;
 
 // Verifie que les boxes pavent exactement le domaine : chaque cellule couverte
 // une et une seule fois.

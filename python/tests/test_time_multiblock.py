@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""adc.time MULTI-BLOCK compiled Programs (epic ADC-399 / ADC-426, spec "Multi-blocs").
+"""pops.time MULTI-BLOCK compiled Programs (epic ADC-399 / ADC-426, spec "Multi-blocs").
 
 `emit_cpp_program` now lowers N ``P.state`` / N ``P.commit``: each op routes to its block's runtime
 index (``_block_indices``, declaration order), so an N-block transport program compiles and steps all
 blocks in one macro-step. The block index is positional -- the System blocks (``sim.add_equation``)
 MUST be added in the SAME order the Program declares them via ``P.state``.
 
-(A) Validation + codegen (pure Python, always runs when adc.time imports): a 2-block program lowers
+(A) Validation + codegen (pure Python, always runs when pops.time imports): a 2-block program lowers
     with per-block ctx.state / rhs_into indices; a read-only block (declared but never committed) is
     allowed; a double commit and a commit of an undeclared block are rejected; the SIMULTANEOUS
     multi-target solve_fields_from_blocks lowers to ctx.solve_fields_from_blocks (Spec 3 crit 24).
@@ -18,7 +18,7 @@ MUST be added in the SAME order the Program declares them via ``P.state``.
     single-block compiled Program (the offline per-block reference -- the blocks are uncoupled, no
     elliptic, so the multi-block step must equal independent single-block steps). The two states must
     match to round-off, and each block must have actually advanced. Runs in CI (gate-python rebuilds
-    _adc) and locally once _adc is rebuilt; skips if _adc lacks install_program, numpy/_adc is absent,
+    _pops) and locally once _pops is rebuilt; skips if _pops lacks install_program, numpy/_pops is absent,
     no compiler/Kokkos is visible, or the .so compile fails -- never faking the engine.
 """
 import sys
@@ -31,9 +31,9 @@ def _skip(msg):
 
 def _adc_time():
     try:
-        import adc.time as t
-    except Exception as exc:  # noqa: BLE001 -- adc.time needs _adc; skip cleanly, never fake
-        _skip("adc.time unavailable: %s" % exc)
+        import pops.time as t
+    except Exception as exc:  # noqa: BLE001 -- pops.time needs _pops; skip cleanly, never fake
+        _skip("pops.time unavailable: %s" % exc)
     return t
 
 
@@ -149,7 +149,7 @@ def section_a(t):
     src_c = Pc.emit_cpp_program()
     chk("ctx.solve_fields_from_blocks(" in src_c,
         "solve_fields_from_blocks lowers to the coupled multi-block solve")
-    chk("std::vector<const adc::MultiFab*>" in src_c,
+    chk("std::vector<const pops::MultiFab*>" in src_c,
         "the coupled solve builds a per-block MultiFab pointer vector")
     chk(src_c.count("] = &") >= 2, "each listed block slots its stage state by index")
 
@@ -184,14 +184,14 @@ def section_b(t):
     try:
         import numpy as np
 
-        import adc
-        from adc import dsl
-    except Exception as exc:  # noqa: BLE001 -- numpy or _adc unavailable
+        import pops
+        from pops import dsl
+    except Exception as exc:  # noqa: BLE001 -- numpy or _pops unavailable
         print("-- (B) skipped: adc/numpy unavailable (%s) --" % exc)
         return
 
-    if not hasattr(adc.System(n=8, L=1.0, periodic=True), "install_program"):
-        print("-- (B) skipped: _adc lacks the install_program binding (rebuild _adc) --")
+    if not hasattr(pops.System(n=8, L=1.0, periodic=True), "install_program"):
+        print("-- (B) skipped: _pops lacks the install_program binding (rebuild _pops) --")
         return
 
     print("== (B) end-to-end: 2-block program vs two independent single-block runs ==")
@@ -209,26 +209,26 @@ def section_b(t):
 
     # Compile the single-block reference programs (one per block name) and the 2-block program.
     try:
-        comp_a = adc.compile_problem(model=passive_model(dsl, "pa_ref"),
+        comp_a = pops.compile_problem(model=passive_model(dsl, "pa_ref"),
                                      time=single_block_program(t, "fe_a", "a"))
-        comp_b = adc.compile_problem(model=passive_model(dsl, "pb_ref"),
+        comp_b = pops.compile_problem(model=passive_model(dsl, "pb_ref"),
                                      time=single_block_program(t, "fe_b", "b"))
-        comp_ab = adc.compile_problem(model=passive_model(dsl, "pab"), time=two_block_program(t))
+        comp_ab = pops.compile_problem(model=passive_model(dsl, "pab"), time=two_block_program(t))
     except (RuntimeError, ValueError) as exc:  # no compiler / no Kokkos / .so compile failed
         _skip("compile_problem could not build the .so: %s" % str(exc)[:160])
 
     chk(comp_ab.program_name == "two_block_passive", "the 2-block handle carries the program name")
 
     def make_sim(blocks):
-        sim = adc.System(n=n, L=1.0, periodic=True)
+        sim = pops.System(n=n, L=1.0, periodic=True)
         for blk in blocks:
             try:
                 cm = passive_model(dsl, "blk_" + blk).compile(backend="production")
             except RuntimeError as exc:  # no compiler / no Kokkos
                 _skip("model compile could not build the .so: %s" % str(exc)[:160])
             sim.add_equation(blk, cm,
-                             spatial=adc.FiniteVolume(limiter="none", riemann="rusanov"),
-                             time=adc.Explicit(method="euler"))
+                             spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                             time=pops.Explicit(method="euler"))
         return sim
 
     # Reference: two INDEPENDENT single-block systems.

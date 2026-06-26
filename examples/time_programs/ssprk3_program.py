@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 """SSPRK3 as a compiled multi-stage time Program (epic ADC-399 / ADC-407).
 
-Writes the three-stage SSPRK3 (Shu-Osher) scheme with ``adc.time.Program`` (two intermediate stage
-states + a linear-combination commit) via the ``adc.time.std.ssprk3`` macro, compiles it to a
-``problem.so`` with ``adc.compile_problem``, installs it, advances one step C++-side, and checks it
-reproduces the native ``adc.Explicit(method="ssprk3")`` step bit-for-bit. There is NO special SSPRK3
+Writes the three-stage SSPRK3 (Shu-Osher) scheme with ``pops.time.Program`` (two intermediate stage
+states + a linear-combination commit) via the ``pops.time.std.ssprk3`` macro, compiles it to a
+``problem.so`` with ``pops.compile_problem``, installs it, advances one step C++-side, and checks it
+reproduces the native ``pops.Explicit(method="ssprk3")`` step bit-for-bit. There is NO special SSPRK3
 C++ class -- the scheme is just IR lowered by the codegen (like the merged ssprk2 example/test).
 
 Run::
 
     python examples/time_programs/ssprk3_program.py
 
-Requires a compiler + a visible Kokkos (``ADC_KOKKOS_ROOT``); prints a skip notice and exits 0
+Requires a compiler + a visible Kokkos (``POPS_KOKKOS_ROOT``); prints a skip notice and exits 0
 otherwise. cf. docs/sphinx/reference/time-program.md.
 """
 import sys
@@ -19,26 +19,26 @@ import sys
 try:
     import numpy as np
 
-    import adc
-    from adc import time as adctime
+    import pops
+    from pops import time as adctime
 except Exception as exc:  # noqa: BLE001
     print("skip ssprk3_program (adc/numpy unavailable: %s)" % exc)
     sys.exit(0)
 
 
 def gas_model():
-    return adc.Model(state=adc.FluidState("isothermal", cs2=0.5),
-                     transport=adc.IsothermalFlux(),
-                     source=adc.NoSource(),
-                     elliptic=adc.BackgroundDensity(alpha=1.0, n0=0.0))
+    return pops.Model(state=pops.FluidState("isothermal", cs2=0.5),
+                     transport=pops.IsothermalFlux(),
+                     source=pops.NoSource(),
+                     elliptic=pops.BackgroundDensity(alpha=1.0, n0=0.0))
 
 
 def build_system(method="ssprk3"):
     n = 48
-    sim = adc.System(n=n, L=1.0, periodic=True)
+    sim = pops.System(n=n, L=1.0, periodic=True)
     sim.add_block("plasma", gas_model(),
-                  spatial=adc.FiniteVolume(limiter="none", riemann="rusanov"),
-                  time=adc.Explicit(method=method))
+                  spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                  time=pops.Explicit(method=method))
     sim.set_poisson("charge_density", "geometric_mg")
     x = (np.arange(n) + 0.5) / n
     X, Y = np.meshgrid(x, x, indexing="ij")
@@ -56,12 +56,12 @@ def ssprk3_program():
 
 
 def main():
-    if not hasattr(adc.System(n=8, L=1.0, periodic=True), "install_program"):
-        print("skip ssprk3_program (_adc lacks install_program; rebuild _adc)")
+    if not hasattr(pops.System(n=8, L=1.0, periodic=True), "install_program"):
+        print("skip ssprk3_program (_pops lacks install_program; rebuild _pops)")
         return 0
     dt = 2e-3
     try:
-        compiled = adc.compile_problem(model=gas_model(), time=ssprk3_program())
+        compiled = pops.compile_problem(model=gas_model(), time=ssprk3_program())
     except RuntimeError as exc:
         print("skip ssprk3_program (compile_problem could not build the .so: %s)" % str(exc)[:160])
         return 0
@@ -74,7 +74,7 @@ def main():
     native = build_system("ssprk3")
     native.step(dt)
     err = float(np.abs(U_prog - np.array(native.get_state("plasma"))).max())
-    print("compiled SSPRK3 Program vs native adc.Explicit('ssprk3'): max|d| = %.2e" % err)
+    print("compiled SSPRK3 Program vs native pops.Explicit('ssprk3'): max|d| = %.2e" % err)
     ok = err < 1e-12
     print("OK" if ok else "MISMATCH")
     return 0 if ok else 1

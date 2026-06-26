@@ -12,33 +12,33 @@
 //
 // Aucune tolerance : operator!= strict (le test echoue au moindre ecart de dernier bit).
 
-#include <adc/physics/composition/composite.hpp>
-#include <adc/physics/bricks/elliptic.hpp>
-#include <adc/runtime/builders/block/block_builder.hpp>  // make_poisson_rhs
+#include <pops/physics/composition/composite.hpp>
+#include <pops/physics/bricks/elliptic.hpp>
+#include <pops/runtime/builders/block/block_builder.hpp>  // make_poisson_rhs
 
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/layout/distribution_mapping.hpp>
-#include <adc/mesh/geometry/geometry.hpp>
-#include <adc/mesh/storage/multifab.hpp>
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/layout/distribution_mapping.hpp>
+#include <pops/mesh/geometry/geometry.hpp>
+#include <pops/mesh/storage/multifab.hpp>
 
 #include <cmath>
 #include <cstdio>
 #include <vector>
 
-using namespace adc;
+using namespace pops;
 
 // Modele scalaire minimal (1 var) : seule la brique elliptique compte ici. Le transport et la
 // source sont triviaux (la brique make_poisson_rhs ne lit que elliptic_rhs).
 template <class Elliptic>
 struct ScalarElliptic {
   using State = StateVec<1>;
-  using Aux = adc::Aux;
+  using Aux = pops::Aux;
   static constexpr int n_vars = 1;
   Elliptic ell{};
-  ADC_HD State flux(const State&, const Aux&, int) const { return State{Real(0)}; }
-  ADC_HD Real max_wave_speed(const State&, const Aux&, int) const { return Real(0); }
-  ADC_HD State source(const State&, const Aux&) const { return State{Real(0)}; }
-  ADC_HD Real elliptic_rhs(const State& u) const { return ell.rhs(u); }
+  POPS_HD State flux(const State&, const Aux&, int) const { return State{Real(0)}; }
+  POPS_HD Real max_wave_speed(const State&, const Aux&, int) const { return Real(0); }
+  POPS_HD State source(const State&, const Aux&) const { return State{Real(0)}; }
+  POPS_HD Real elliptic_rhs(const State& u) const { return ell.rhs(u); }
 };
 
 int main() {

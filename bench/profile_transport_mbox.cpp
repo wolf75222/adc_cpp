@@ -12,18 +12,18 @@
 // Le cas physique est Euler 2D periodique lisse, sans disque, sans Schur, sans AMR, sans Poisson.
 // Il sert a comparer C++/Kokkos/MPI et frontends Python sans melanger le verrou scientifique Hoffart.
 
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/layout/distribution_mapping.hpp>
-#include <adc/mesh/boundary/fill_boundary.hpp>
-#include <adc/mesh/execution/for_each.hpp>
-#include <adc/mesh/geometry/geometry.hpp>
-#include <adc/mesh/storage/mf_arith.hpp>
-#include <adc/mesh/storage/multifab.hpp>
-#include <adc/numerics/spatial_operator.hpp>
-#include <adc/parallel/comm.hpp>
-#include <adc/parallel/load_balance.hpp>
-#include <adc/physics/bricks/bricks.hpp>
-#include <adc/physics/fluids/euler.hpp>
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/layout/distribution_mapping.hpp>
+#include <pops/mesh/boundary/fill_boundary.hpp>
+#include <pops/mesh/execution/for_each.hpp>
+#include <pops/mesh/geometry/geometry.hpp>
+#include <pops/mesh/storage/mf_arith.hpp>
+#include <pops/mesh/storage/multifab.hpp>
+#include <pops/numerics/spatial_operator.hpp>
+#include <pops/parallel/comm.hpp>
+#include <pops/parallel/load_balance.hpp>
+#include <pops/physics/bricks/bricks.hpp>
+#include <pops/physics/fluids/euler.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -34,7 +34,7 @@
 #include <string>
 #include <type_traits>
 
-using namespace adc;
+using namespace pops;
 using Clock = std::chrono::steady_clock;
 
 namespace {
@@ -125,7 +125,7 @@ void update_stage1(MultiFab& U1, const MultiFab& U, const MultiFab& R, Real dt) 
     ConstArray4 r = R.fab(li).const_array();
     const Box2D b = U.box(li);
     for (int c = 0; c < Model::n_vars; ++c) {
-      for_each_cell(b, [=] ADC_HD(int i, int j) { u1(i, j, c) = u(i, j, c) + dt * r(i, j, c); });
+      for_each_cell(b, [=] POPS_HD(int i, int j) { u1(i, j, c) = u(i, j, c) + dt * r(i, j, c); });
     }
   }
 }
@@ -137,7 +137,7 @@ void update_stage2(MultiFab& U, const MultiFab& U1, const MultiFab& R, Real dt) 
     ConstArray4 r = R.fab(li).const_array();
     const Box2D b = U.box(li);
     for (int c = 0; c < Model::n_vars; ++c) {
-      for_each_cell(b, [=] ADC_HD(int i, int j) {
+      for_each_cell(b, [=] POPS_HD(int i, int j) {
         u(i, j, c) = Real(0.5) * u(i, j, c) + Real(0.5) * (u1(i, j, c) + dt * r(i, j, c));
       });
     }

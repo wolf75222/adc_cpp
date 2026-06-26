@@ -20,7 +20,7 @@ import sys
 
 import numpy as np
 
-from adc import dsl
+from pops import dsl
 
 fails = 0
 

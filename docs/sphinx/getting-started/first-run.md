@@ -7,23 +7,23 @@ only that the module is [installed](installation.md) and importable).
 
 ```python
 import numpy as np
-import adc
+import pops
 
 # 1. A periodic 96 x 96 square system, domain [0, 1]^2.
-sim = adc.System(n=96, L=1.0, periodic=True)
+sim = pops.System(n=96, L=1.0, periodic=True)
 
 # 2. A block "ne": the density, advected by the E x B drift (transport=ExB),
 #    coupled to Poisson via a neutralizing background density (elliptic=BackgroundDensity).
 sim.add_block(
     "ne",
-    model=adc.Model(
-        state=adc.Scalar(),                       # one conservative variable: the density
-        transport=adc.ExB(B0=1.0),                # drift velocity v = (-d_y phi, d_x phi) / B0
-        source=adc.NoSource(),                    # no source term
-        elliptic=adc.BackgroundDensity(alpha=1.0, n0=1.0),  # Poisson rhs = alpha (n - n0)
+    model=pops.Model(
+        state=pops.Scalar(),                       # one conservative variable: the density
+        transport=pops.ExB(B0=1.0),                # drift velocity v = (-d_y phi, d_x phi) / B0
+        source=pops.NoSource(),                    # no source term
+        elliptic=pops.BackgroundDensity(alpha=1.0, n0=1.0),  # Poisson rhs = alpha (n - n0)
     ),
-    spatial=adc.Spatial(minmod=True),             # MUSCL minmod + Rusanov (default)
-    time=adc.Explicit(),                          # explicit integration
+    spatial=pops.Spatial(minmod=True),             # MUSCL minmod + Rusanov (default)
+    time=pops.Explicit(),                          # explicit integration
 )
 
 # 3. The system Poisson: rhs = charge density, multigrid solver.
@@ -48,8 +48,8 @@ print("density  =", sim.density("ne").shape)    # (96, 96)
 
 What the key calls do:
 
-- `adc.System(n=, L=, periodic=)` creates the system/coupler (square domain by default).
-- `adc.Model(state=, transport=, source=, elliptic=)` composes a model from native
+- `pops.System(n=, L=, periodic=)` creates the system/coupler (square domain by default).
+- `pops.Model(state=, transport=, source=, elliptic=)` composes a model from native
   bricks. Here: `Scalar` + `ExB` + `NoSource` + `BackgroundDensity`. This is exactly the
   reduced diocotron model, but the core does not name it.
 - `set_poisson(rhs="charge_density", solver="geometric_mg")`: `rhs` is either `charge_density` or
@@ -57,6 +57,6 @@ What the key calls do:
 - `set_density(name, arr2d)` sets a contiguous `(n, n)` array; `step_cfl(cfl)` advances one step
   at the given CFL; `density(name)` / `mass(name)` / `time()` read the state.
 
-To move from the model composed of bricks to the model written in formulas (DSL `adc.dsl.Model`),
-to adaptive refinement (`adc.AmrSystem`), to the figures and the GIF, follow the
+To move from the model composed of bricks to the model written in formulas (DSL `pops.dsl.Model`),
+to adaptive refinement (`pops.AmrSystem`), to the figures and the GIF, follow the
 [A->Z tutorial](tutorial.md).

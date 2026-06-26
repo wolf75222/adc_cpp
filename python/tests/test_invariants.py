@@ -6,12 +6,12 @@ hardcoded in the framework: the value is whatever the user writes.
 """
 import pytest
 
-physics = pytest.importorskip("adc.physics")
-amath = pytest.importorskip("adc.math")
+physics = pytest.importorskip("pops.physics")
+amath = pytest.importorskip("pops.math")
 
 
 def test_invariant_is_a_generic_integral():
-    from adc.math import integral
+    from pops.math import integral
     m = physics.Model("euler")
     U = m.state("U", components=["rho", "mx", "my"])
     rho, mx, my = U
@@ -22,7 +22,7 @@ def test_invariant_is_a_generic_integral():
 
 
 def test_invariants_are_not_name_special_cased():
-    from adc.math import integral
+    from pops.math import integral
     m = physics.Model("euler")
     U = m.state("U", components=["rho", "mx", "my"])
     rho, mx, my = U
@@ -33,7 +33,7 @@ def test_invariants_are_not_name_special_cased():
 
 
 def test_invariant_records_the_states_it_ranges_over():
-    from adc.math import integral
+    from pops.math import integral
     m = physics.Model("plasma")
     U = m.state("U", components=["rho", "mx", "my"])
     rho, mx, my = U

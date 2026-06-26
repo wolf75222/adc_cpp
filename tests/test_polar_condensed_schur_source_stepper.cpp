@@ -2,7 +2,7 @@
 // 2b) : test SOURCE-ONLY (transport gele) d'un fluide magnetise RAIDE sur un anneau (r, theta), sous la
 // source implicite couplee potentiel / vitesse / Lorentz (Hoffart et al., arXiv:2510.11808). Pendant
 // POLAIRE de test_condensed_schur_source_stepper (cartesien). Cf.
-// include/adc/coupling/polar_condensed_schur_source_stepper.hpp.
+// include/pops/coupling/polar_condensed_schur_source_stepper.hpp.
 //
 // SYSTEME SOURCE (transport gele), rho = rho0 (gele), B_z = B0, alpha. Vitesse (v_r, v_theta) dans la
 // base locale orthonormee (e_r, e_theta) ; la force de Lorentz y a la MEME forme qu'en cartesien
@@ -27,24 +27,24 @@
 //
 // Host / Serial-safe : UNE box, n_ranks()==1 (PolarTensorKrylovSolver / PolarPoissonSolver mono-rang).
 
-#include <adc/coupling/schur/source/polar_condensed_schur_source_stepper.hpp>
+#include <pops/coupling/schur/source/polar_condensed_schur_source_stepper.hpp>
 
-#include <adc/mesh/index/box2d.hpp>
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/layout/distribution_mapping.hpp>
-#include <adc/mesh/execution/for_each.hpp>
-#include <adc/mesh/geometry/geometry.hpp>
-#include <adc/mesh/storage/multifab.hpp>
-#include <adc/mesh/boundary/physical_bc.hpp>
-#include <adc/numerics/elliptic/polar/polar_poisson_solver.hpp>
-#include <adc/numerics/linalg/lorentz_eliminator.hpp>
-#include <adc/parallel/comm.hpp>
+#include <pops/mesh/index/box2d.hpp>
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/layout/distribution_mapping.hpp>
+#include <pops/mesh/execution/for_each.hpp>
+#include <pops/mesh/geometry/geometry.hpp>
+#include <pops/mesh/storage/multifab.hpp>
+#include <pops/mesh/boundary/physical_bc.hpp>
+#include <pops/numerics/elliptic/polar/polar_poisson_solver.hpp>
+#include <pops/numerics/linalg/lorentz_eliminator.hpp>
+#include <pops/parallel/comm.hpp>
 
 #include <cmath>
 #include <cstdio>
 #include <vector>
 
-using namespace adc;
+using namespace pops;
 static constexpr double kPi = 3.14159265358979323846;
 static constexpr double kRmin = 0.30;
 static constexpr double kRmax = 1.00;
@@ -92,7 +92,7 @@ struct InitKernel {
   Array4 st, phi;
   Real rho0;
   int c_rho, c_mx, c_my, c_E;
-  ADC_HD void operator()(int i, int j) const {
+  POPS_HD void operator()(int i, int j) const {
     const Real r = geom.r_cell(i);
     const Real th = geom.theta_cell(j);
     const Real h = std::sin(Real(kPi) * (r - Real(kRmin)) / Real(kRmax - kRmin));  // 0 aux bords
@@ -111,7 +111,7 @@ struct InitKernel {
 struct ConstBzKernel {
   Array4 bz;
   Real B0;
-  ADC_HD void operator()(int i, int j) const { bz(i, j, 0) = B0; }
+  POPS_HD void operator()(int i, int j) const { bz(i, j, 0) = B0; }
 };
 
 // norme L2 GLOBALE de la VITESSE (mr, mtheta)/rho de l'etat (diagnostic de stabilite).
@@ -181,7 +181,7 @@ struct DivVPolarKernel {
   Array4 rhs;
   Real coef;  // alpha rho0
   Real half_idr, half_idth, r_min, dr;
-  ADC_HD void operator()(int i, int j) const {
+  POPS_HD void operator()(int i, int j) const {
     const Real ri = r_min + (i + Real(0.5)) * dr;
     const Real rip = r_min + (i + Real(1.5)) * dr;
     const Real rim = r_min + (i - Real(0.5)) * dr;
@@ -196,7 +196,7 @@ struct DvPolarKernel {
   ConstArray4 vr, vt, phi;
   Array4 dvr, dvt;
   Real B0, half_idr, half_idth, r_min, dr;
-  ADC_HD void operator()(int i, int j) const {
+  POPS_HD void operator()(int i, int j) const {
     const Real ri = r_min + (i + Real(0.5)) * dr;
     const Real gr = (phi(i + 1, j, 0) - phi(i - 1, j, 0)) * half_idr;
     const Real gt = (phi(i, j + 1, 0) - phi(i, j - 1, 0)) * (half_idth / ri);
@@ -209,18 +209,18 @@ struct AxpyKernel {
   Array4 y;
   ConstArray4 x;
   Real a;
-  ADC_HD void operator()(int i, int j) const { y(i, j, 0) += a * x(i, j, 0); }
+  POPS_HD void operator()(int i, int j) const { y(i, j, 0) += a * x(i, j, 0); }
 };
 struct ScaleAddKernel {
   Array4 z;
   ConstArray4 base, x;
   Real a;
-  ADC_HD void operator()(int i, int j) const { z(i, j, 0) = base(i, j, 0) + a * x(i, j, 0); }
+  POPS_HD void operator()(int i, int j) const { z(i, j, 0) = base(i, j, 0) + a * x(i, j, 0); }
 };
 struct CopyKernel {
   Array4 d;
   ConstArray4 s;
-  ADC_HD void operator()(int i, int j) const { d(i, j, 0) = s(i, j, 0); }
+  POPS_HD void operator()(int i, int j) const { d(i, j, 0) = s(i, j, 0); }
 };
 
 struct RefIntegrator {

@@ -1,11 +1,11 @@
-"""PARAMETRES RUNTIME du DSL (P7-b) : un parametre declare adc.dsl.Param(..., kind='runtime') peut voir
+"""PARAMETRES RUNTIME du DSL (P7-b) : un parametre declare pops.dsl.Param(..., kind='runtime') peut voir
 sa valeur CHANGEE a l'execution SANS recompiler le .so, alors qu'un parametre kind='const' (defaut)
 reste INLINE EN DUR (bit-identique a l'historique).
 
 Mecanique (backend "aot", add_compiled_block) : le codegen emet `params.get(<indice>)` pour un param
-runtime (lecture d'un membre adc::RuntimeParams de la brique generee) au lieu d'une constante ; l'ABI du
+runtime (lecture d'un membre pops::RuntimeParams de la brique generee) au lieu d'une constante ; l'ABI du
 .so AOT transporte un bloc plat de valeurs (symboles `_p`) ; System.set_block_params(name, values) ecrit
-dans le bloc PARTAGE -> le comportement change au prochain pas. cf. include/adc/runtime/runtime_params.hpp.
+dans le bloc PARTAGE -> le comportement change au prochain pas. cf. include/pops/runtime/runtime_params.hpp.
 
 Ce test verifie :
   1) NON-REGRESSION : un param const reste inline (codegen byte-identique a un modele sans param runtime ;
@@ -22,7 +22,7 @@ import tempfile
 
 import numpy as np
 
-import adc
+import pops
 
 INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "include"))
 
@@ -30,7 +30,7 @@ INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "i
 def _build_iso(cs2_kind, cs2_value=1.0):
     """Modele isotherme 2D (rho, rho_u, rho_v) avec p = cs2 * rho. @p cs2_kind = 'runtime' | 'const'.
     Le SEUL parametre est cs2 : un meme modele a deux variantes (cs2 runtime vs cs2 const)."""
-    m = adc.dsl.Model("iso")
+    m = pops.dsl.Model("iso")
     rho, mx, my = m.conservative_vars("rho", "rho_u", "rho_v")
     cs2 = m.param("cs2", cs2_value, kind=cs2_kind)
     u = m.primitive("u", mx / rho)
@@ -39,7 +39,7 @@ def _build_iso(cs2_kind, cs2_value=1.0):
     m.primitive_vars(rho=rho, u=u, v=v, p=p)
     m.conservative_from([rho, rho * u, rho * v])
     m.flux(x=[mx, mx * u + p, my * u], y=[my, mx * v, my * v + p])
-    cs = adc.dsl.sqrt(cs2)
+    cs = pops.dsl.sqrt(cs2)
     m.eigenvalues(x=[u - cs, u, u + cs], y=[v - cs, v, v + cs])
     return m
 
@@ -63,7 +63,7 @@ def _check_codegen_non_regression():
 
     rt_src = _build_iso("runtime", 2.5)._m.emit_cpp_brick(name="IsoHyp")
     assert "runtime_params.hpp" in rt_src, "param runtime : doit inclure runtime_params.hpp"
-    assert "adc::RuntimeParams params{1, {2.5}}" in rt_src, "param runtime : membre seede a la declaration"
+    assert "pops::RuntimeParams params{1, {2.5}}" in rt_src, "param runtime : membre seede a la declaration"
     assert "params.get(0)" in rt_src, "param runtime : doit lire params.get(0) (pas de valeur en dur)"
     print("OK  (1) param const INLINE (byte-identique), param runtime -> params.get(0) + membre seede")
 
@@ -89,7 +89,7 @@ def main():
         so = compiled.so_path
 
         def build(cs2):
-            sys = adc.System(n=n, L=L, periodic=True)
+            sys = pops.System(n=n, L=L, periodic=True)
             sys._s.add_compiled_block("gas", so, limiter="minmod", riemann="rusanov",
                                       recon="conservative", time="explicit",
                                       names=["rho", "rho_u", "rho_v"])
@@ -132,7 +132,7 @@ def main():
         # modele a cs2 CONST=2.0 et on le compare au modele runtime apres set_block_params(cs2=2.0).
         mc = _build_iso("const", 2.0)
         so_const = mc.compile(os.path.join(tmp, "iso_const2.so"), INCLUDE, backend="aot").so_path
-        sysc = adc.System(n=n, L=L, periodic=True)
+        sysc = pops.System(n=n, L=L, periodic=True)
         sysc._s.add_compiled_block("gas", so_const, limiter="minmod", riemann="rusanov",
                                    recon="conservative", time="explicit",
                                    names=["rho", "rho_u", "rho_v"])

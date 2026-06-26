@@ -6,26 +6,26 @@
 //   modele MagModel = CompositeModel<ExBVelocity, BzSource, NoEll>, flux ExB (grad=0 -> nul),
 //   source S = B_z u, elliptic_rhs nul (phi=0) -> eval_rhs = B_z u = c (densite 1, B_z constant c).
 
-#include <adc/physics/composition/composite.hpp>
-#include <adc/physics/bricks/hyperbolic.hpp>  // ExBVelocity
-#include <adc/runtime/builders/compiled/dsl_block.hpp>   // add_compiled_model
-#include <adc/runtime/system.hpp>
+#include <pops/physics/composition/composite.hpp>
+#include <pops/physics/bricks/hyperbolic.hpp>  // ExBVelocity
+#include <pops/runtime/builders/compiled/dsl_block.hpp>   // add_compiled_model
+#include <pops/runtime/system.hpp>
 
 #include <cmath>
 #include <cstdio>
 #include <vector>
 
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
 #include <Kokkos_Core.hpp>
 #endif
 
-using namespace adc;
+using namespace pops;
 
 // Source magnetisee : S = B_z u (composante 0). Declare n_aux=4 -> le compose expose n_aux=4.
 struct BzSource {
   static constexpr int n_aux = 4;
   template <class State>
-  ADC_HD State apply(const State& u, const Aux& a) const {
+  POPS_HD State apply(const State& u, const Aux& a) const {
     State s{};
     s[0] = a.B_z * u[0];
     return s;
@@ -33,7 +33,7 @@ struct BzSource {
 };
 struct NoEll {
   template <class State>
-  ADC_HD Real rhs(const State&) const {
+  POPS_HD Real rhs(const State&) const {
     return Real(0);
   }
 };
@@ -42,7 +42,7 @@ using MagModel = CompositeModel<ExBVelocity, BzSource, NoEll>;
 static_assert(MagModel::n_aux == 4, "le compose lit B_z");
 
 int main(int argc, char** argv) {
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   Kokkos::ScopeGuard guard(argc, argv);  // Kokkos init AVANT la 1ere allocation (ctor System)
 #else
   (void)argc;

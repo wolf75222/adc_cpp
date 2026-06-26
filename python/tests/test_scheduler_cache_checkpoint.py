@@ -33,13 +33,13 @@ def test_cache_npz_key_scheme_roundtrips():
         print("-- (A) skipped: numpy unavailable: %s --" % exc)
         return
 
-    # Mirror EXACTLY the keys + dtypes adc.System.checkpoint writes for one held node.
+    # Mirror EXACTLY the keys + dtypes pops.System.checkpoint writes for one held node.
     nid = 5
     name = "fields_from_state"
     ncomp, ny, nx = 1, 4, 4
     value = np.arange(ncomp * ny * nx, dtype=np.float64).reshape(ncomp, ny, nx)
     out = {
-        "adc_checkpoint_version": 1,
+        "pops_checkpoint_version": 1,
         "program_hash": "deadbeef" * 8,  # a 64-hex IR hash shape (the hash guard)
         "cache_nodes": np.array([nid], dtype=np.int64),
         "cache_names": np.array([name]),
@@ -80,7 +80,7 @@ def test_cache_npz_key_scheme_roundtrips():
             "the missing-cache guard must name the node verbatim (Spec 3 section 30)"
 
     # Back-compat: a checkpoint WITHOUT the cache keys carries no cache_nodes (restarts as before).
-    legacy = {"adc_checkpoint_version": 1, "t": 0.0, "macro_step": 0}
+    legacy = {"pops_checkpoint_version": 1, "t": 0.0, "macro_step": 0}
     with tempfile.TemporaryDirectory() as tmp:
         path = os.path.join(tmp, "legacy.npz")
         with open(path, "wb") as f:

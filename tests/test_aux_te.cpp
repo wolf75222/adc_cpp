@@ -4,28 +4,28 @@
 // champ (composante 4) et la population derivee cote System (set_electron_temperature_from + apply_te
 // recalcule a chaque solve_fields). Chemin de production : add_compiled_model + eval_rhs.
 
-#include <adc/physics/composition/composite.hpp>
-#include <adc/physics/fluids/euler.hpp>       // Euler (bloc fluide source de T_e)
-#include <adc/physics/bricks/hyperbolic.hpp>  // ExBVelocity
-#include <adc/physics/bricks/source.hpp>      // NoSource
-#include <adc/runtime/builders/compiled/dsl_block.hpp>   // add_compiled_model
-#include <adc/runtime/system.hpp>
+#include <pops/physics/composition/composite.hpp>
+#include <pops/physics/fluids/euler.hpp>       // Euler (bloc fluide source de T_e)
+#include <pops/physics/bricks/hyperbolic.hpp>  // ExBVelocity
+#include <pops/physics/bricks/source.hpp>      // NoSource
+#include <pops/runtime/builders/compiled/dsl_block.hpp>   // add_compiled_model
+#include <pops/runtime/system.hpp>
 
 #include <cmath>
 #include <cstdio>
 #include <vector>
 
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
 #include <Kokkos_Core.hpp>
 #endif
 
-using namespace adc;
+using namespace pops;
 
 // Source qui lit T_e : S = T_e u (composante 0). n_aux=5 -> le compose expose n_aux=5.
 struct TeSource {
   static constexpr int n_aux = 5;
   template <class State>
-  ADC_HD State apply(const State& u, const Aux& a) const {
+  POPS_HD State apply(const State& u, const Aux& a) const {
     State s{};
     s[0] = a.T_e * u[0];
     return s;
@@ -33,7 +33,7 @@ struct TeSource {
 };
 struct NoEll {
   template <class State>
-  ADC_HD Real rhs(const State&) const {
+  POPS_HD Real rhs(const State&) const {
     return Real(0);
   }
 };
@@ -43,7 +43,7 @@ using GasModel = CompositeModel<Euler, NoSource, NoEll>;          // fournit p/r
 static_assert(ProbeModel::n_aux == 5, "le probe lit T_e (composante aux 4)");
 
 int main(int argc, char** argv) {
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   Kokkos::ScopeGuard guard(argc, argv);
 #else
   (void)argc;

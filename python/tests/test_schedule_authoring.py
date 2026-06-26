@@ -3,13 +3,13 @@
 The schedule vocabulary, the policy chaining, recording a schedule on a Program node, the
 cacheable-capability validation, and the honest refusal to lower a non-always schedule (the
 runtime that honors caches / accumulate_dt / checkpoint is the C++ part of ADC-458). These are
-pure-Python: only adc.time / adc.model are needed, no compiled step is run.
+pure-Python: only pops.time / pops.model are needed, no compiled step is run.
 """
 import pytest
 
-from adc import dsl, model
+from pops import dsl, model
 
-adctime = pytest.importorskip("adc.time")
+adctime = pytest.importorskip("pops.time")
 
 
 def _module(cacheable=True):

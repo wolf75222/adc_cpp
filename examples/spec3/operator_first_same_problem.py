@@ -1,16 +1,16 @@
 """Spec 3: the SAME problem driven purely by the operator-first kernel (Spec 2 retention).
 
 The model is authored board-style for brevity, but it lowers to an ordinary
-``adc.model.Module``; the time program here uses ONLY the explicit operator-first
+``pops.model.Module``; the time program here uses ONLY the explicit operator-first
 builder (P.bind_operators / P.call / P.linear_combine / P.solve_local_linear /
 P.commit) -- no board sugar. This is the kernel a library macro or an advanced user
 writes against; the board facade produces the identical IR.
 
 Run: python3 examples/spec3/operator_first_same_problem.py
 """
-from adc.math import sqrt, grad, div, laplacian, ddt
-from adc.physics import Model
-from adc.time import Program
+from pops.math import sqrt, grad, div, laplacian, ddt
+from pops.physics import Model
+from pops.time import Program
 
 
 def build_model():

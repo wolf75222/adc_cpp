@@ -81,7 +81,7 @@ srun -p instant --constraint=armgpu --gres=gpu:1 ./build-cuda/bin/HARNESS
 ```
 
 A multi-thread (Kokkos OpenMP) Python module is available via the `python-parallel`
-CMake preset; set the thread count with `adc.set_threads(n)` right after
+CMake preset; set the thread count with `pops.set_threads(n)` right after
 `import adc`. There is no nvcc/CUDA Python module, so GPU runs stay C++-only, and
 the Python module does not exercise the MPI code paths (MPI is validated through
 the C++/ctest path). To distribute across ranks, add `-DADC_USE_MPI=ON` and see

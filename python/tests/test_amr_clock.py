@@ -22,7 +22,7 @@ l'ETAT (impossible) ; il valide l'horloge + la cadence, qui sont independantes e
 """
 import numpy as np
 
-import adc
+import pops
 
 
 def _bump(n, amp):
@@ -33,18 +33,18 @@ def _bump(n, amp):
 
 
 def _scalar_charge(q, B0=1.0):
-    return adc.Model(adc.Scalar(), adc.ExB(B0=B0), adc.NoSource(), adc.ChargeDensity(charge=q))
+    return pops.Model(pops.Scalar(), pops.ExB(B0=B0), pops.NoSource(), pops.ChargeDensity(charge=q))
 
 
 def _build_stride(n=32):
     """AMR multi-blocs : un bloc a stride=2 (cadence hold-then-catch-up) -> la cadence depend du
     compteur de macro-pas, ce que macro_step()/set_clock() exposent et restaurent."""
-    sim = adc.AmrSystem(n=n, L=1.0, periodic=True, regrid_every=0)
+    sim = pops.AmrSystem(n=n, L=1.0, periodic=True, regrid_every=0)
     sim.add_block("ions", _scalar_charge(+1.0),
-                  spatial=adc.Spatial(limiter="none", flux="rusanov"))
+                  spatial=pops.Spatial(limiter="none", flux="rusanov"))
     sim.add_block("slow", _scalar_charge(-1.0),
-                  spatial=adc.Spatial(limiter="minmod", flux="rusanov"),
-                  time=adc.Explicit(stride=2))  # bloc lent : cadence stride=2
+                  spatial=pops.Spatial(limiter="minmod", flux="rusanov"),
+                  time=pops.Explicit(stride=2))  # bloc lent : cadence stride=2
     sim.set_poisson(bc="periodic")
     sim.set_density("ions", _bump(n, 0.40))
     sim.set_density("slow", _bump(n, 0.20))

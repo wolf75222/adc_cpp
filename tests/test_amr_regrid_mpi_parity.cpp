@@ -30,22 +30,22 @@
 //
 // Independant du backend (Kokkos Serial CI, Kokkos Cuda GH200). Compile le runtime AmrSystem comme
 // test_mpi_amr_twoblock_parity (avec python/amr_system.cpp).
-#include <adc/runtime/amr_system.hpp>
-#include <adc/runtime/config/model_spec.hpp>
-#include <adc/parallel/comm.hpp>  // comm_init, my_rank, n_ranks, all_reduce_*
+#include <pops/runtime/amr_system.hpp>
+#include <pops/runtime/config/model_spec.hpp>
+#include <pops/parallel/comm.hpp>  // comm_init, my_rank, n_ranks, all_reduce_*
 
-#include "test_harness.hpp"  // adc::test::checksum (somme des carres partagee)
+#include "test_harness.hpp"  // pops::test::checksum (somme des carres partagee)
 
 #include <cmath>
 #include <cstdio>
 #include <string>
 #include <vector>
 
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
 #include <Kokkos_Core.hpp>
 #endif
 
-using namespace adc;
+using namespace pops;
 
 static ModelSpec exb_charge(double q, double B0) {
   ModelSpec s;
@@ -73,7 +73,7 @@ static std::vector<double> blob(int n, double cx, double cy, double amp, double 
 
 int main(int argc, char** argv) {
   comm_init(&argc, &argv);
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   Kokkos::ScopeGuard guard(argc, argv);
 #else
   (void)argc;
@@ -110,7 +110,7 @@ int main(int argc, char** argv) {
   for (int s = 0; s < 16; ++s)
     sys.step(dt);  // 16 macro-pas, regrid tous les 2 -> plusieurs regrids
 
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   Kokkos::fence();
 #endif
   const std::vector<double> da = sys.density("a");
@@ -119,7 +119,7 @@ int main(int argc, char** argv) {
   const double ma = sys.mass("a"), mb = sys.mass("b");
   const int npatch = sys.n_patches();  // nombre de patchs fins = signature du layout fin d'union
 
-  using adc::test::checksum;  // somme des carres partagee (signature deterministe d'un champ)
+  using pops::test::checksum;  // somme des carres partagee (signature deterministe d'un champ)
   const double ca = checksum(da), cb = checksum(db), cp = checksum(phi);
 
   // (1) CONSISTANCE CROSS-RANG : densite reconstruite globalement + potentiel + n_patches sont des

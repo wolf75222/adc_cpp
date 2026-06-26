@@ -18,7 +18,7 @@
 -- adc Python module: interpreteur /apps/2025/spack_install/linux-rhel9-zen4/linux-rhel9-zen4/aocc-5.0.0/python-venv-1.0-67qe4nrfb5p5ff3sqes5yuvqvgd242yh/bin/python3 (3.10.14)
 -- Performing Test HAS_FLTO
 -- Performing Test HAS_FLTO - Success
--- adc Python module: signature en-tetes ADC_HEADER_SIG=0aaa4e641a74f04bafb6999e3d21bacc21bf82efc440be352a5e5cb78f9d820f
+-- adc Python module: signature en-tetes POPS_HEADER_SIG=0aaa4e641a74f04bafb6999e3d21bacc21bf82efc440be352a5e5cb78f9d820f
 -- Configuring done (2.9s)
 -- Generating done (0.0s)
--- Build files have been written to: /home/rmdraux/adc_perf_frontends_adde23b_20260608/build_python_kokkos_pic
+-- Build files have been written to: /home/rmdraux/pops_perf_frontends_adde23b_20260608/build_python_kokkos_pic

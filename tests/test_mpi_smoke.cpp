@@ -6,16 +6,16 @@
 // Tourne aussi en serie (np=1) : all_reduce devient l'identite. Le resultat est
 // identique quel que soit N (invariance au nombre de rangs).
 
-#include <adc/mesh/index/box2d.hpp>
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/storage/multifab.hpp>
-#include <adc/parallel/comm.hpp>
-#include <adc/parallel/load_balance.hpp>
+#include <pops/mesh/index/box2d.hpp>
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/storage/multifab.hpp>
+#include <pops/parallel/comm.hpp>
+#include <pops/parallel/load_balance.hpp>
 
 #include <cmath>
 #include <cstdio>
 
-using namespace adc;
+using namespace pops;
 
 int main(int argc, char** argv) {
   comm_init(&argc, &argv);

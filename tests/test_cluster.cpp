@@ -1,15 +1,15 @@
 // Berger-Rigoutsos : bloc plein -> une box, deux blocs separes -> deux boxes,
 // gros bloc -> chop par max_box_size, et couverture complete d'une forme en L.
 
-#include <adc/amr/tagging/cluster.hpp>
-#include <adc/amr/tagging/tag_box.hpp>
-#include <adc/mesh/index/box2d.hpp>
+#include <pops/amr/tagging/cluster.hpp>
+#include <pops/amr/tagging/tag_box.hpp>
+#include <pops/mesh/index/box2d.hpp>
 
 #include <algorithm>
 #include <cstdio>
 #include <vector>
 
-using namespace adc;
+using namespace pops;
 
 static void tag_block(TagBox& tb, const Box2D& b) {
   for (int j = b.lo[1]; j <= b.hi[1]; ++j)

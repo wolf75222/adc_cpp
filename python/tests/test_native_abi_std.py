@@ -1,17 +1,17 @@
 """Garde-fou de REGRESSION : la norme C++ du modele NATIF (backend="production") doit suivre celle du
-LOADER (module _adc), sinon add_native_block rejette le bloc avec "incompatible ABI".
+LOADER (module _pops), sinon add_native_block rejette le bloc avec "incompatible ABI".
 
-CONTEXTE (regression observee sur GH200). Le module _adc est compile en C++20 sous Kokkos (CUDA 12.x
-n'offre pas -std=c++23 ; cf. ADC_CXX_STD dans CMakeLists.txt), en C++23 sinon. Avant le fix, le DSL
+CONTEXTE (regression observee sur GH200). Le module _pops est compile en C++20 sous Kokkos (CUDA 12.x
+n'offre pas -std=c++23 ; cf. POPS_CXX_STD dans CMakeLists.txt), en C++23 sinon. Avant le fix, le DSL
 backend="production" figeait le std du modele natif a "c++23" en dur. Sous Kokkos cela donnait :
 loader C++20 (__cplusplus=202002L) vs modele C++23 (__cplusplus!=202002L) -> les cles d'ABI (qui
 encodent __cplusplus) divergeaient -> add_native_block levait "incompatible ABI" -> AUCUN cas ne
 pouvait tourner en natif sur GH200. Le fix derive le std du modele natif de la norme reelle du loader
-(adc.dsl.loader_cxx_std() / adc._adc.__cxx_std__), donc les cles concordent SUR TOUTE toolchain.
+(pops.dsl.loader_cxx_std() / pops._pops.__cxx_std__), donc les cles concordent SUR TOUTE toolchain.
 
 Ce test :
   1) verifie l'INVARIANT de norme : loader_cxx_std() == norme reellement bakee par le module
-     (adc._adc.__cxx_std__), avec fallback sur le std encode dans abi_key() ;
+     (pops._pops.__cxx_std__), avec fallback sur le std encode dans abi_key() ;
   2) bout-en-bout : un modele trivial compile(backend="production") puis branche par add_native_block
      se charge SANS erreur d'ABI -- c'est exactement ce qui cassait sous Kokkos. Le test echouerait
      sous Kokkos avec l'ancien defaut c++23 (mismatch __cplusplus), il passe avec le std aligne.
@@ -26,8 +26,8 @@ import tempfile
 
 import numpy as np
 
-import adc
-from adc import dsl
+import pops
+from pops import dsl
 
 
 INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "include"))
@@ -55,10 +55,10 @@ def build_trivial_euler(name="euler_abistd"):
 def _expected_std_from_module():
     """Norme attendue du loader, lue DIRECTEMENT du module (independamment de loader_cxx_std), pour
     constituer une reference croisee : __cxx_std__ (entier 20/23) sinon le std encode dans abi_key()."""
-    n = getattr(adc._adc, "__cxx_std__", None)
+    n = getattr(pops._pops, "__cxx_std__", None)
     if isinstance(n, int) and n in (20, 23):
         return "c++%d" % n
-    key = adc._adc.abi_key()
+    key = pops._pops.abi_key()
     for tok in str(key).split(";"):
         if tok.startswith("std="):
             val = tok[len("std="):].rstrip("Ll")
@@ -75,7 +75,7 @@ def check_std_invariant():
     assert got == expected, (
         "loader_cxx_std()=%r != norme du module %r : le modele natif serait compile avec un std "
         "different du loader -> __cplusplus divergent -> cle d'ABI incompatible" % (got, expected))
-    print("OK  invariant de norme : loader_cxx_std()=%s == module _adc (%s)" % (got, expected))
+    print("OK  invariant de norme : loader_cxx_std()=%s == module _pops (%s)" % (got, expected))
     return got
 
 
@@ -91,7 +91,7 @@ def check_native_loads_without_abi_error(expected_std):
         so = e.compile(os.path.join(tmp, "euler_abistd.so"), INCLUDE, backend="production")
         assert os.path.exists(so), "compile(backend='production') n'a pas produit de .so"
 
-        sys = adc.System(n=n, L=1.0, periodic=True)
+        sys = pops.System(n=n, L=1.0, periodic=True)
         # Si le std du modele != std du loader, add_native_block leve RuntimeError("incompatible ABI").
         try:
             sys._s.add_native_block("gas", so, limiter="minmod", riemann="rusanov",

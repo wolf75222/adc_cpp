@@ -10,46 +10,46 @@
 // Pendant strict de test_mpi_mbox_parity (composite 100% natif) : seul le TYPE de brique change. La
 // propriete est independante du backend (verte Kokkos Serial CPU, et Cuda GPU). Lance via ctest a
 // np=1/2/4 ; resultat bit-identique (dmax == 0) a chaque rang count.
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/geometry/geometry.hpp>
-#include <adc/mesh/storage/multifab.hpp>
-#include <adc/parallel/comm.hpp>
-#include <adc/parallel/load_balance.hpp>
-#include <adc/physics/bricks/bricks.hpp>  // CompositeModel, GravityCoupling
-#include <adc/physics/fluids/euler.hpp>   // Euler (transport compressible natif)
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/geometry/geometry.hpp>
+#include <pops/mesh/storage/multifab.hpp>
+#include <pops/parallel/comm.hpp>
+#include <pops/parallel/load_balance.hpp>
+#include <pops/physics/bricks/bricks.hpp>  // CompositeModel, GravityCoupling
+#include <pops/physics/fluids/euler.hpp>   // Euler (transport compressible natif)
 
-#include <adc/runtime/builders/block/block_builder.hpp>
+#include <pops/runtime/builders/block/block_builder.hpp>
 
 #include <cmath>
 #include <cstdio>
 #include <vector>
 
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
 #include <Kokkos_Core.hpp>
 #endif
 
-using namespace adc;
+using namespace pops;
 static const double kPi = 3.14159265358979323846;
 
 // Brique de SOURCE style DSL (telle que l'emet dsl.SourceBrick : apply NON template, 4 variables, lit
 // a.grad_x / a.grad_y). Replique la gravite rho g, g = -grad phi. Composee ici avec un transport et une
-// elliptique NATIFS -> un CompositeModel HYBRIDE, comme le genere adc.CompositeModel cote Python.
-namespace adc_generated {
+// elliptique NATIFS -> un CompositeModel HYBRIDE, comme le genere pops.CompositeModel cote Python.
+namespace pops_generated {
 struct GenGravitySrc {
-  ADC_HD adc::StateVec<4> apply(const adc::StateVec<4>& U, const adc::Aux& a) const {
-    const adc::Real rho = U[0], rhou = U[1], rhov = U[2];
-    const adc::Real gx = a.grad_x, gy = a.grad_y;
-    adc::StateVec<4> S{};
-    S[0] = adc::Real(0);
+  POPS_HD pops::StateVec<4> apply(const pops::StateVec<4>& U, const pops::Aux& a) const {
+    const pops::Real rho = U[0], rhou = U[1], rhov = U[2];
+    const pops::Real gx = a.grad_x, gy = a.grad_y;
+    pops::StateVec<4> S{};
+    S[0] = pops::Real(0);
     S[1] = -rho * gx;
     S[2] = -rho * gy;
     S[3] = -(rhou * gx + rhov * gy);
     return S;
   }
 };
-}  // namespace adc_generated
+}  // namespace pops_generated
 
-using Model = CompositeModel<Euler, adc_generated::GenGravitySrc, GravityCoupling>;
+using Model = CompositeModel<Euler, pops_generated::GenGravitySrc, GravityCoupling>;
 
 // Etat conservatif initial : champ primitif periodique (rho>0, p>0), vitesse non nulle -> -div F != 0.
 static Euler::State init_state(const Euler& eul, int i, int j, int n) {
@@ -95,7 +95,7 @@ static void residual_norms(const BoxArray& ba, const DistributionMapping& dm, co
   BlockClosures clo =
       make_block(model, "minmod", "rusanov", ctx, /*imex=*/false, /*recon_prim=*/false);
   clo.rhs_into(U, R);  // fill_ghosts(U) [halos multi-box / MPI] + assemble_rhs (-div F + source)
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   Kokkos::fence();  // barriere avant lecture HOTE du residu device (no-op sous Serial)
 #endif
   double s = 0, ss = 0, mx = 0;
@@ -120,7 +120,7 @@ static void residual_norms(const BoxArray& ba, const DistributionMapping& dm, co
 
 int main(int argc, char** argv) {
   comm_init(&argc, &argv);
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   Kokkos::ScopeGuard guard(argc, argv);
 #else
   (void)argc;
@@ -131,7 +131,7 @@ int main(int argc, char** argv) {
   const double L = 1.0;
   const Box2D dom = Box2D::from_extents(n, n);
   const Geometry geom{dom, 0.0, L, 0.0, L};
-  const Model model{Euler{1.4}, adc_generated::GenGravitySrc{}, GravityCoupling{-1.0, 1.0, 1.0}};
+  const Model model{Euler{1.4}, pops_generated::GenGravitySrc{}, GravityCoupling{-1.0, 1.0, 1.0}};
 
   // (A) decomposition MULTI-BOX distribuee (SFC sur np rangs) : boites <= 16 -> 4x4 = 16 boites.
   BoxArray baK = BoxArray::from_domain(dom, 16);

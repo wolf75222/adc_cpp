@@ -2,9 +2,9 @@
 
 Date: 2026-06-12.
 Reviewed base: `origin/master` / `ffb9022`.
-Scope: C++ coding conventions of the core (`include/adc/**/*.hpp`, 110 files, 25,089 lines)
+Scope: C++ coding conventions of the core (`include/pops/**/*.hpp`, 110 files, 25,089 lines)
 and of the Python binding layer (`python/{bindings,system,amr_system}.cpp`). Out of scope: pure
-Python code (`python/adc/*.py`) and `adc_cases`, which have their own conventions.
+Python code (`python/pops/*.py`) and `adc_cases`, which have their own conventions.
 
 Method: review by subsystem (naming, headers, comments, error handling, formatting,
 idioms), confronted with three public references (Google C++ Style Guide, C++ Core Guidelines
@@ -47,9 +47,9 @@ Repository practice and proposed rule:
 | Public POD members | without suffix (`Box2D::lo/hi`, `Euler::gamma` `physics/euler.hpp:40`) | without suffix | all three |
 | Literal constants | `kCamelCase` (`kTwoPi` `mesh/geometry.hpp:72`, `kMaxRuntimeParams` `runtime/runtime_params.hpp:34`) | `kCamelCase` | Google |
 | Concept-trait constants | `snake_case` (`n_vars` `physics/euler.hpp:38`) | `snake_case`, name imposed by `requires` | constraint |
-| Macros | `ADC_` + `SCREAMING_SNAKE`; `ADC_HD` 338x, `ADC_EXPORT` 24x (excluding its definition) | `ADC_` + `SCREAMING_SNAKE` | all three (NL.9) |
+| Macros | `POPS_` + `SCREAMING_SNAKE`; `POPS_HD` 338x, `POPS_EXPORT` 24x (excluding its definition) | `POPS_` + `SCREAMING_SNAKE` | all three (NL.9) |
 | Files | `.hpp` `snake_case`; 110/110, zero `.h`/`.cc` | `.hpp` `snake_case`; `.cpp` for the TUs | Google (adapted) |
-| Namespaces | lowercase; `adc`, `adc::detail` 45 occ. (`amr/cluster.hpp:49`) | `adc` public, `adc::detail` internal | all three |
+| Namespaces | lowercase; `adc`, `pops::detail` 45 occ. (`amr/cluster.hpp:49`) | `adc` public, `pops::detail` internal | all three |
 | Template parameters | descriptive `PascalCase` (`Model` 127x); letter for arithmetic (`M`, `N`) | same | none |
 
 Justification: practice is already homogeneous on all these axes and admits, for each line, only
@@ -68,7 +68,7 @@ Divergence: Google and LLVM impose `#ifndef ..._H_` and proscribe `#pragma once`
 asks for a guard without imposing the form and tolerates `#pragma once`.
 
 Repository practice: `#pragma once` in 110/110 headers, zero `#ifndef` as include guard (the
-only `#ifndef` serve conditional compilation: `ADC_HAS_KOKKOS`, `ADC_HEADER_SIG`,
+only `#ifndef` serve conditional compilation: `POPS_HAS_KOKKOS`, `POPS_HEADER_SIG`,
 `NOMINMAX`/`WIN32_LEAN_AND_MEAN`). Unanimous.
 
 Proposed decision: `#pragma once` on the first line of each header.
@@ -84,10 +84,10 @@ Status: adopted (2026-06-15).
 Divergence: Google places C++ std early (before third-party libs); LLVM places the system header
 last; opposite orders. CG does not decide.
 
-Repository practice: `<adc/...>` block first, blank line, then STL block `<...>`; angle brackets everywhere;
+Repository practice: `<pops/...>` block first, blank line, then STL block `<...>`; angle brackets everywhere;
 manual sort (`SortIncludes: false`).
 
-Proposed decision: two groups, `<adc/...>` then STL, separated by a blank line; angle brackets for
+Proposed decision: two groups, `<pops/...>` then STL, separated by a blank line; angle brackets for
 everything; order maintained by hand, `SortIncludes` stays `false`.
 
 Justification: neither Google nor LLVM matches the usage; an automatic sort would mix the two
@@ -110,7 +110,7 @@ by a context then ` : `
 Proposed decision: exceptions allowed and idiomatic on the host path (config validation,
 loading of `.so`, API errors); `std::runtime_error` by default, `std::invalid_argument` for
 an invalid argument; message always prefixed by a context then ` : `. The device path (code
-under `ADC_HD`) never `throw`s.
+under `POPS_HD`) never `throw`s.
 
 Justification: the device constraint already imposes the Google/LLVM ban on the hot part, but the host
 has no reason to deprive itself of it and the usage there is massive and homogeneous. We split according to the execution path
@@ -124,10 +124,10 @@ Divergence: LLVM "assert liberally" plus `llvm_unreachable`; Google `assert()` p
 `CHECK`/`DCHECK`; CG `Expects()`/`Ensures()` (I.6, I.8) via GSL.
 
 Repository practice: 45 `static_assert` (compile-time constraints), 8 raw `assert(` only,
-no `ADC_ASSERT` macro (does not exist).
+no `POPS_ASSERT` macro (does not exist).
 
 Proposed decision: strong preference for `static_assert`. Runtime `assert` on the host path
-only, sparingly. No GSL `Expects`/`Ensures`. No `CHECK`/`ADC_ASSERT` macro as long
+only, sparingly. No GSL `Expects`/`Ensures`. No `CHECK`/`POPS_ASSERT` macro as long
 as a recurring need is not established.
 
 Justification: `Expects`/`Ensures` are not callable on device and `assert` on device is
@@ -215,7 +215,7 @@ Status: adopted (2026-06-15).
 Divergence: Google imposes `// TODO: <context>` (historically `// TODO(user):`); LLVM and CG do not
 prescribe anything.
 
-Repository practice: no in-code TODO markers currently exist in `include/adc/` or `python/`
+Repository practice: no in-code TODO markers currently exist in `include/pops/` or `python/`
 (a `grep -ri todo` over the sources returns none; only the top-level `todo.md` backlog file). The
 rule below is therefore preventive: it fixes the format for future TODOs rather than normalizing an
 existing inconsistent set.

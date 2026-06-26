@@ -58,7 +58,7 @@ choose the CFL number with `step_cfl(cfl)`, which returns the step it selected.
 
 ## Advancing a coupled system
 
-A simulation rarely holds a single equation. `adc.System` advances several blocks (one per species)
+A simulation rarely holds a single equation. `pops.System` advances several blocks (one per species)
 that share one Poisson solve. Within a macro-step, the elliptic field is solved once, the `aux`
 channel (`phi`, `grad phi`) is refreshed, and each block then advances its hyperbolic transport
 explicitly reading that frozen field.

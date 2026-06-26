@@ -46,7 +46,7 @@ Component layout (matches `to_3d`/`set_primitive_state`): **component-major, row
 
 ### 1.1 Struct / field additions
 
-- **`AmrBuildParams`** -- `include/adc/runtime/amr_system.hpp:75-90`. Add after the density fields (~86-87):
+- **`AmrBuildParams`** -- `include/pops/runtime/amr_system.hpp:75-90`. Add after the density fields (~86-87):
   ```cpp
   bool has_state = false;
   std::vector<double> state;   // ncomp*n*n, component-major c*n*n+j*n+i; ncomp == Model::n_vars
@@ -55,7 +55,7 @@ Component layout (matches `to_3d`/`set_primitive_state`): **component-major, row
 - **`BlockSpec`** -- `python/bindings/amr/amr_system.cpp:98-100`. Mirror: `bool has_state=false; std::vector<double> state;`.
 - **`AmrCompiledHooks`** -- unchanged.
 
-### 1.2 New kernel `coupler_write_coarse_state` -- `include/adc/coupling/amr/amr_coupler_mp.hpp` (add after `coupler_write_coarse`, ~line 133)
+### 1.2 New kernel `coupler_write_coarse_state` -- `include/pops/coupling/amr/amr_coupler_mp.hpp` (add after `coupler_write_coarse`, ~line 133)
 
 New function; `coupler_write_coarse` (line 116) left untouched (density path provably bit-identical). Distribution-aware, multi-box; copies all `ncomp` components positionally (no rho/momentum/energy hardwired -- caller does prim->cons). `gamma` omitted (energy supplied by caller).
 
@@ -102,7 +102,7 @@ const std::vector<std::string>& implicit_roles,
 const std::vector<double>& state, bool has_state)>;
 ```
 
-> **REVIEW FIX [phaseB-typeerasure C1+H1] -- the ABI guard does NOT catch a header *edit*; this is the central Phase B risk.** The guard at `amr_system.cpp:501` compares `loader_key` vs `detail::abi_key_string()` = `compiler;std;ADC_HEADER_SIG` (`abi_key.hpp:46-49`). The module-side `ADC_HEADER_SIG` is injected by CMake via `file(GLOB_RECURSE ... CONFIGURE_DEPENDS)` (`python/CMakeLists.txt:32-41`), whose own comment (26-30) warns: *"Une EDITION de contenu d'en-tete n'invalide pas le glob."* Phase B **edits existing headers, adds no new files** -> `cmake --build` (without re-`cmake -S`) keeps a **stale** signature. Stale module + stale loader produce **matching** keys -> the guard passes -> `build_multi` (`amr_system.cpp:232`) invokes the new 12-arg typedef against a 10-arg lambda across the `dlopen` boundary -> **stack corruption on the density-only path** (NO-DEFAULT-CHANGE violated by the ABI surface change itself). The same hazard hits the `AmrBuildParams` struct-layout change (§1.1), via the mono `mono_builder(make_build_params())` path. **Mandatory fix:** add a literal, glob-independent sentinel to `abi_key_string()` (e.g. `";amr_builder_v=2"`) so both header-side and python-side keys change deterministically the instant the typedef/struct changes. **AND** document that landing this requires a full reconfigure (`cmake -S . -B build-py`), not just `cmake --build`, plus `dsl.compile_native(target='amr_system')` to regenerate loaders. The design's original R1 ("typedef perturbs nothing in the hash") is backwards and must not be relied on.
+> **REVIEW FIX [phaseB-typeerasure C1+H1] -- the ABI guard does NOT catch a header *edit*; this is the central Phase B risk.** The guard at `amr_system.cpp:501` compares `loader_key` vs `detail::abi_key_string()` = `compiler;std;POPS_HEADER_SIG` (`abi_key.hpp:46-49`). The module-side `POPS_HEADER_SIG` is injected by CMake via `file(GLOB_RECURSE ... CONFIGURE_DEPENDS)` (`python/CMakeLists.txt:32-41`), whose own comment (26-30) warns: *"Une EDITION de contenu d'en-tete n'invalide pas le glob."* Phase B **edits existing headers, adds no new files** -> `cmake --build` (without re-`cmake -S`) keeps a **stale** signature. Stale module + stale loader produce **matching** keys -> the guard passes -> `build_multi` (`amr_system.cpp:232`) invokes the new 12-arg typedef against a 10-arg lambda across the `dlopen` boundary -> **stack corruption on the density-only path** (NO-DEFAULT-CHANGE violated by the ABI surface change itself). The same hazard hits the `AmrBuildParams` struct-layout change (§1.1), via the mono `mono_builder(make_build_params())` path. **Mandatory fix:** add a literal, glob-independent sentinel to `abi_key_string()` (e.g. `";amr_builder_v=2"`) so both header-side and python-side keys change deterministically the instant the typedef/struct changes. **AND** document that landing this requires a full reconfigure (`cmake -S . -B build-py`), not just `cmake --build`, plus `dsl.compile_native(target='amr_system')` to regenerate loaders. The design's original R1 ("typedef perturbs nothing in the hash") is backwards and must not be relied on.
 
 ### 1.5 Python marshaling
 
@@ -122,7 +122,7 @@ const std::vector<double>& state, bool has_state)>;
 
   > **REVIEW FIX [phaseB-typeerasure L2] -- assert `arr.ndim()==3` in the binding.** `flat(arr)` flattens *any* C-contiguous array (`bindings.cpp:51-53`), so a 2-D `(n,n)` density passed by mistake silently becomes a 1-component state (passes `%nn==0`), writing comp 0 and leaving momentum/energy at `set_val(0)` defaults -- a silent density-masquerade with wrong physics. Add `if (arr.ndim()!=3) throw ...` before `flat`, mirroring `to_3d`'s validation (`bindings.cpp:38-49`).
 
-- **facade** -- `python/adc/__init__.py`: `AmrSystem` delegates via `__getattr__`; binding auto-exposed, no facade edit (confirm `set_density` is not re-declared in the AMR facade -- it is not).
+- **facade** -- `python/pops/__init__.py`: `AmrSystem` delegates via `__getattr__`; binding auto-exposed, no facade edit (confirm `set_density` is not re-declared in the AMR facade -- it is not).
 
 ### 1.7 New read binding `coarse_state()` -- REQUIRED (not optional)
 
@@ -203,7 +203,7 @@ out[l-1](c) = (interior coarse fluxes) - (1/2 Sigma fine-face F)/dx_c
 
 ### 2.4 `AmrTensorKrylovSolver` + MPI
 
-New `include/adc/numerics/elliptic/amr_tensor_krylov_solver.hpp` -- multi-level BiCGStab. Reuses the BiCGStab skeleton + `KrylovResult` (`krylov_solver.hpp:56-60,104-...`), `apply_laplacian` full-tensor matvec (`poisson_operator.hpp:137-179`), `saxpy/lincomb` (`mf_arith.hpp:82,114`), `all_reduce_sum` (`comm.hpp:56`).
+New `include/pops/numerics/elliptic/amr_tensor_krylov_solver.hpp` -- multi-level BiCGStab. Reuses the BiCGStab skeleton + `KrylovResult` (`krylov_solver.hpp:56-60,104-...`), `apply_laplacian` full-tensor matvec (`poisson_operator.hpp:137-179`), `saxpy/lincomb` (`mf_arith.hpp:82,114`), `all_reduce_sum` (`comm.hpp:56`).
 
 **Global reductions.** One `all_reduce_sum` per inner product (level-summed local dots), covered-coarse cells excluded.
 ```cpp
@@ -263,7 +263,7 @@ Pure per-level reuse of the mono kernels; the only AMR addition is C/F ghost fil
 
 ### 2.7 Python API + binding + step insertion
 
-Remove the `isinstance(time, Split)` rejection guards in `python/adc/__init__.py` (`add_block` ~1240-1244, `add_equation` ~1287-1295). Reuse the **existing** `adc.Strang`/`adc.Split`/`adc.CondensedSchur` descriptors (no new `AmrStrang` class -- they are topology-agnostic). Route as `System.add_equation` (912-924): add the transport block, then `self._s.set_source_stage(name, kind, theta, alpha)` + `self._s.set_time_scheme(scheme)`.
+Remove the `isinstance(time, Split)` rejection guards in `python/pops/__init__.py` (`add_block` ~1240-1244, `add_equation` ~1287-1295). Reuse the **existing** `pops.Strang`/`pops.Split`/`pops.CondensedSchur` descriptors (no new `AmrStrang` class -- they are topology-agnostic). Route as `System.add_equation` (912-924): add the transport block, then `self._s.set_source_stage(name, kind, theta, alpha)` + `self._s.set_time_scheme(scheme)`.
 
 C++ `set_source_stage`/`set_time_scheme` on `AmrSystem` (header `amr_system.hpp`, impl `python/bindings/amr/amr_system.cpp`, pybind `python/bindings/core/bindings.cpp`) with the **same validation chain** as `system.cpp:922-990`: kind=="electrostatic_lorentz"; theta in (0,1]; cartesian geometry; Density/MomentumX/MomentumY roles present; **B_z mandatory** (`set_magnetic_field` + `ensure_aux_width(kAuxBaseComps+1)`, `system.cpp:969-973`). Store spec per block; build `AmrCondensedSchurSourceStepper` lazily at first `step()` (after hierarchy/layout final).
 
@@ -330,27 +330,27 @@ ROMEO-only = **V6**. Everything through V5 (incl. MPI up to np=4) runs on the la
 ## 5. New/changed files checklist (exact paths + one-line purpose)
 
 **Phase B -- changed:**
-- `include/adc/runtime/amr_system.hpp` -- `AmrBuildParams` += `has_state,state`; `AmrCompiledBlockBuilder` typedef += `state,has_state`; declare `set_conservative_state`, `coarse_state`.
-- `include/adc/runtime/dynamic/abi_key.hpp` -- **add glob-independent ABI sentinel** (`amr_builder_v=2`) [phaseB C1/H1].
-- `include/adc/coupling/amr/amr_coupler_mp.hpp` -- **new** `coupler_write_coarse_state`; **new** `coupler_read_coarse_all`.
-- `include/adc/runtime/builders/compiled/amr_dsl_block.hpp` -- mono seed branch (90); `build_amr_block`/`dispatch_amr_block` (10 sites)/`multi_builder` += `state,has_state`.
+- `include/pops/runtime/amr_system.hpp` -- `AmrBuildParams` += `has_state,state`; `AmrCompiledBlockBuilder` typedef += `state,has_state`; declare `set_conservative_state`, `coarse_state`.
+- `include/pops/runtime/dynamic/abi_key.hpp` -- **add glob-independent ABI sentinel** (`amr_builder_v=2`) [phaseB C1/H1].
+- `include/pops/coupling/amr/amr_coupler_mp.hpp` -- **new** `coupler_write_coarse_state`; **new** `coupler_read_coarse_all`.
+- `include/pops/runtime/builders/compiled/amr_dsl_block.hpp` -- mono seed branch (90); `build_amr_block`/`dispatch_amr_block` (10 sites)/`multi_builder` += `state,has_state`.
 - `python/bindings/amr/amr_system.cpp` -- `BlockSpec` += `has_state,state`; `make_build_params` packs state; 2 multi dispatches += args; **new** `set_conservative_state` + `coarse_state` bodies.
 - `python/bindings/core/bindings.cpp` -- **new** `set_conservative_state` (with `ndim()==3` guard) + `coarse_state` pybind.
 - `adc_cases/hoffart_euler_poisson_dsl/run.py` -- drift-seed `build_amr` (probe in try/except, `nc` guard); docstring (15-17) + metadata (464,482) honesty fix.
 - `python/tests/test_amr_conservative_state.py` -- **new** Tests A-E.
 
 **Phase C -- new:**
-- `include/adc/numerics/elliptic/amr_tensor_krylov_solver.hpp` -- multi-level BiCGStab; covered-excluded L2 reductions; per-level matvec with reflux + covered-slave; FGMRES fallback hook.
-- `include/adc/numerics/elliptic/amr_elliptic_reflux.hpp` -- `TensorFluxRegister` + `route_elliptic_reflux` (diagonal flux; conforming cross-flux if §2.3 option 1).
-- `include/adc/coupling/schur/amr/amr_condensed_schur_source_stepper.hpp` -- per-level scratch, `step()`, lazy build, full rebuild-on-regrid.
-- `include/adc/numerics/elliptic/amr_mg_preconditioner.hpp` -- *(Tier 1 only)* MLAT V-cycle across AMR levels.
+- `include/pops/numerics/elliptic/amr_tensor_krylov_solver.hpp` -- multi-level BiCGStab; covered-excluded L2 reductions; per-level matvec with reflux + covered-slave; FGMRES fallback hook.
+- `include/pops/numerics/elliptic/amr_elliptic_reflux.hpp` -- `TensorFluxRegister` + `route_elliptic_reflux` (diagonal flux; conforming cross-flux if §2.3 option 1).
+- `include/pops/coupling/schur/amr/amr_condensed_schur_source_stepper.hpp` -- per-level scratch, `step()`, lazy build, full rebuild-on-regrid.
+- `include/pops/numerics/elliptic/amr_mg_preconditioner.hpp` -- *(Tier 1 only)* MLAT V-cycle across AMR levels.
 - `python/tests/test_amr_schur_*.py` -- V0a/V0b/V1/V2/V3/V4 drivers.
 
 **Phase C -- changed:**
-- `include/adc/numerics/elliptic/poisson/poisson_operator.hpp` -- *(only if §2.3 option 1)* `cross_div` refactor to emit C/F-conforming face cross-flux [recon-extrap G3, contradicts original "no modification"].
-- `include/adc/runtime/amr/amr_runtime.hpp` -- `amr_schur_step`; Strang restructure (new phi-publish-without-resolve entry, half-step orchestration); **rebuild stepper after `regrid()`**; phi-restart contract (R0).
-- `include/adc/runtime/amr_system.hpp` / `python/bindings/amr/amr_system.cpp` / `python/bindings/core/bindings.cpp` -- `set_source_stage` + `set_time_scheme` (validation chain mirroring `system.cpp:922-990`).
-- `python/adc/__init__.py` -- remove `isinstance(time, Split)` AMR guards; route `set_source_stage`/`set_time_scheme`.
+- `include/pops/numerics/elliptic/poisson/poisson_operator.hpp` -- *(only if §2.3 option 1)* `cross_div` refactor to emit C/F-conforming face cross-flux [recon-extrap G3, contradicts original "no modification"].
+- `include/pops/runtime/amr/amr_runtime.hpp` -- `amr_schur_step`; Strang restructure (new phi-publish-without-resolve entry, half-step orchestration); **rebuild stepper after `regrid()`**; phi-restart contract (R0).
+- `include/pops/runtime/amr_system.hpp` / `python/bindings/amr/amr_system.cpp` / `python/bindings/core/bindings.cpp` -- `set_source_stage` + `set_time_scheme` (validation chain mirroring `system.cpp:922-990`).
+- `python/pops/__init__.py` -- remove `isinstance(time, Split)` AMR guards; route `set_source_stage`/`set_time_scheme`.
 
 **Unchanged (reused as-is):** `GeometricMG` (except do **not** retrofit `vcycle_rec`), `TensorKrylovSolver`, `schur_condensation.hpp`, mono `condensed_schur_source_stepper.hpp`. *(`poisson_operator.hpp` moves to "changed" only under §2.3 option 1.)*
 

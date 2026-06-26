@@ -11,14 +11,14 @@
 //   (5) coupling_role_index : bloc SANS roles -> fallback canonique conserve (compat) ; bloc AVEC roles
 //       mais sans le role requis -> LEVE en nommant le bloc et le role (plus aucun repli silencieux).
 //
-// Test PUR (n'inclut que core/variables.hpp) : aucune dependance runtime, lie adc::adc seul.
-#include <adc/core/state/variables.hpp>
+// Test PUR (n'inclut que core/variables.hpp) : aucune dependance runtime, lie pops::pops seul.
+#include <pops/core/state/variables.hpp>
 
 #include <cstdio>
 #include <stdexcept>
 #include <string>
 
-using R = adc::VariableRole;
+using R = pops::VariableRole;
 
 int main() {
   int fails = 0;
@@ -31,8 +31,8 @@ int main() {
   // --- (1)+(2)+(3) index_of(string) : layer role canonique + role utilisateur, layout NON canonique ---
   // Bloc fictif : momentum_x en comp 0, un champ utilisateur "phi" en comp 1, densite en comp 2 (layout
   // NON canonique). roles porte l'enum (Custom pour "phi"), user_roles porte le label parallele.
-  adc::VariableSet vs;
-  vs.kind = adc::VariableKind::Conservative;
+  pops::VariableSet vs;
+  vs.kind = pops::VariableKind::Conservative;
   vs.names = {"mx", "phi", "rho"};
   vs.size = 3;
   vs.roles = {R::MomentumX, R::Custom, R::Density};
@@ -50,13 +50,13 @@ int main() {
   chk(vs.index_of("") == -1, "index_of_string:empty_role_is_minus1");  // (3)
 
   // --- (4) aller-retour CSV : roles_csv emet le label utilisateur, parse_roles_into le reconstruit ----
-  const std::string csv = adc::roles_csv(vs);
+  const std::string csv = pops::roles_csv(vs);
   chk(csv == "momentum_x,phi,density", "roles_csv:emits_user_label");
-  adc::VariableSet rt;
-  rt.kind = adc::VariableKind::Conservative;
+  pops::VariableSet rt;
+  rt.kind = pops::VariableKind::Conservative;
   rt.names = vs.names;
   rt.size = vs.size;
-  adc::parse_roles_into(rt, csv);
+  pops::parse_roles_into(rt, csv);
   chk(rt.index_of("phi") == 1, "parse_roles_into:roundtrips_user_label");
   chk(rt.index_of(R::Density) == 2, "parse_roles_into:roundtrips_canonical");
   chk(rt.roles.size() == 3 && rt.roles[1] == R::Custom,
@@ -64,30 +64,30 @@ int main() {
 
   // Jeu PUREMENT canonique : user_roles reste vide (bit-identique au comportement historique, aucune
   // regression sur les blocs existants ni sur l'ABI .so des blocs sans role utilisateur).
-  adc::VariableSet canon;
-  canon.kind = adc::VariableKind::Conservative;
-  adc::parse_roles_into(canon, "density,momentum_x,energy");
+  pops::VariableSet canon;
+  canon.kind = pops::VariableKind::Conservative;
+  pops::parse_roles_into(canon, "density,momentum_x,energy");
   chk(canon.user_roles.empty(), "parse_roles_into:canonical_csv_leaves_user_roles_empty");
   chk(canon.index_of(R::Energy) == 2, "parse_roles_into:canonical_csv_roles_resolve");
 
   // --- (5) coupling_role_index : fallback pour bloc SANS roles, LEVE pour bloc AVEC roles sans le role -
   // Bloc SANS roles (legacy / dynamique sans roles declares) -> fallback canonique conserve.
-  adc::VariableSet roleless;
-  roleless.kind = adc::VariableKind::Conservative;
+  pops::VariableSet roleless;
+  roleless.kind = pops::VariableKind::Conservative;
   roleless.names = {"u0", "u1", "u2"};
   roleless.size = 3;  // roles + user_roles vides
-  chk(adc::coupling_role_index(roleless, R::MomentumX, 1, "test", "blk") == 1,
+  chk(pops::coupling_role_index(roleless, R::MomentumX, 1, "test", "blk") == 1,
       "coupling_role_index:roleless_block_keeps_fallback");
 
   // Bloc AVEC roles QUI PORTE le role : on retourne son indice (non canonique : density en comp 2),
   // jamais le fallback (0).
-  chk(adc::coupling_role_index(vs, R::Density, 0, "test", "blk") == 2,
+  chk(pops::coupling_role_index(vs, R::Density, 0, "test", "blk") == 2,
       "coupling_role_index:present_role_returns_index");
 
   // Bloc AVEC roles mais SANS le role requis (vs ne porte pas Energy) -> LEVE en nommant bloc + role.
   bool threw = false, names_block = false, names_role = false;
   try {
-    (void)adc::coupling_role_index(vs, R::Energy, 3, "System::add_thermal_exchange", "fluid_a");
+    (void)pops::coupling_role_index(vs, R::Energy, 3, "System::add_thermal_exchange", "fluid_a");
   } catch (const std::exception& e) {
     threw = true;
     const std::string m = e.what();

@@ -17,85 +17,85 @@ footgun (the `.so` is linked to a specific cpython), detailed in [limitations](k
 
 ## System: compose, configure, advance
 
-`adc.System` is the coupler: you add blocks (one model per block), you configure a
+`pops.System` is the coupler: you add blocks (one model per block), you configure a
 shared system Poisson, you set the initial conditions in numpy, you advance. `add_block`
-takes a composed model `adc.Model(...)`; `add_equation` dispatches on the model type
+takes a composed model `pops.Model(...)`; `add_equation` dispatches on the model type
 (native `ModelSpec` or `CompiledModel` from the DSL). `set_poisson(rhs=..., solver=..., bc=...)`
 configures the system elliptic; `set_density` / `step_cfl` / `advance` / `run` drive
 the advance; `density` / `mass` / `time` read the state.
 
 ```{eval-rst}
-.. autoclass:: adc.System
+.. autoclass:: pops.System
    :members:
 ```
 
 ## AMR: composition on a refined hierarchy
 
-`adc.AmrSystem` is the refined counterpart of `System`: one or more blocks carried on a
+`pops.AmrSystem` is the refined counterpart of `System`: one or more blocks carried on a
 block-structured AMR hierarchy (Berger-Rigoutsos regrid, conservative reflux). In multi-block,
 the hierarchy is re-gridded on the union of the tags (per-block density and/or `|grad phi|`). Same
 `add_block` / `add_equation` signatures as `System`; the regrid cadence is carried by
 `AmrSystemConfig.regrid_every`.
 
 ```{eval-rst}
-.. autoclass:: adc.AmrSystem
+.. autoclass:: pops.AmrSystem
    :members:
 ```
 
 ## Geometry and mesh
 
-`adc.System` runs in Cartesian geometry by default; the polar / disk geometry is
+`pops.System` runs in Cartesian geometry by default; the polar / disk geometry is
 selected via the `geometry`, `nr`, `ntheta`, `r_min`, `r_max` fields of `SystemConfig` (cf.
 [Advanced topics](../advanced/index.md), geometry section). The exposed mesh classes:
 
 ```{eval-rst}
-.. autoclass:: adc.CartesianMesh
-.. autoclass:: adc.PolarMesh
+.. autoclass:: pops.CartesianMesh
+.. autoclass:: pops.PolarMesh
 ```
 
 ## Native models: brick composition
 
-A native model is assembled by `adc.Model(state, transport, source, elliptic)` from
+A native model is assembled by `pops.Model(state, transport, source, elliptic)` from
 generic bricks. The C++ core only knows these bricks (no scenario name). The
 function validates the state <-> transport consistency (Scalar with ExB; compressible FluidState
 with CompressibleFlux; isothermal with IsothermalFlux).
 
 ```{eval-rst}
-.. autofunction:: adc.Model
+.. autofunction:: pops.Model
 
-.. autoclass:: adc.Scalar
-.. autoclass:: adc.FluidState
-.. autoclass:: adc.ExB
-.. autoclass:: adc.CompressibleFlux
-.. autoclass:: adc.IsothermalFlux
-.. autoclass:: adc.NoSource
-.. autoclass:: adc.PotentialForce
-.. autoclass:: adc.GravityForce
-.. autoclass:: adc.MagneticLorentzForce
-.. autoclass:: adc.PotentialMagneticForce
-.. autoclass:: adc.ChargeDensity
-.. autoclass:: adc.BackgroundDensity
-.. autoclass:: adc.GravityCoupling
+.. autoclass:: pops.Scalar
+.. autoclass:: pops.FluidState
+.. autoclass:: pops.ExB
+.. autoclass:: pops.CompressibleFlux
+.. autoclass:: pops.IsothermalFlux
+.. autoclass:: pops.NoSource
+.. autoclass:: pops.PotentialForce
+.. autoclass:: pops.GravityForce
+.. autoclass:: pops.MagneticLorentzForce
+.. autoclass:: pops.PotentialMagneticForce
+.. autoclass:: pops.ChargeDensity
+.. autoclass:: pops.BackgroundDensity
+.. autoclass:: pops.GravityCoupling
 ```
 
 ## Elliptic model: operator, right-hand side, output
 
-The system elliptic is not a hard-coded Poisson special case: `adc.elliptic(...)` composes an
+The system elliptic is not a hard-coded Poisson special case: `pops.elliptic(...)` composes an
 `EllipticModel` from an operator (`div_eps_grad`), a right-hand side (`composite_rhs`, the generic
 sum of the per-block elliptic bricks, or its usual case `charge_density`) and an output
 (`electric_field_from_potential`). `System.set_poisson(...)` is the shortcut for the Poisson
-instance; `EllipticSolver` selects the linear solver. The `elliptic` field of `adc.Model(...)`
+instance; `EllipticSolver` selects the linear solver. The `elliptic` field of `pops.Model(...)`
 (see above) decides which brick each block contributes to the right-hand side.
 
 ```{eval-rst}
-.. autofunction:: adc.elliptic
-.. autoclass:: adc.EllipticModel
-.. autoclass:: adc.EllipticSolver
+.. autofunction:: pops.elliptic
+.. autoclass:: pops.EllipticModel
+.. autoclass:: pops.EllipticSolver
 
-.. autofunction:: adc.div_eps_grad
-.. autofunction:: adc.charge_density
-.. autofunction:: adc.composite_rhs
-.. autofunction:: adc.electric_field_from_potential
+.. autofunction:: pops.div_eps_grad
+.. autofunction:: pops.charge_density
+.. autofunction:: pops.composite_rhs
+.. autofunction:: pops.electric_field_from_potential
 ```
 
 ## Named aux fields
@@ -103,72 +103,72 @@ instance; `EllipticSolver` selects the linear solver. The `elliptic` field of `a
 Beyond the canonical aux channel (`phi`, `grad_x`, `grad_y`, `B_z`, `T_e`), a model can declare
 named auxiliary fields with `m.aux_field(name)` (see
 [aux vs aux_field](#aux-vs-aux-field) in the DSL reference). Each is set per block
-via `System.set_aux_field(block, name, array, halo=...)`; `adc.AuxHalo` is the optional per-field
+via `System.set_aux_field(block, name, array, halo=...)`; `pops.AuxHalo` is the optional per-field
 ghost boundary policy (`foextrap` zero-gradient, or `dirichlet` with a fixed `value`), applied to
 the non-periodic faces only. Default (no `halo`) keeps the shared aux boundary, bit-identical.
 
 ```{eval-rst}
-.. autoclass:: adc.AuxHalo
+.. autoclass:: pops.AuxHalo
 ```
 
 ## Per-block spatial scheme
 
 Each block independently chooses its reconstruction (limiter), its numerical Riemann
-flux and the reconstructed variables. `adc.FiniteVolume(...)` is a shortcut (the Riemann
+flux and the reconstructed variables. `pops.FiniteVolume(...)` is a shortcut (the Riemann
 flux is called `riemann` there, so as not to collide with the physical flux `m.flux` of the DSL)
-that remaps onto the `adc.Spatial(...)` object.
+that remaps onto the `pops.Spatial(...)` object.
 
 ```{eval-rst}
-.. autoclass:: adc.Spatial
+.. autoclass:: pops.Spatial
    :members:
 
-.. autofunction:: adc.FiniteVolume
+.. autofunction:: pops.FiniteVolume
 
-.. autoclass:: adc.PythonFlux
+.. autoclass:: pops.PythonFlux
    :members:
 ```
 
 ## Per-block time treatment
 
 The time treatment is carried by the block (and not the model): the same model is reused
-with distinct policies. `adc.Explicit` (SSPRK2/3, substeps, stride) is the default;
-`adc.IMEX` / `adc.SourceImplicit` treat the stiff source implicitly (backward-Euler,
+with distinct policies. `pops.Explicit` (SSPRK2/3, substeps, stride) is the default;
+`pops.IMEX` / `pops.SourceImplicit` treat the stiff source implicitly (backward-Euler,
 Newton local to the cell) while the transport stays explicit; this is not a global implicit
-solver. `adc.IMEXRK` is the order-2 IMEX-RK family (ARS(2,2,2) scheme), Cartesian-System only.
-`adc.Split` / `adc.Strang` are the opt-in for explicit/implicit splitting and
-take a source stage `adc.CondensedSchur` (Schur condensation of the electrostatic Lorentz
-coupling). `adc.Role` addresses a component by its physical meaning.
+solver. `pops.IMEXRK` is the order-2 IMEX-RK family (ARS(2,2,2) scheme), Cartesian-System only.
+`pops.Split` / `pops.Strang` are the opt-in for explicit/implicit splitting and
+take a source stage `pops.CondensedSchur` (Schur condensation of the electrostatic Lorentz
+coupling). `pops.Role` addresses a component by its physical meaning.
 
 ```{eval-rst}
-.. autoclass:: adc.Explicit
+.. autoclass:: pops.Explicit
    :members:
 
-.. autoclass:: adc.IMEX
+.. autoclass:: pops.IMEX
    :members:
 
-.. autoclass:: adc.IMEXRK
+.. autoclass:: pops.IMEXRK
    :members:
 
-.. autoclass:: adc.SourceImplicit
+.. autoclass:: pops.SourceImplicit
    :members:
 
-.. autoclass:: adc.Split
+.. autoclass:: pops.Split
    :members:
 
-.. autoclass:: adc.Strang
+.. autoclass:: pops.Strang
    :members:
 
-.. autoclass:: adc.CondensedSchur
+.. autoclass:: pops.CondensedSchur
    :members:
 
-.. autoclass:: adc.Role
+.. autoclass:: pops.Role
    :members:
 ```
 
 ```{note}
-`adc.Implicit(...)` still exists as an alias of `adc.IMEX` but is obsolete (the name wrongly
+`pops.Implicit(...)` still exists as an alias of `pops.IMEX` but is obsolete (the name wrongly
 suggests a global implicit solver) and emits a `DeprecationWarning`: use
-`adc.SourceImplicit(...)` or `adc.IMEX(...)`.
+`pops.SourceImplicit(...)` or `pops.IMEX(...)`.
 ```
 
 ## Inter-species couplings
@@ -177,30 +177,30 @@ Operator-split couplings applied after the transport, passed to `sim.add_couplin
 ionization, inter-species friction, thermal exchange.
 
 ```{eval-rst}
-.. autoclass:: adc.Ionization
-.. autoclass:: adc.Collision
-.. autoclass:: adc.ThermalExchange
+.. autoclass:: pops.Ionization
+.. autoclass:: pops.Collision
+.. autoclass:: pops.ThermalExchange
 ```
 
 ## Symbolic model DSL
 
-The `adc.dsl` submodule describes a model in symbolic formulas (conservative variables,
+The `pops.dsl` submodule describes a model in symbolic formulas (conservative variables,
 auxiliaries, flux, eigenvalues, primitives, elliptic right-hand side), checks it, then
 compiles it into a `.so` pluggable via `System.add_equation`. `dsl.Model` is the facade;
 `dsl.CompiledModel` is the result of `m.compile(...)` (it carries the `.so` and the dispatch
 metadata); `dsl.HybridModel` mixes native bricks and partial DSL bricks in a single
-model (produced by `adc.CompositeModel(...)`).
+model (produced by `pops.CompositeModel(...)`).
 
 ```{eval-rst}
-.. automodule:: adc.dsl
+.. automodule:: pops.dsl
    :members: Model, CompiledModel, HybridModel
 
-.. autofunction:: adc.CompositeModel
+.. autofunction:: pops.CompositeModel
 ```
 
 ```{note}
 Compilation backends (`m.compile(..., backend=...)`, default `auto`, which auto-selects
-`production` under toolchain parity with the installed `_adc`, otherwise `aot`; explicit
+`production` under toolchain parity with the installed `_pops`, otherwise `aot`; explicit
 `prototype | aot | production` still available): `prototype` and `aot`
 are CPU-only (no MPI/AMR/GPU); `production` is CPU + MPI + AMR. See
 [backend matrix](backend-matrix.md) and [limitations](known-limitations.md). DSL design:
@@ -209,7 +209,7 @@ are CPU-only (no MPI/AMR/GPU); `production` is CPU + MPI + AMR. See
 
 ## Moment models
 
-The `adc.moments` submodule generates a `dsl.Model` for a 2D velocity-moment hierarchy from a
+The `pops.moments` submodule generates a `dsl.Model` for a 2D velocity-moment hierarchy from a
 single closure: the central and standardized moments, the flux, and the signed wave speeds are
 derived, so you write only the closure (and, optionally, the sources). For the concept see
 [moments and closures](../concepts/moments-and-closures.md), for the worked example
@@ -217,13 +217,13 @@ derived, so you write only the closure (and, optionally, the sources). For the c
 [moment models](moment-models.md).
 
 ```{eval-rst}
-.. automodule:: adc.moments
+.. automodule:: pops.moments
    :members: build_moment_model, gaussian_closure, lorentz_sources, moment_names, moment_indices
 ```
 
 ## Capabilities matrix
 
-`adc.capabilities()` returns the support matrix by facade / geometry / backend. It is the single
+`pops.capabilities()` returns the support matrix by facade / geometry / backend. It is the single
 source of truth for what each path actually wires (riemann, time, stability policy, poisson,
 geometry, schur, DSL backends, io, AMR layout, regrid, aux) -- other pages key off it rather than
 re-listing combinations that can drift. The returned keys are `dimension`, `riemann`, `time`,
@@ -232,23 +232,23 @@ re-listing combinations that can drift. The returned keys are `dimension`, `riem
 being silently ignored.
 
 ```{eval-rst}
-.. autofunction:: adc.capabilities
+.. autofunction:: pops.capabilities
 ```
 
 ## Environment and diagnostics
 
-Runtime introspection and the single thread knob. `adc.set_threads(n=None)` writes
+Runtime introspection and the single thread knob. `pops.set_threads(n=None)` writes
 `OMP_NUM_THREADS` and `KOKKOS_NUM_THREADS` and MUST be called before the first `System`
-(Kokkos initializes lazily then); `adc.has_kokkos()` and `adc.parallel_info()` report the
-compiled backend and current thread state; `adc.doctor()` is the one-command troubleshooting
-entry point; `adc.abi_key()` returns the module ABI key used by the production DSL path; and the
-module attribute `adc.__version__` carries the version baked into the extension (single source:
+(Kokkos initializes lazily then); `pops.has_kokkos()` and `pops.parallel_info()` report the
+compiled backend and current thread state; `pops.doctor()` is the one-command troubleshooting
+entry point; `pops.abi_key()` returns the module ABI key used by the production DSL path; and the
+module attribute `pops.__version__` carries the version baked into the extension (single source:
 `project(VERSION)` in CMake).
 
 ```{eval-rst}
-.. autofunction:: adc.set_threads
-.. autofunction:: adc.has_kokkos
-.. autofunction:: adc.parallel_info
-.. autofunction:: adc.doctor
-.. autofunction:: adc.abi_key
+.. autofunction:: pops.set_threads
+.. autofunction:: pops.has_kokkos
+.. autofunction:: pops.parallel_info
+.. autofunction:: pops.doctor
+.. autofunction:: pops.abi_key
 ```

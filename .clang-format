@@ -1,10 +1,10 @@
 # Style C++ de adc_cpp. Cale au plus pres du style maison observe : indentation 2 espaces,
-# accolades attachees (`namespace adc {`), references/pointeurs colles au type (`Real& x`),
+# accolades attachees (`namespace pops {`), references/pointeurs colles au type (`Real& x`),
 # Doxygen `///`. Base Google, ajustements minimaux.
 #
 # IMPORTANT :
 #  - ReflowComments: false  -> on NE retouche PAS les longs commentaires Doxygen francais existants.
-#  - SortIncludes: false    -> on NE reordonne PAS les blocs d'include groupes a la main (adc, puis std).
+#  - SortIncludes: false    -> on NE reordonne PAS les blocs d'include groupes a la main (pops, puis std).
 # Le job `format` de quality.yml est BLOQUANT (clang-format --dry-run) depuis ADC-219 : le tronc est
 # conforme depuis le balayage ADC-118, donc tout nouvel ecart est une regression (corriger avec
 # `clang-format -i`). quality.yml ne tourne que sur schedule / dispatch / PR labellisee `quality`.

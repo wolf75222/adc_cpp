@@ -21,19 +21,19 @@
 //   (D) SETTER set_bz : poser B_z apres construction donne le meme resultat que par le ctor.
 //   (E) GARDE / BIT-IDENTITE : sans bz fourni, la composante B_z reste 0 (comportement historique).
 
-#include <adc/core/model/coupled_system.hpp>
-#include <adc/core/model/physical_model.hpp>
-#include <adc/core/state/state.hpp>
-#include <adc/coupling/system/amr_system_coupler.hpp>
-#include <adc/coupling/base/elliptic_rhs.hpp>  // ChargeDensityRhs
-#include <adc/mesh/index/box2d.hpp>
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/layout/distribution_mapping.hpp>
-#include <adc/mesh/geometry/geometry.hpp>
-#include <adc/mesh/storage/multifab.hpp>
-#include <adc/mesh/boundary/physical_bc.hpp>
-#include <adc/numerics/time/amr/reflux/amr_reflux_mf.hpp>  // AmrLevelMP
-#include <adc/parallel/comm.hpp>
+#include <pops/core/model/coupled_system.hpp>
+#include <pops/core/model/physical_model.hpp>
+#include <pops/core/state/state.hpp>
+#include <pops/coupling/system/amr_system_coupler.hpp>
+#include <pops/coupling/base/elliptic_rhs.hpp>  // ChargeDensityRhs
+#include <pops/mesh/index/box2d.hpp>
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/layout/distribution_mapping.hpp>
+#include <pops/mesh/geometry/geometry.hpp>
+#include <pops/mesh/storage/multifab.hpp>
+#include <pops/mesh/boundary/physical_bc.hpp>
+#include <pops/numerics/time/amr/reflux/amr_reflux_mf.hpp>  // AmrLevelMP
+#include <pops/parallel/comm.hpp>
 
 #include <cmath>
 #include <cstdio>
@@ -41,33 +41,33 @@
 #include <memory>
 #include <vector>
 
-using namespace adc;
+using namespace pops;
 
 // Croissance pilotee par B_z : flux nul, elliptique nul (phi=0), source S = B_z*u. Lit a.B_z
 // -> declare n_aux=4. du/dt = B_z u, Euler avant par sous-pas.
 struct BzGrowPop {
   using State = StateVec<1>;
-  using Aux = adc::Aux;
+  using Aux = pops::Aux;
   static constexpr int n_vars = 1;
   static constexpr int n_aux = 4;  // phi, grad_x, grad_y, B_z
-  ADC_HD State flux(const State&, const Aux&, int) const { return State{Real(0)}; }
-  ADC_HD Real max_wave_speed(const State&, const Aux&, int) const { return Real(0); }
-  ADC_HD State source(const State& u, const Aux& a) const { return State{a.B_z * u[0]}; }
-  ADC_HD Real elliptic_rhs(const State&) const { return Real(0); }
+  POPS_HD State flux(const State&, const Aux&, int) const { return State{Real(0)}; }
+  POPS_HD Real max_wave_speed(const State&, const Aux&, int) const { return Real(0); }
+  POPS_HD State source(const State& u, const Aux& a) const { return State{a.B_z * u[0]}; }
+  POPS_HD Real elliptic_rhs(const State&) const { return Real(0); }
 };
 
 // Bloc de base (n_aux defaut = 3) : advection en x, ne lit pas l'aux, source nulle.
 struct AdvectXPop {
   using State = StateVec<1>;
-  using Aux = adc::Aux;
+  using Aux = pops::Aux;
   static constexpr int n_vars = 1;
   Real v = Real(1);
-  ADC_HD State flux(const State& u, const Aux&, int dir) const {
+  POPS_HD State flux(const State& u, const Aux&, int dir) const {
     return State{dir == 0 ? v * u[0] : Real(0)};
   }
-  ADC_HD Real max_wave_speed(const State&, const Aux&, int) const { return std::fabs(v); }
-  ADC_HD State source(const State&, const Aux&) const { return State{}; }
-  ADC_HD Real elliptic_rhs(const State&) const { return Real(0); }
+  POPS_HD Real max_wave_speed(const State&, const Aux&, int) const { return std::fabs(v); }
+  POPS_HD State source(const State&, const Aux&) const { return State{}; }
+  POPS_HD Real elliptic_rhs(const State&) const { return Real(0); }
 };
 
 static_assert(PhysicalModel<BzGrowPop> && PhysicalModel<AdvectXPop>);

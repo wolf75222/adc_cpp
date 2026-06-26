@@ -21,7 +21,7 @@ skeleton**. `[x]` = done and green; `[ ]` = to do.
 ## 1. Done (current status, all green)
 
 ### Architecture / repositories
-- [x] Core/applications split: `adc_cpp` (engine, zero model) <-> `adc_cases` (models, facades, Python) via FetchContent (`adc::adc`). Pushed.
+- [x] Core/applications split: `adc_cpp` (engine, zero model) <-> `adc_cases` (models, facades, Python) via FetchContent (`pops::pops`). Pushed.
 - [x] `adc_cpp` HEAD contains **no** application (verified); README refocused on "core library".
 
 ### Per-block abstractions (the missing level: skeleton in place)
@@ -130,10 +130,10 @@ the user architecture.
   `SystemCoupler` (`adc_cases/solver/multispecies_solver.{hpp,cpp}`), like the other facades.
   Concrete two-fluid case; the fully generic composition `vector<SpeciesConfig>`
   (arbitrary species) remains a later milestone (combinatorial explosion / type erasure).
-- [x] pybind11 bindings: `adc.MultiSpeciesConfig`, `adc.MultiSpeciesSolver`
+- [x] pybind11 bindings: `pops.MultiSpeciesConfig`, `pops.MultiSpeciesSolver`
   (`step/advance/density_e/density_i/potential/mass_e/mass_i/max_charge`), fields as numpy
   (`python/bindings/core/bindings.cpp`, tested `python/test_bindings.py`).
-- [x] **Runtime composition**: `adc.Simulation` (`solver/simulation.{hpp,cpp}`),
+- [x] **Runtime composition**: `pops.Simulation` (`solver/simulation.{hpp,cpp}`),
   `add_species(name, charge)` adds N species on the fly, sharing a system Poisson;
   `set_density` (numpy), `step/advance`, `density/potential/mass`. The `sim.add_equation(...)`
   spirit from the TODO, bounded to drift species (Diocotron, 1 var, simple IC); physics compiled,
@@ -148,7 +148,7 @@ the user architecture.
   callback in the hot path. Runtime plugin without recompiling = design choice (future).
 - [x] **Evolution (June 2026)**: this layer (`add_species`, named blocks `Diocotron`/`Euler`,
   tags `model=`) is replaced by the **generic brick composition**: `CompositeModel`
-  in C++, `adc.Model(state, transport, source, elliptic)` in Python. `adc_cpp` no longer names
+  in C++, `pops.Model(state, transport, source, elliptic)` in Python. `adc_cpp` no longer names
   any scenario; the named compositions live on the application side (`adc_cases/models.py`).
 
 ---
@@ -159,7 +159,7 @@ the user architecture.
   `compute_face_fluxes` (receives `dx/dy` from the level), guarded by `DiffusiveModel` (hyperbolic
   path strictly bit-identical). Seen by the reflux -> conservative at the
   coarse-fine interfaces. Tested (`test_amr_diffusion`: mass conserved to 1e-12 + smoothing).
-- [x] **`Aux` contract**: decided, `Aux` is **fixed** (`adc::Aux`). The `PhysicalModel` concept
+- [x] **`Aux` contract**: decided, `Aux` is **fixed** (`pops::Aux`). The `PhysicalModel` concept
   now requires `std::same_as<typename M::Aux, Aux>`: it promises exactly what
   `load_aux` provides (generalizing to an arbitrary `Model::Aux` remains possible later).
 - [x] **`SpectralCoupler::max_drift_speed`**: generalized via `model.max_wave_speed` (no more

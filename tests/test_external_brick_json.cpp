@@ -1,18 +1,18 @@
 // Manifest JSON escape/unescape round-trip for the external-brick registry (Spec 3 section 21-22,
 // ADC-463). The host emits each brick's id/category/requirements/capabilities into the JSON manifest
-// `adc.lib.load_cpp_library` parses with `json.loads`; the C++ reader (`field`) parses it back. Both
+// `pops.lib.load_cpp_library` parses with `json.loads`; the C++ reader (`field`) parses it back. Both
 // directions must agree on EVERY byte a user-chosen id/requirement can carry -- structural `"` / `\`
 // and any control character -- or a manifest with such a token is silently truncated (C++ side) or
 // rejected outright (`json.loads` raises on a raw control char). This is a pure-string test: it does
-// NOT need Kokkos or _adc, so it stays a fast, always-on gate independent of the device toolchain.
+// NOT need Kokkos or _pops, so it stays a fast, always-on gate independent of the device toolchain.
 
-#include <adc/runtime/program/external_brick.hpp>
+#include <pops/runtime/program/external_brick.hpp>
 
 #include <cstdio>
 #include <string>
 
-using adc::runtime::program::json_escape;
-using adc::runtime::program::json_unescape;
+using pops::runtime::program::json_escape;
+using pops::runtime::program::json_unescape;
 
 namespace {
 

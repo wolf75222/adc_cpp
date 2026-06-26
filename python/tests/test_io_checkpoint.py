@@ -18,7 +18,7 @@ import tempfile
 
 import numpy as np
 
-import adc
+import pops
 
 fails = 0
 
@@ -33,21 +33,21 @@ def chk(cond, label):
 def build(n=16):
     """Deux blocs couples par le Poisson, le second a STRIDE=2 (cadence hold-then-catch-up) :
     le restart doit reprendre la fenetre stride exactement (macro_step restaure)."""
-    sim = adc.System(n=n, L=1.0, periodic=True)
+    sim = pops.System(n=n, L=1.0, periodic=True)
     sim.set_poisson(rhs="charge_density", solver="geometric_mg", bc="periodic")
     sim.add_block("ions",
-                  adc.Model(state=adc.FluidState("isothermal", cs2=0.5),
-                            transport=adc.IsothermalFlux(),
-                            source=adc.PotentialForce(charge=1.0),
-                            elliptic=adc.ChargeDensity(charge=1.0)),
-                  spatial=adc.FiniteVolume(limiter="minmod"), time=adc.Explicit())
+                  pops.Model(state=pops.FluidState("isothermal", cs2=0.5),
+                            transport=pops.IsothermalFlux(),
+                            source=pops.PotentialForce(charge=1.0),
+                            elliptic=pops.ChargeDensity(charge=1.0)),
+                  spatial=pops.FiniteVolume(limiter="minmod"), time=pops.Explicit())
     sim.add_block("slow",
-                  adc.Model(state=adc.FluidState("isothermal", cs2=0.5),
-                            transport=adc.IsothermalFlux(),
-                            source=adc.PotentialForce(charge=-1.0),
-                            elliptic=adc.ChargeDensity(charge=-1.0)),
-                  spatial=adc.FiniteVolume(limiter="minmod"),
-                  time=adc.Explicit(stride=2))
+                  pops.Model(state=pops.FluidState("isothermal", cs2=0.5),
+                            transport=pops.IsothermalFlux(),
+                            source=pops.PotentialForce(charge=-1.0),
+                            elliptic=pops.ChargeDensity(charge=-1.0)),
+                  spatial=pops.FiniteVolume(limiter="minmod"),
+                  time=pops.Explicit(stride=2))
     x = (np.arange(n) + 0.5) / n
     X, Y = np.meshgrid(x, x, indexing="xy")
     sim.set_density("ions", (1.0 + 0.4 * np.exp(-50.0 * ((X - 0.4) ** 2 + (Y - 0.5) ** 2))).ravel())
@@ -86,13 +86,13 @@ chk(abs(sim2.time() - ref_t) < 1e-15, "temps final identique")
 
 # --- (2) rejets explicites -----------------------------------------------------------
 print("== (2) rejets explicites ==")
-bad = adc.System(n=16, L=1.0, periodic=True)
+bad = pops.System(n=16, L=1.0, periodic=True)
 bad.set_poisson(rhs="charge_density", solver="geometric_mg", bc="periodic")
 bad.add_block("autre",
-              adc.Model(state=adc.FluidState("isothermal", cs2=0.5),
-                        transport=adc.IsothermalFlux(), source=adc.NoSource(),
-                        elliptic=adc.ChargeDensity(charge=0.0)),
-              spatial=adc.FiniteVolume(limiter="minmod"))
+              pops.Model(state=pops.FluidState("isothermal", cs2=0.5),
+                        transport=pops.IsothermalFlux(), source=pops.NoSource(),
+                        elliptic=pops.ChargeDensity(charge=0.0)),
+              spatial=pops.FiniteVolume(limiter="minmod"))
 try:
     bad.restart(os.path.join(tmp, "chk"))
     chk(False, "composition differente aurait du lever")

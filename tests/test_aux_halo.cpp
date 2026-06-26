@@ -2,22 +2,22 @@
 // aux component (a model-named field) can carry its OWN boundary policy (foextrap / dirichlet),
 // overriding the shared aux BC for that component only, while the all-component overload stays
 // strictly bit-identical. This is the mechanism the System / polar / AMR aux-ghost paths reuse to
-// honor a per-field halo declared via adc.AuxHalo (Refs ADC-291).
+// honor a per-field halo declared via pops.AuxHalo (Refs ADC-291).
 
-#include <adc/core/foundation/types.hpp>
-#include <adc/mesh/index/box2d.hpp>
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/layout/distribution_mapping.hpp>
-#include <adc/mesh/storage/fab2d.hpp>
-#include <adc/mesh/storage/multifab.hpp>
-#include <adc/mesh/boundary/physical_bc.hpp>
-#include <adc/parallel/comm.hpp>
+#include <pops/core/foundation/types.hpp>
+#include <pops/mesh/index/box2d.hpp>
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/layout/distribution_mapping.hpp>
+#include <pops/mesh/storage/fab2d.hpp>
+#include <pops/mesh/storage/multifab.hpp>
+#include <pops/mesh/boundary/physical_bc.hpp>
+#include <pops/parallel/comm.hpp>
 
 #include <cmath>
 #include <cstdio>
 #include <vector>
 
-using namespace adc;
+using namespace pops;
 
 int main() {
   int fails = 0;

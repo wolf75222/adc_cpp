@@ -5,7 +5,7 @@
 // (fill_cf_ghost_cell, the refined-patch interface that the original Hoffart failure exercised).
 //
 // Four checks (serial; the np=1/2/4 MPI replay is the Python test, the device path is argued by
-// construction -- same ADC_HD kernel, the clamp is host-side and outside every conservation sum):
+// construction -- same POPS_HD kernel, the clamp is host-side and outside every conservation sum):
 //  (1) C/F GHOST CLAMP (the highest-risk site): the LIVE multi-box ghost fill mf_fill_fine_ghosts_mb
 //      reads a coarse parent whose density dips BELOW the floor in one cell; unclamped the fine ghosts
 //      reading it go sub-floor, with the floor every C/F fine-ghost density is >= floor while the
@@ -17,29 +17,29 @@
 //      trajectory DIFFERS from the unfloored run (the floor was active).
 //  (4) REJECT: a model without a Density role (AdvectionDiffusion) + positivity_floor > 0 ->
 //      runtime_error mentioning positivity_floor (positivity_comp resolved on the AMR path).
-#include <adc/validation/physics/advection_diffusion.hpp>
-#include <adc/physics/fluids/euler.hpp>
+#include <pops/validation/physics/advection_diffusion.hpp>
+#include <pops/physics/fluids/euler.hpp>
 
-#include <adc/numerics/fv/numerical_flux.hpp>      // RusanovFlux
-#include <adc/numerics/fv/reconstruction.hpp>      // Weno5, Minmod
-#include <adc/numerics/spatial_operator.hpp>    // reconstruct_pp, positivity_comp
-#include <adc/numerics/time/amr/reflux/amr_reflux_mf.hpp>  // advance_amr, AmrLevelMP, mf_fill_fine_ghosts_mb
+#include <pops/numerics/fv/numerical_flux.hpp>      // RusanovFlux
+#include <pops/numerics/fv/reconstruction.hpp>      // Weno5, Minmod
+#include <pops/numerics/spatial_operator.hpp>    // reconstruct_pp, positivity_comp
+#include <pops/numerics/time/amr/reflux/amr_reflux_mf.hpp>  // advance_amr, AmrLevelMP, mf_fill_fine_ghosts_mb
 
-#include <adc/mesh/index/box2d.hpp>
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/layout/distribution_mapping.hpp>
-#include <adc/mesh/execution/for_each.hpp>
-#include <adc/mesh/geometry/geometry.hpp>
-#include <adc/mesh/storage/multifab.hpp>
-#include <adc/mesh/boundary/physical_bc.hpp>
-#include <adc/parallel/comm.hpp>
+#include <pops/mesh/index/box2d.hpp>
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/layout/distribution_mapping.hpp>
+#include <pops/mesh/execution/for_each.hpp>
+#include <pops/mesh/geometry/geometry.hpp>
+#include <pops/mesh/storage/multifab.hpp>
+#include <pops/mesh/boundary/physical_bc.hpp>
+#include <pops/parallel/comm.hpp>
 
 #include <cmath>
 #include <cstdio>
 #include <stdexcept>
 #include <string>
 
-using namespace adc;
+using namespace pops;
 
 // Euler WITHOUT source (parity with test_positivity_floor.cpp): forwards flux / wave speed and the
 // Density-role introspection (conservative_vars, role Density at component 0). advance_amr only needs
@@ -50,11 +50,11 @@ struct EulerNoSrc {
   static constexpr int n_vars = Euler::n_vars;
   Euler e{};
   Real gamma = Real(1.4);
-  ADC_HD State flux(const State& u, const Aux& a, int dir) const { return e.flux(u, a, dir); }
-  ADC_HD Real max_wave_speed(const State& u, const Aux& a, int dir) const {
+  POPS_HD State flux(const State& u, const Aux& a, int dir) const { return e.flux(u, a, dir); }
+  POPS_HD Real max_wave_speed(const State& u, const Aux& a, int dir) const {
     return e.max_wave_speed(u, a, dir);
   }
-  ADC_HD State source(const State&, const Aux&) const { return State{}; }
+  POPS_HD State source(const State&, const Aux&) const { return State{}; }
   static VariableSet conservative_vars() { return Euler::conservative_vars(); }
   static VariableSet primitive_vars() { return Euler::primitive_vars(); }
 };
@@ -321,7 +321,7 @@ int main(int argc, char** argv) {
   //     (positivity_comp resolved at the head of subcycle_level_mp), message mentions positivity_floor.
   // ------------------------------------------------------------------------------------------------
   {
-    const adc::validation::AdvectionDiffusion scal{1.0, 0.0, 0.0};
+    const pops::validation::AdvectionDiffusion scal{1.0, 0.0, 0.0};
     MultiFab Us(ba, dm, 1, 2), auxs(ba, dm, 3, 1);
     Us.set_val(1.0);
     auxs.set_val(0.0);

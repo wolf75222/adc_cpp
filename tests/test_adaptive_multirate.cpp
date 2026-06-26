@@ -7,31 +7,31 @@
 // Champ uniforme : l'advection ne change rien, seule la source fait grandir n -> on lit
 // directement le pas effectif de chaque espece.
 
-#include <adc/core/model/coupled_system.hpp>
-#include <adc/core/state/state.hpp>
-#include <adc/coupling/system/system_coupler.hpp>
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/layout/distribution_mapping.hpp>
-#include <adc/mesh/geometry/geometry.hpp>
-#include <adc/mesh/storage/multifab.hpp>
+#include <pops/core/model/coupled_system.hpp>
+#include <pops/core/state/state.hpp>
+#include <pops/coupling/system/system_coupler.hpp>
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/layout/distribution_mapping.hpp>
+#include <pops/mesh/geometry/geometry.hpp>
+#include <pops/mesh/storage/multifab.hpp>
 
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
 
-using namespace adc;
+using namespace pops;
 
 struct AdvectProduce {
   using State = StateVec<1>;
-  using Aux = adc::Aux;
+  using Aux = pops::Aux;
   static constexpr int n_vars = 1;
   Real a = Real(1), rate = Real(1);
-  ADC_HD State flux(const State& u, const Aux&, int dir) const {
+  POPS_HD State flux(const State& u, const Aux&, int dir) const {
     return State{dir == 0 ? a * u[0] : Real(0)};
   }
-  ADC_HD Real max_wave_speed(const State&, const Aux&, int) const { return a < 0 ? -a : a; }
-  ADC_HD State source(const State&, const Aux&) const { return State{rate}; }
-  ADC_HD Real elliptic_rhs(const State& u) const { return u[0]; }
+  POPS_HD Real max_wave_speed(const State&, const Aux&, int) const { return a < 0 ? -a : a; }
+  POPS_HD State source(const State&, const Aux&) const { return State{rate}; }
+  POPS_HD Real elliptic_rhs(const State& u) const { return u[0]; }
 };
 
 struct ZeroSystemRhs {

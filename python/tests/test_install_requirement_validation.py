@@ -5,7 +5,7 @@ descriptor). System.install_program reads that descriptor and rejects, BEFORE in
 a simulation that did not provide a required field -- here B_z, normally supplied by
 set_magnetic_field -- with a spec-style message ("operator 'lorentz' requires aux field 'B_z', but
 simulation did not provide it") instead of a cryptic failure mid-step. The negative and positive
-cases both need a compiler + a visible Kokkos (ADC_KOKKOS_ROOT) to build the .so; the test prints a
+cases both need a compiler + a visible Kokkos (POPS_KOKKOS_ROOT) to build the .so; the test prints a
 skip notice and exits 0 otherwise (run it on ROMEO). cf. docs/sphinx/reference/operator-modules.md.
 """
 import sys
@@ -13,9 +13,9 @@ import sys
 try:
     import numpy as np
 
-    import adc
-    from adc import dsl
-    from adc import time as adctime
+    import pops
+    from pops import dsl
+    from pops import time as adctime
 except Exception as exc:  # noqa: BLE001
     print("skip test_install_requirement_validation (adc/numpy unavailable: %s)" % exc)
     sys.exit(0)
@@ -51,10 +51,10 @@ def lie_program(name="adc446_prog"):
 
 
 def make_sim(block_model, with_bz):
-    sim = adc.System(n=N, L=1.0, periodic=True)
+    sim = pops.System(n=N, L=1.0, periodic=True)
     sim.add_equation("plasma", block_model.compile(backend="production"),
-                     spatial=adc.FiniteVolume(limiter="none", riemann="rusanov"),
-                     time=adc.Explicit(method="euler"))
+                     spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                     time=pops.Explicit(method="euler"))
     sim.set_poisson("charge_density", "geometric_mg")
     if with_bz:
         sim.set_magnetic_field(3.0 * np.ones(N * N))
@@ -66,12 +66,12 @@ def make_sim(block_model, with_bz):
 
 
 def main():
-    if not hasattr(adc.System(n=8, L=1.0, periodic=True), "install_program"):
-        print("skip test_install_requirement_validation (_adc lacks install_program; rebuild _adc)")
+    if not hasattr(pops.System(n=8, L=1.0, periodic=True), "install_program"):
+        print("skip test_install_requirement_validation (_pops lacks install_program; rebuild _pops)")
         return 0
     m = lorentz_model()
     try:
-        compiled = adc.compile_problem(model=m, time=lie_program())
+        compiled = pops.compile_problem(model=m, time=lie_program())
     except RuntimeError as exc:
         print("skip test_install_requirement_validation (no Kokkos to build the .so: %s)"
               % str(exc)[:120])

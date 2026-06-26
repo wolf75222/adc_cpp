@@ -3,8 +3,8 @@
 //
 // La brique modele est EMISE par la DSL (emit_cpp_brick, fichier hyqmom15_brick.hpp genere
 // cote Mac depuis le modele VALIDE : flux + vitesses exactes par jacobien autodiff +
-// adc::real_eig_minmax + sources electriques) et branchee par le SEAM DE COMPILATION
-// adc::add_compiled_model - le meme chemin natif que add_block (assemble_rhs device, halos),
+// pops::real_eig_minmax + sources electriques) et branchee par le SEAM DE COMPILATION
+// pops::add_compiled_model - le meme chemin natif que add_block (assemble_rhs device, halos),
 // zero marshaling. L'etat initial est LU en binaire (ic.raw : 15*n*n doubles row-major
 // (comp, y, x)) - calcule par le python valide (diocotron_state), jamais re-porte.
 //
@@ -17,15 +17,15 @@
 // driver tourne sous srun -n N. comm_init/comm_finalize ouvrent/ferment MPI ; les lectures de
 // diagnostic et de snapshot passent par sys.state_global / sys.potential_global (all-reduce
 // collectif, system.cpp) et le pas sys.step_cfl / sys.solve_fields est collectif, donc chaque
-// rang detient le champ complet et seul le rang 0 ecrit fichiers + stdout. Sans ADC_HAS_MPI les
+// rang detient le champ complet et seul le rang 0 ecrit fichiers + stdout. Sans POPS_HAS_MPI les
 // stubs de comm.hpp donnent my_rank()=0 / n_ranks()=1 : le chemin serie (parity181) est inchange
 // au bit pres. Topologie = System mono-boite round-robin (boite 0 au rang 0, autres rangs
 // local_size()==0 -> contribuent 0 a l'all-reduce), identique a la topologie CPU de run_mpi.py.
 
-#include <adc/parallel/comm.hpp>
-#include <adc/physics/composition/composite.hpp>
-#include <adc/runtime/builders/compiled/dsl_block.hpp>
-#include <adc/runtime/system.hpp>
+#include <pops/parallel/comm.hpp>
+#include <pops/physics/composition/composite.hpp>
+#include <pops/runtime/builders/compiled/dsl_block.hpp>
+#include <pops/runtime/system.hpp>
 
 #include "hyqmom15_brick.hpp"
 
@@ -51,8 +51,8 @@ static std::string arg_s(int argc, char** argv, const char* key, const char* dfl
 }
 
 int main(int argc, char** argv) {
-  adc::comm_init(&argc, &argv);  // MPI_Init si ADC_HAS_MPI et pas deja initialise ; no-op en serie
-  const int me = adc::my_rank(), np = adc::n_ranks();
+  pops::comm_init(&argc, &argv);  // MPI_Init si POPS_HAS_MPI et pas deja initialise ; no-op en serie
+  const int me = pops::my_rank(), np = pops::n_ranks();
   const int n = static_cast<int>(arg_d(argc, argv, "--n", 128));
   const double tend = arg_d(argc, argv, "--tend", 4.0);
   const double cfl = arg_d(argc, argv, "--cfl", 0.4);
@@ -66,14 +66,14 @@ int main(int argc, char** argv) {
   // ensemble (aucun collectif n'a encore eu lieu) -- pas de deadlock.
   if (n < 1 || snap_every < 1 || diag_every < 1) {
     if (me == 0) std::fprintf(stderr, "[gpu] --n/--snap-every/--diag-every doivent etre >= 1\n");
-    adc::comm_finalize();
+    pops::comm_finalize();
     return 1;
   }
 
   // mkdir : seul le rang 0 ecrit dans --out (les autres rangs n'ont pas de boite a dumper).
   if (me == 0 && std::system(("mkdir -p " + out).c_str()) != 0) {
     std::fprintf(stderr, "[gpu] mkdir -p %s a echoue\n", out.c_str());
-    adc::comm_finalize();
+    pops::comm_finalize();
     return 1;
   }
 
@@ -85,23 +85,23 @@ int main(int argc, char** argv) {
     std::ifstream f(ic, std::ios::binary);
     if (!f) {
       if (me == 0) std::fprintf(stderr, "IC introuvable : %s\n", ic.c_str());
-      adc::comm_finalize();
+      pops::comm_finalize();
       return 2;
     }
     f.read(reinterpret_cast<char*>(U0.data()),
            static_cast<std::streamsize>(U0.size() * sizeof(double)));
     if (!f) {
       if (me == 0) std::fprintf(stderr, "IC tronquee : %s\n", ic.c_str());
-      adc::comm_finalize();
+      pops::comm_finalize();
       return 2;
     }
   }
 
-  adc::SystemConfig cfg;
+  pops::SystemConfig cfg;
   cfg.n = n;
   cfg.L = 1.0;
   cfg.periodic = true;
-  adc::System sys(cfg);
+  pops::System sys(cfg);
 
   // briques emises par la DSL (flux + vitesses exactes / source Lorentz / rhs de Poisson),
   // assemblees par CompositeModel et branchees par le seam de COMPILATION (chemin natif
@@ -110,16 +110,16 @@ int main(int argc, char** argv) {
   // une brique elliptique PAR n (rho_background cave, depend de la discretisation du
   // scenario) ; Hyp/Src partagees.
   if (n == 128) {
-    using Model = adc::CompositeModel<adc_generated::Hyqmom15Hyp, adc_generated::Hyqmom15Src,
-                                      adc_generated::Hyqmom15Ell128>;
-    adc::add_compiled_model(sys, "mom", Model{}, "none", "hll", "conservative", "explicit");
+    using Model = pops::CompositeModel<pops_generated::Hyqmom15Hyp, pops_generated::Hyqmom15Src,
+                                      pops_generated::Hyqmom15Ell128>;
+    pops::add_compiled_model(sys, "mom", Model{}, "none", "hll", "conservative", "explicit");
   } else if (n == 256) {
-    using Model = adc::CompositeModel<adc_generated::Hyqmom15Hyp, adc_generated::Hyqmom15Src,
-                                      adc_generated::Hyqmom15Ell256>;
-    adc::add_compiled_model(sys, "mom", Model{}, "none", "hll", "conservative", "explicit");
+    using Model = pops::CompositeModel<pops_generated::Hyqmom15Hyp, pops_generated::Hyqmom15Src,
+                                      pops_generated::Hyqmom15Ell256>;
+    pops::add_compiled_model(sys, "mom", Model{}, "none", "hll", "conservative", "explicit");
   } else {
     if (me == 0) std::fprintf(stderr, "n=%d sans brique elliptique emise (128|256)\n", n);
-    adc::comm_finalize();
+    pops::comm_finalize();
     return 2;
   }
   sys.set_poisson("charge_density", "geometric_mg");
@@ -134,7 +134,7 @@ int main(int argc, char** argv) {
     gf = std::fopen((out + "/growth.csv").c_str(), "w");
     if (!gf) {
       std::fprintf(stderr, "[gpu] impossible d'ouvrir %s/growth.csv\n", out.c_str());
-      adc::comm_finalize();
+      pops::comm_finalize();
       return 1;
     }
     std::fprintf(gf, "step,t,dt,mass,a2,a3,a4,a5,a6\n");
@@ -163,7 +163,7 @@ int main(int argc, char** argv) {
     // les rangs ; on vote tout de meme via all_reduce_max pour ne JAMAIS sortir un seul rang
     // de la boucle (les collectifs restants -- state_global -- bloqueraient les autres rangs).
     int collapse = (dt < 1e-4 * dt0) ? 1 : 0;
-    collapse = static_cast<int>(adc::all_reduce_max(static_cast<double>(collapse)));
+    collapse = static_cast<int>(pops::all_reduce_max(static_cast<double>(collapse)));
     if (collapse) {
       if (me == 0)
         std::fprintf(stderr,
@@ -199,7 +199,7 @@ int main(int argc, char** argv) {
       if (!finite) {
         if (me == 0) std::fprintf(stderr, "[FATAL] M00 non fini au pas %ld\n", k);
         if (gf) std::fclose(gf);
-        adc::comm_finalize();
+        pops::comm_finalize();
         return 3;
       }
       mass = dmass;
@@ -251,6 +251,6 @@ int main(int argc, char** argv) {
     std::fflush(stdout);
   }
   if (gf) std::fclose(gf);
-  adc::comm_finalize();
+  pops::comm_finalize();
   return 0;
 }

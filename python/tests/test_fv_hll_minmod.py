@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Test VISIBLE du chemin generique HLL + minmod sur un modele NON Euler.
 
-adc.FiniteVolume(limiter="minmod", riemann="hll", variables="primitive") doit etre accepte par
+pops.FiniteVolume(limiter="minmod", riemann="hll", variables="primitive") doit etre accepte par
 System ET AmrSystem des que le modele expose des vitesses d'onde signees (model.wave_speeds) --
 ici le fluide ISOTHERME 3 variables (rho, rho_u, rho_v), qui n'est PAS Euler 4 variables : ce
 modele NATIF n'expose pas les hooks HasHLLCStructure / HasRoeDissipation, donc hllc et roe le
@@ -19,7 +19,7 @@ import sys
 
 import numpy as np
 
-import adc
+import pops
 
 fails = 0
 
@@ -32,10 +32,10 @@ def chk(cond, label):
 
 
 def iso_model(charge=1.0, cs2=0.5):
-    return adc.Model(state=adc.FluidState("isothermal", cs2=cs2),
-                     transport=adc.IsothermalFlux(),
-                     source=adc.PotentialForce(charge=charge),
-                     elliptic=adc.ChargeDensity(charge=charge))
+    return pops.Model(state=pops.FluidState("isothermal", cs2=cs2),
+                     transport=pops.IsothermalFlux(),
+                     source=pops.PotentialForce(charge=charge),
+                     elliptic=pops.ChargeDensity(charge=charge))
 
 
 def gaussian(n):
@@ -47,10 +47,10 @@ def gaussian(n):
 # --- 1. System : hll + minmod + primitive sur isotherme 3 var (non Euler) -------
 print("== System : FiniteVolume(minmod, hll, primitive) sur isotherme 3 var ==")
 n = 32
-sim = adc.System(n=n, L=1.0, periodic=True)
+sim = pops.System(n=n, L=1.0, periodic=True)
 sim.add_block("ions", iso_model(),
-              spatial=adc.FiniteVolume(limiter="minmod", riemann="hll", variables="primitive"),
-              time=adc.Explicit())
+              spatial=pops.FiniteVolume(limiter="minmod", riemann="hll", variables="primitive"),
+              time=pops.Explicit())
 sim.set_poisson(rhs="charge_density", solver="geometric_mg", bc="periodic")
 rho0 = gaussian(n)
 sim.set_density("ions", rho0.ravel())
@@ -64,32 +64,32 @@ chk(abs(sim.mass("ions") - m0) < 1e-10 * abs(m0), "masse conservee (periodique)"
 
 # --- 2. hll sur scalaire ExB (pas de wave_speeds) -> erreur explicite ------------
 print("== hll sans wave_speeds (scalaire ExB) : rejet explicite ==")
-sim2 = adc.System(n=16, L=1.0, periodic=True)
-scal = adc.Model(state=adc.Scalar(), transport=adc.ExB(B0=1.0), source=adc.NoSource(),
-                 elliptic=adc.BackgroundDensity(alpha=1.0, n0=0.0))
+sim2 = pops.System(n=16, L=1.0, periodic=True)
+scal = pops.Model(state=pops.Scalar(), transport=pops.ExB(B0=1.0), source=pops.NoSource(),
+                 elliptic=pops.BackgroundDensity(alpha=1.0, n0=0.0))
 try:
-    sim2.add_block("e", scal, spatial=adc.FiniteVolume(limiter="minmod", riemann="hll"))
+    sim2.add_block("e", scal, spatial=pops.FiniteVolume(limiter="minmod", riemann="hll"))
     chk(False, "hll sur scalaire ExB aurait du lever")
 except RuntimeError as e:
     chk("wave_speeds" in str(e) or "hll" in str(e), f"erreur explicite : {e}")
 
 # --- 3. hllc sur isotherme 3 var -> rejet explicite (Euler 2D seulement) ---------
 print("== hllc sur isotherme 3 var natif : rejet explicite (ni capability HLLC, ni Euler 2D) ==")
-sim3 = adc.System(n=16, L=1.0, periodic=True)
+sim3 = pops.System(n=16, L=1.0, periodic=True)
 try:
-    sim3.add_block("ions", iso_model(), spatial=adc.FiniteVolume(limiter="minmod", riemann="hllc"))
+    sim3.add_block("ions", iso_model(), spatial=pops.FiniteVolume(limiter="minmod", riemann="hllc"))
     chk(False, "hllc sur isotherme 3 var aurait du lever")
 except RuntimeError as e:
     chk("hllc" in str(e), f"erreur explicite : {e}")
 
 # --- 4. AmrSystem : hll + minmod accepte (alignement de surface System/AMR) ------
 print("== AmrSystem : add_block(riemann='hll') accepte sur isotherme ==")
-amr = adc.AmrSystem(n=32, L=1.0, periodic=True, regrid_every=0)
+amr = pops.AmrSystem(n=32, L=1.0, periodic=True, regrid_every=0)
 amr.set_poisson(rhs="charge_density", solver="geometric_mg", bc="periodic")
 amr.set_refinement(1e30)  # aucun raffinement : hierarchie mono-niveau (le sujet est le ROUTAGE hll)
 amr.add_block("ions", iso_model(),
-              spatial=adc.FiniteVolume(limiter="minmod", riemann="hll", variables="primitive"),
-              time=adc.Explicit())
+              spatial=pops.FiniteVolume(limiter="minmod", riemann="hll", variables="primitive"),
+              time=pops.Explicit())
 amr.set_density("ions", gaussian(32).ravel())
 m0 = amr.mass("ions")
 for _ in range(3):

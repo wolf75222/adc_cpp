@@ -1,4 +1,4 @@
-// Identite NUMERIQUE EXACTE des types nommes de include/adc/elliptic :
+// Identite NUMERIQUE EXACTE des types nommes de include/pops/elliptic :
 // EllipticProblem et FieldPostProcess sont des descripteurs structurels qui
 // NOMMENT des valeurs et conventions deja codees, sans changer une seule
 // operation flottante. Le test prouve la bit-identite par operator== strict
@@ -13,23 +13,23 @@
 //       bit. Le cas GradSign::Minus egale -reference (convention two_fluid).
 //   (C) garde-fou eps : EllipticProblem{}.eps vaut exactement 1.
 
-#include <adc/numerics/elliptic/interface/elliptic_problem.hpp>
-#include <adc/numerics/elliptic/mg/geometric_mg.hpp>
-#include <adc/numerics/elliptic/poisson/poisson_operator.hpp>
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/layout/distribution_mapping.hpp>
-#include <adc/mesh/execution/for_each.hpp>
-#include <adc/mesh/geometry/geometry.hpp>
-#include <adc/mesh/storage/mf_arith.hpp>
-#include <adc/mesh/storage/multifab.hpp>
-#include <adc/mesh/boundary/physical_bc.hpp>
+#include <pops/numerics/elliptic/interface/elliptic_problem.hpp>
+#include <pops/numerics/elliptic/mg/geometric_mg.hpp>
+#include <pops/numerics/elliptic/poisson/poisson_operator.hpp>
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/layout/distribution_mapping.hpp>
+#include <pops/mesh/execution/for_each.hpp>
+#include <pops/mesh/geometry/geometry.hpp>
+#include <pops/mesh/storage/mf_arith.hpp>
+#include <pops/mesh/storage/multifab.hpp>
+#include <pops/mesh/boundary/physical_bc.hpp>
 
 #include <cmath>
 #include <cstdio>
 #include <stdexcept>
 #include <vector>
 
-using namespace adc;
+using namespace pops;
 static constexpr double kPi = 3.14159265358979323846;
 
 int main() {
@@ -89,7 +89,7 @@ int main() {
   auto solve_into = [&](auto& solver) {
     Array4 f = solver.rhs().fab(0).array();
     const Box2D v = solver.rhs().box(0);
-    for_each_cell(v, [=] ADC_HD(int i, int j) { f(i, j) = fr(i, j); });
+    for_each_cell(v, [=] POPS_HD(int i, int j) { f(i, j) = fr(i, j); });
     solver.phi().set_val(0.0);
     solver.solve();
   };
@@ -116,7 +116,7 @@ int main() {
   {
     Array4 p = phi.fab(0).array();
     const Box2D v = phi.box(0);
-    for_each_cell(v, [=] ADC_HD(int i, int j) { p(i, j) = fr(i, j); });
+    for_each_cell(v, [=] POPS_HD(int i, int j) { p(i, j) = fr(i, j); });
     fill_ghosts(phi, dom, bc);
   }
   const Real cx = Real(1) / (2 * geom.dx());
@@ -128,7 +128,7 @@ int main() {
     const ConstArray4 p = phi.fab(0).const_array();
     Array4 a = ref.fab(0).array();
     const Box2D v = ref.box(0);
-    for_each_cell(v, [=] ADC_HD(int i, int j) {
+    for_each_cell(v, [=] POPS_HD(int i, int j) {
       a(i, j, 0) = p(i, j);
       a(i, j, 1) = (p(i + 1, j) - p(i - 1, j)) * cx;
       a(i, j, 2) = (p(i, j + 1) - p(i, j - 1)) * cy;

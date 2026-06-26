@@ -1,7 +1,7 @@
 // Validation DEVICE (GH200, Kokkos Cuda) du peuplement de B_z PAR NIVEAU dans le chemin AMR (#53).
 // Le coupleur de systeme (AmrSystemCoupler::fill_bz) pose B_z(x,y) aux centres DE CHAQUE NIVEAU
 // (dx = dx_coarse / 2^k) sur la composante kAuxBaseComps du canal aux PARTAGE, puis le modele lit
-// a.B_z via load_aux<4> dans le noyau source AMR (for_each_cell ADC_HD -> device). On valide ICI
+// a.B_z via load_aux<4> dans le noyau source AMR (for_each_cell POPS_HD -> device). On valide ICI
 // ce CHEMIN DEVICE par le moteur header-only advance_amr, qui est exactement la primitive qui
 // consomme B_z sur le device a chaque niveau (le meme que celui qu'appelle le coupleur niveau par
 // niveau). NB : la facade AmrSystemCoupler ENTIERE est, elle, validee sous nvcc par le harness frere
@@ -14,16 +14,16 @@
 // fin -> u(t+dt) depend de B_z LU AU BON NIVEAU. Imprime exec=, B_z relu par niveau, et les valeurs
 // finales ; dump binaire de U(grossier+fin) -> diff_bin Cuda vs Serial (dmax sur chaque cellule).
 
-#include <adc/core/model/physical_model.hpp>
-#include <adc/core/state/state.hpp>
-#include <adc/mesh/index/box2d.hpp>
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/layout/distribution_mapping.hpp>
-#include <adc/mesh/execution/for_each.hpp>  // device_fence
-#include <adc/mesh/geometry/geometry.hpp>
-#include <adc/mesh/storage/multifab.hpp>
-#include <adc/numerics/time/amr/reflux/amr_reflux_mf.hpp>  // AmrLevelMP, advance_amr
-#include <adc/parallel/comm.hpp>
+#include <pops/core/model/physical_model.hpp>
+#include <pops/core/state/state.hpp>
+#include <pops/mesh/index/box2d.hpp>
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/layout/distribution_mapping.hpp>
+#include <pops/mesh/execution/for_each.hpp>  // device_fence
+#include <pops/mesh/geometry/geometry.hpp>
+#include <pops/mesh/storage/multifab.hpp>
+#include <pops/numerics/time/amr/reflux/amr_reflux_mf.hpp>  // AmrLevelMP, advance_amr
+#include <pops/parallel/comm.hpp>
 
 #include <cmath>
 #include <cstdint>
@@ -32,28 +32,28 @@
 #include <string>
 #include <vector>
 
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
 #include <Kokkos_Core.hpp>
 #endif
 
-using namespace adc;
+using namespace pops;
 static constexpr double kPi = 3.14159265358979323846;
 
 // Modele jouet pilote par B_z : flux nul, pas de couplage elliptique, source S = B_z * u.
 // Declare n_aux=4 -> lit a.B_z (dependant du niveau via fill_bz / le peuplement par niveau ici).
 struct BzGrow {
   using State = StateVec<1>;
-  using Aux = adc::Aux;
+  using Aux = pops::Aux;
   static constexpr int n_vars = 1;
   static constexpr int n_aux = 4;
-  ADC_HD State flux(const State&, const Aux&, int) const { return State{Real(0)}; }
-  ADC_HD Real max_wave_speed(const State&, const Aux&, int) const { return Real(0); }
-  ADC_HD State source(const State& u, const Aux& a) const {
+  POPS_HD State flux(const State&, const Aux&, int) const { return State{Real(0)}; }
+  POPS_HD Real max_wave_speed(const State&, const Aux&, int) const { return Real(0); }
+  POPS_HD State source(const State& u, const Aux& a) const {
     State s{};
     s[0] = a.B_z * u[0];
     return s;
   }
-  ADC_HD Real elliptic_rhs(const State&) const { return Real(0); }
+  POPS_HD Real elliptic_rhs(const State&) const { return Real(0); }
 };
 static_assert(PhysicalModel<BzGrow>);
 static_assert(aux_comps<BzGrow>() == 4, "BzGrow declare n_aux=4");
@@ -82,7 +82,7 @@ static void collect(const MultiFab& U, std::vector<double>& out) {
 }
 
 int main(int argc, char** argv) {
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   Kokkos::initialize(argc, argv);
 #else
   (void)argc;
@@ -100,7 +100,7 @@ int main(int argc, char** argv) {
       ++fails;
     }
   };
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   const char* space = Kokkos::DefaultExecutionSpace::name();
 #else
   const char* space = "Serial(host)";
@@ -189,7 +189,7 @@ int main(int argc, char** argv) {
 
   if (fails == 0)
     std::printf("OK gpu_amr_bz_validate (exec=%s)\n", space);
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   Kokkos::finalize();
 #endif
   return fails == 0 ? 0 : 1;

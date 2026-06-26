@@ -15,7 +15,7 @@ import math
 
 import numpy as np
 
-import adc
+import pops
 
 RMIN, RMAX, NR, NTH = 0.30, 1.00, 48, 48
 L_MODE = 4
@@ -45,12 +45,12 @@ def _mode_amplitude(sim, l):
 
 
 def test_polar_diocotron_mode_grows_and_conserves():
-    sim = adc.System(mesh=adc.PolarMesh(r_min=RMIN, r_max=RMAX, nr=NR, ntheta=NTH))
+    sim = pops.System(mesh=pops.PolarMesh(r_min=RMIN, r_max=RMAX, nr=NR, ntheta=NTH))
     sim.add_block(
         "ne",
-        model=adc.Model(state=adc.Scalar(), transport=adc.ExB(B0=1.0),
-                        source=adc.NoSource(), elliptic=adc.ChargeDensity(charge=1.0)),
-        spatial=adc.Spatial(weno5=True), time=adc.Explicit(method="ssprk3"))
+        model=pops.Model(state=pops.Scalar(), transport=pops.ExB(B0=1.0),
+                        source=pops.NoSource(), elliptic=pops.ChargeDensity(charge=1.0)),
+        spatial=pops.Spatial(weno5=True), time=pops.Explicit(method="ssprk3"))
     sim.set_poisson(rhs="charge_density", solver="polar", bc="dirichlet")
     sim.set_density("ne", _hollow_ring_density())
 

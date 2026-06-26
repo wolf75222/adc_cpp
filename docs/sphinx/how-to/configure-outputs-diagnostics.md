@@ -1,7 +1,7 @@
 # Configure outputs and diagnostics
 
 This guide shows how to read the fields and diagnostics a run produces from an
-`adc.System` (or `adc.AmrSystem`), and how to write them to disk. The facade returns its
+`pops.System` (or `pops.AmrSystem`), and how to write them to disk. The facade returns its
 state as numpy arrays that you read and save from Python, and it also provides `sim.write(...)`
 and `sim.checkpoint(...)` to write files directly. This assumes you already
 have a composed and initialized system. To build one, see
@@ -88,7 +88,7 @@ writes its own boxes as hyperslabs into one file, which needs `h5py` built with 
 writes it; true parallelism only appears for multi-box runs.
 
 For which `format` / `parallel` combinations a backend supports, read
-`adc.capabilities()["io"]` rather than a static table here.
+`pops.capabilities()["io"]` rather than a static table here.
 
 Write a restartable checkpoint with `sim.checkpoint(path, parallel=False)`. It saves the full
 conservative state of every block plus the clock; reload it with `sim.restart(path)` after you
@@ -100,7 +100,7 @@ sim.checkpoint("out/run.ckpt")
 sim.restart("out/run.ckpt.npz")
 ```
 
-`adc.AmrSystem` exposes the same surface with slightly different signatures: `write(path,
+`pops.AmrSystem` exposes the same surface with slightly different signatures: `write(path,
 format="npz", step=None)` (npz default; writes coarse per-block fields plus fine-patch
 footprints) and `checkpoint(path)` (single-block, single-rank restartable npz).
 

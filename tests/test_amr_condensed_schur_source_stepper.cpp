@@ -1,5 +1,5 @@
 // ETAGE SOURCE condense par Schur sur HIERARCHIE AMR (AmrCondensedSchurSourceStepper) : test de PARITE
-// mono-niveau. Cf. include/adc/coupling/amr_condensed_schur_source_stepper.hpp.
+// mono-niveau. Cf. include/pops/coupling/amr_condensed_schur_source_stepper.hpp.
 //
 // On valide que l'etage source condense AMR, applique a une hierarchie MONO-NIVEAU (un seul niveau
 // couvrant tout le domaine, AUCUN patch fin), est STRICTEMENT identique a l'etage source condense
@@ -27,22 +27,22 @@
 // Serie (Kokkos OFF) : n_ranks() == 1. L'etage uniforme est par ailleurs deja rejoue MPI np=1/2/4 par
 // son propre test ; la parite mono-niveau est une propriete de composition, independante du rang.
 
-#include <adc/coupling/schur/amr/amr_condensed_schur_source_stepper.hpp>
-#include <adc/coupling/schur/source/condensed_schur_source_stepper.hpp>
+#include <pops/coupling/schur/amr/amr_condensed_schur_source_stepper.hpp>
+#include <pops/coupling/schur/source/condensed_schur_source_stepper.hpp>
 
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/layout/distribution_mapping.hpp>
-#include <adc/mesh/execution/for_each.hpp>
-#include <adc/mesh/geometry/geometry.hpp>
-#include <adc/mesh/storage/multifab.hpp>
-#include <adc/mesh/boundary/physical_bc.hpp>
-#include <adc/parallel/comm.hpp>
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/layout/distribution_mapping.hpp>
+#include <pops/mesh/execution/for_each.hpp>
+#include <pops/mesh/geometry/geometry.hpp>
+#include <pops/mesh/storage/multifab.hpp>
+#include <pops/mesh/boundary/physical_bc.hpp>
+#include <pops/parallel/comm.hpp>
 
 #include <cmath>
 #include <cstdio>
 #include <vector>
 
-using namespace adc;
+using namespace pops;
 static constexpr double kPi = 3.14159265358979323846;
 
 // VariableSet d'un fluide minimal : rho, mx, my (+ energie optionnelle si with_E).
@@ -83,7 +83,7 @@ struct InitKernel {
   Array4 st, phi;
   Real rho0;
   int c_rho, c_mx, c_my, c_E;  // c_E < 0 si pas d'energie
-  ADC_HD void operator()(int i, int j) const {
+  POPS_HD void operator()(int i, int j) const {
     const Real x = geom.x_cell(i), y = geom.y_cell(j);
     const Real sx = std::sin(Real(kPi) * x), sy = std::sin(Real(kPi) * y);
     const Real vx = Real(0.6) * sx * sy;
@@ -101,7 +101,7 @@ struct InitKernel {
 struct ConstBzKernel {
   Array4 bz;
   Real B0;
-  ADC_HD void operator()(int i, int j) const { bz(i, j, 0) = B0; }
+  POPS_HD void operator()(int i, int j) const { bz(i, j, 0) = B0; }
 };
 
 // Vitesse LOCALISEE : bump gaussien centre en (xc, yc), de largeur sigma -> v non nulle SEULEMENT autour
@@ -111,7 +111,7 @@ struct LocalizedInitKernel {
   Array4 st;
   Real rho0, xc, yc, sigma;
   int c_rho, c_mx, c_my, c_E;
-  ADC_HD void operator()(int i, int j) const {
+  POPS_HD void operator()(int i, int j) const {
     const Real x = geom.x_cell(i), y = geom.y_cell(j);
     const Real dx = x - xc, dy = y - yc;
     const Real bump = std::exp(-(dx * dx + dy * dy) / (Real(2) * sigma * sigma));

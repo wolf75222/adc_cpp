@@ -1,6 +1,6 @@
 # ThreadSanitizer suppressions -- adc_cpp quality `tsan` job (.github/workflows/quality.yml, ADC-165).
 #
-# A suppression HIDES a diagnostic, so each entry below is justified -- and a race inside include/adc/
+# A suppression HIDES a diagnostic, so each entry below is justified -- and a race inside include/pops/
 # must NEVER be added here (that would be a real bug to fix, not to mask). Kokkos and the LLVM OpenMP
 # runtime (libomp) are LINKED but built WITHOUT -fsanitize=thread: TSan cannot see their internal
 # synchronization (lock-free thread pools, atomics, OMPT-less barriers) and reports benign races

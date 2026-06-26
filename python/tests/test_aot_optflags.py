@@ -1,11 +1,11 @@
 """Optimization flags of the AOT backend (compile_aot): the AOT .so runs the SAME production path
-as native, so it must be compiled with the SAME flags ($ADC_DSL_OPTFLAGS, default -O3 -DNDEBUG)
+as native, so it must be compiled with the SAME flags ($POPS_DSL_OPTFLAGS, default -O3 -DNDEBUG)
 and not a hardcoded -O2 (at -O2 without -DNDEBUG the marshaled kernel is ~1.48x).
 
 Three parts:
 (a) COMMAND LINE (hermetic, no compiler nor Kokkos required): we intercept the compile command of
     compile_aot and check it carries the expected flags -- default -O3 -DNDEBUG, and a custom
-    $ADC_DSL_OPTFLAGS honored (tracer define).
+    $POPS_DSL_OPTFLAGS honored (tracer define).
 (b) CACHE KEY (hermetic): the flags enter the key (a stale -O2 .so is not served), and the key of
     the native/jit backends stays UNCHANGED (no collateral invalidation).
 (c) NUMERIC PARITY (auto-skip without compiler / Kokkos): the same model compiled via aot and via
@@ -21,8 +21,8 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(__file__))
 
-import adc  # noqa: E402  (the .so paths require the native module, like the neighboring AOT tests)
-from adc import dsl  # noqa: E402
+import pops  # noqa: E402  (the .so paths require the native module, like the neighboring AOT tests)
+from pops import dsl  # noqa: E402
 from test_dsl_phase_a import INCLUDE, build_euler, initial_state  # noqa: E402
 
 
@@ -38,14 +38,14 @@ def _capture_compile_aot_cmd(optflags_env):
 
     We neutralize the toolchain probes (Kokkos / std / compiler) and replace _run_compile with a
     capture: the test stays valid even without a compiler or Kokkos installed."""
-    saved_env = os.environ.get("ADC_DSL_OPTFLAGS")
+    saved_env = os.environ.get("POPS_DSL_OPTFLAGS")
     saved = {nm: getattr(dsl, nm) for nm in (
         "_run_compile", "_native_kokkos_root", "_native_kokkos_compiler",
         "_native_kokkos_flags", "_probe_cxx_std")}
     if optflags_env is None:
-        os.environ.pop("ADC_DSL_OPTFLAGS", None)
+        os.environ.pop("POPS_DSL_OPTFLAGS", None)
     else:
-        os.environ["ADC_DSL_OPTFLAGS"] = optflags_env
+        os.environ["POPS_DSL_OPTFLAGS"] = optflags_env
     try:
         def _grab(cmd, what):
             raise _Captured(cmd)
@@ -65,13 +65,13 @@ def _capture_compile_aot_cmd(optflags_env):
         for nm, fn in saved.items():
             setattr(dsl, nm, fn)
         if saved_env is None:
-            os.environ.pop("ADC_DSL_OPTFLAGS", None)
+            os.environ.pop("POPS_DSL_OPTFLAGS", None)
         else:
-            os.environ["ADC_DSL_OPTFLAGS"] = saved_env
+            os.environ["POPS_DSL_OPTFLAGS"] = saved_env
 
 
 def check_default_flags():
-    """Without $ADC_DSL_OPTFLAGS, compile_aot must build at -O3 -DNDEBUG (native parity), never hardcoded -O2."""
+    """Without $POPS_DSL_OPTFLAGS, compile_aot must build at -O3 -DNDEBUG (native parity), never hardcoded -O2."""
     cmd = _capture_compile_aot_cmd(None)
     assert "-O3" in cmd, "compile_aot default: -O3 missing (got %r)" % (cmd,)
     assert "-DNDEBUG" in cmd, "compile_aot default: -DNDEBUG missing (got %r)" % (cmd,)
@@ -80,13 +80,13 @@ def check_default_flags():
 
 
 def check_env_override_honored():
-    """$ADC_DSL_OPTFLAGS must be honored by compile_aot (same variable as the native path)."""
+    """$POPS_DSL_OPTFLAGS must be honored by compile_aot (same variable as the native path)."""
     cmd = _capture_compile_aot_cmd("-O2 -DADC_TEST_FLAG")
-    assert "-O2" in cmd, "ADC_DSL_OPTFLAGS=-O2 ... not honored (got %r)" % (cmd,)
-    assert "-DADC_TEST_FLAG" in cmd, "ADC_DSL_OPTFLAGS tracer define not forwarded (got %r)" % (cmd,)
+    assert "-O2" in cmd, "POPS_DSL_OPTFLAGS=-O2 ... not honored (got %r)" % (cmd,)
+    assert "-DADC_TEST_FLAG" in cmd, "POPS_DSL_OPTFLAGS tracer define not forwarded (got %r)" % (cmd,)
     assert "-O3" not in cmd and "-DNDEBUG" not in cmd, \
         "the default -O3 -DNDEBUG leaks despite the override (got %r)" % (cmd,)
-    print("OK  compile_aot honors $ADC_DSL_OPTFLAGS (-O2 -DADC_TEST_FLAG, tracer define forwarded)")
+    print("OK  compile_aot honors $POPS_DSL_OPTFLAGS (-O2 -DADC_TEST_FLAG, tracer define forwarded)")
 
 
 def _old_cache_path(model_hash, abi_key, backend, target, name):
@@ -94,24 +94,24 @@ def _old_cache_path(model_hash, abi_key, backend, target, name):
     rest = "|".join((abi_key or "", backend or "", target or "", name or "",
                      dsl._platform_cache_key())).encode()
     tag = hashlib.sha256(rest).hexdigest()[:16]
-    return os.path.join(dsl.adc_cache_dir(), "%s-%s.so" % ((model_hash or "nohash")[:16], tag))
+    return os.path.join(dsl.pops_cache_dir(), "%s-%s.so" % ((model_hash or "nohash")[:16], tag))
 
 
 def check_cache_key():
     """The flags enter the cache key of the aot artifact (a stale -O2 is not served); native/jit
     keep an unchanged name (no collateral invalidation)."""
-    saved_env = os.environ.get("ADC_DSL_OPTFLAGS")
+    saved_env = os.environ.get("POPS_DSL_OPTFLAGS")
     aot_be = "aot;kokkos=on;kcfg=deadbeef"
     prod_be = "production;kokkos=on;kcfg=deadbeef"
     try:
         # (1) the optflags change the aot .so name -> a binary built with other flags is distinct
-        os.environ.pop("ADC_DSL_OPTFLAGS", None)
+        os.environ.pop("POPS_DSL_OPTFLAGS", None)
         p_o3 = dsl._cache_so_path("mh", "abi", aot_be, "system", None)
-        os.environ["ADC_DSL_OPTFLAGS"] = "-O2"
+        os.environ["POPS_DSL_OPTFLAGS"] = "-O2"
         p_o2 = dsl._cache_so_path("mh", "abi", aot_be, "system", None)
         assert p_o3 != p_o2, "aot cache key insensitive to optflags (%s == %s)" % (p_o3, p_o2)
         # (2) an aot .so built before aligning the flags (5-component key) no longer collides
-        os.environ.pop("ADC_DSL_OPTFLAGS", None)
+        os.environ.pop("POPS_DSL_OPTFLAGS", None)
         assert dsl._cache_so_path("mh", "abi", aot_be, "system", None) \
             != _old_cache_path("mh", "abi", aot_be, "system", None), \
             "the pre-fix -O2 aot .so would still be served (key not invalidated)"
@@ -121,17 +121,17 @@ def check_cache_key():
             "the native backend key changed (collateral invalidation)"
     finally:
         if saved_env is None:
-            os.environ.pop("ADC_DSL_OPTFLAGS", None)
+            os.environ.pop("POPS_DSL_OPTFLAGS", None)
         else:
-            os.environ["ADC_DSL_OPTFLAGS"] = saved_env
+            os.environ["POPS_DSL_OPTFLAGS"] = saved_env
     print("OK  cache key: optflags folded into the aot .so, stale -O2 set apart, native unchanged")
 
 
 def _is_local_env_limitation(err):
     """True if the failure stems from the local ENVIRONMENT, not from a code regression:
-    - AOT .so not loadable (Kokkos symbol absent from the flat namespace: serial _adc / macOS two-level);
-    - worktree headers != build of the _adc module (header signature: _adc built elsewhere).
-    Neither case happens in CI (same headers as _adc, Kokkos runtime loaded). We do NOT mask a
+    - AOT .so not loadable (Kokkos symbol absent from the flat namespace: serial _pops / macOS two-level);
+    - worktree headers != build of the _pops module (header signature: _pops built elsewhere).
+    Neither case happens in CI (same headers as _pops, Kokkos runtime loaded). We do NOT mask a
     compilation failure ('the compilation of the .so ... failed') nor a parity gap (AssertionError)."""
     msg = str(err)
     if "dlopen" in msg and "Kokkos" in msg:
@@ -162,8 +162,8 @@ def check_numeric_parity():
             cm_prod = build_euler("euler_optflags_production").compile(
                 os.path.join(tmp, "m_prod.so"), INCLUDE, backend="production")
             for backend, cm in (("aot", cm_aot), ("production", cm_prod)):
-                s = adc.System(n=n, periodic=True)
-                s.add_equation("gas", cm, spatial=adc.FiniteVolume(limiter="minmod", riemann="hllc",
+                s = pops.System(n=n, periodic=True)
+                s.add_equation("gas", cm, spatial=pops.FiniteVolume(limiter="minmod", riemann="hllc",
                                                                    variables="primitive"))
                 s.set_poisson(rhs="charge_density", solver="geometric_mg")
                 s.set_state("gas", initial_state(n))

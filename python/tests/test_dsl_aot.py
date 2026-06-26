@@ -13,7 +13,7 @@ import tempfile
 
 import numpy as np
 
-import adc
+import pops
 from test_dsl_coupled import build_euler_poisson, GAMMA, INCLUDE
 
 
@@ -37,15 +37,15 @@ def main():
         U[3] = 1.0 / (GAMMA - 1.0)
         Uflat = U.reshape(-1).tolist()
 
-        spec = adc.Model(state=adc.FluidState("compressible", gamma=GAMMA),
-                         transport=adc.CompressibleFlux(),
-                         source=adc.GravityForce(),
-                         elliptic=adc.GravityCoupling(sign=-1.0, four_pi_G=1.0, rho0=1.0))
+        spec = pops.Model(state=pops.FluidState("compressible", gamma=GAMMA),
+                         transport=pops.CompressibleFlux(),
+                         source=pops.GravityForce(),
+                         elliptic=pops.GravityCoupling(sign=-1.0, four_pi_G=1.0, rho0=1.0))
 
         # Pour chaque schema (rusanov, puis HLLC qui exige pressure() + wave_speeds() generes), le
         # bloc AOT doit etre IDENTIQUE au bloc NATIF add_block (memes briques, meme assemble_rhs).
         def compare(limiter, riemann, recon):
-            aot = adc.System(n=n, L=L, periodic=True)
+            aot = pops.System(n=n, L=L, periodic=True)
             aot.add_compiled_block("gas", so, limiter=limiter, riemann=riemann, recon=recon,
                                    time="explicit", names=["rho", "rho_u", "rho_v", "E"])
             aot.set_poisson(rhs="charge_density", solver="geometric_mg")
@@ -54,11 +54,11 @@ def main():
             R_aot = np.array(aot.eval_rhs("gas")).reshape(4, n, n)
             phi_aot = np.array(aot.potential()).reshape(n, n)
 
-            nat = adc.System(n=n, L=L, periodic=True)
+            nat = pops.System(n=n, L=L, periodic=True)
             lim = {"none": dict(none=True), "minmod": dict(minmod=True),
                    "vanleer": dict(vanleer=True)}[limiter]
-            nat.add_block("gas", spec, spatial=adc.Spatial(flux=riemann, recon=recon, **lim),
-                          time=adc.Explicit())
+            nat.add_block("gas", spec, spatial=pops.Spatial(flux=riemann, recon=recon, **lim),
+                          time=pops.Explicit())
             nat.set_poisson(rhs="charge_density", solver="geometric_mg")
             nat.set_state("gas", Uflat)
             nat.solve_fields()
@@ -77,7 +77,7 @@ def main():
         compare("minmod", "hllc", "primitive")  # flux de production : pressure()/wave_speeds() generes
 
         # (C) avance de production (SSPRK2 + HLLC) : tourne, masse conservee, dynamique non triviale
-        aot = adc.System(n=n, L=L, periodic=True)
+        aot = pops.System(n=n, L=L, periodic=True)
         aot.add_compiled_block("gas", so, limiter="minmod", riemann="hllc", recon="primitive",
                                names=["rho", "rho_u", "rho_v", "E"])
         aot.set_poisson(rhs="charge_density", solver="geometric_mg")

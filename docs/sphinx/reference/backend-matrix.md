@@ -40,7 +40,7 @@ Python) with the backends above. The legend distinguishes in particular:
 
 ## Highlights
 
-- The Python tests only exercise Kokkos Serial: the `_adc` module is built in CI in
+- The Python tests only exercise Kokkos Serial: the `_pops` module is built in CI in
   Kokkos Serial, without MPI or Cuda. No Python test covers MPI or Cuda.
 - The FFT Poisson path runs under MPI via a box-slab remap (`RemappedFFTSolver`, ADC-287): periodic,
   constant coefficient, `Ny` divisible by `n_ranks()`; a test checks parity with `geometric_mg`. The

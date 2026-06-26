@@ -18,7 +18,7 @@
 *                       @wolf75222
 
 # C++23 core: mesh, AMR, numerics, elliptic, coupling, runtime, physics, validation.
-/include/adc/           @wolf75222
+/include/pops/           @wolf75222
 
 # Python bindings, the DSL surface and the Python tests.
 /python/                @wolf75222

@@ -8,13 +8,13 @@ model, the validation status of each configuration and the coverage matrix, see 
 
 MPI distributes subdomains across ranks through the `comm.hpp` seam; the local compute
 stays on the Kokkos Serial execution space, one process per rank. Enable it with the
-`ADC_USE_MPI` CMake option.
+`POPS_USE_MPI` CMake option.
 
 ## Build with MPI
 
 This uses the same Kokkos Serial install as the reference build, plus the MPI seam.
 
-1. Configure the build with both `ADC_USE_KOKKOS` and `ADC_USE_MPI` turned on.
+1. Configure the build with both `POPS_USE_KOKKOS` and `POPS_USE_MPI` turned on.
    Replace `KOKKOS_PREFIX` with the path to your Kokkos Serial install.
 
    ```bash
@@ -60,8 +60,8 @@ OMP_NUM_THREADS=4 OMPI_MCA_rmaps_base_oversubscribe=true ctest --test-dir build-
 
 ## Multi-rank from Python
 
-The `adc` Python module is MPI-aware when `_adc` is built with `ADC_USE_MPI=ON`
-(the `mpi` CMake preset, which writes to `build-mpi` and relies on `ADC_USE_KOKKOS`
+The `adc` Python module is MPI-aware when `_pops` is built with `POPS_USE_MPI=ON`
+(the `mpi` CMake preset, which writes to `build-mpi` and relies on `POPS_USE_KOKKOS`
 defaulting to ON). Run a script across ranks the same way as a C++ binary, by
 launching the interpreter under `mpirun`.
 
@@ -70,7 +70,7 @@ cmake --preset mpi && cmake --build --preset mpi   # or the ad-hoc cmake above, 
 mpirun -np 4 python your_script.py
 ```
 
-`adc.my_rank()` and `adc.n_ranks()` report the rank and the rank count. The global
+`pops.my_rank()` and `pops.n_ranks()` report the rank and the rank count. The global
 accessors (`sim.state_global(name)`, `sim.density_global(name)`,
 `sim.potential_global()`) and `sim.write(...)` are collective: they `all_reduce`/gather
 across ranks, so **every** rank must call them or the run deadlocks. `sim.write` gathers
@@ -79,17 +79,17 @@ mono-box); the other ranks return the path without I/O.
 
 ```python
 import numpy as np
-import adc
+import pops
 
 # Built and stepped identically on every rank.
-sim = adc.System(n=96, L=1.0, periodic=True)
+sim = pops.System(n=96, L=1.0, periodic=True)
 sim.add_block(
     "ne",
-    model=adc.Model(
-        state=adc.Scalar(),
-        transport=adc.ExB(B0=1.0),
-        source=adc.NoSource(),
-        elliptic=adc.BackgroundDensity(alpha=1.0, n0=1.0),
+    model=pops.Model(
+        state=pops.Scalar(),
+        transport=pops.ExB(B0=1.0),
+        source=pops.NoSource(),
+        elliptic=pops.BackgroundDensity(alpha=1.0, n0=1.0),
     ),
 )
 sim.set_poisson(rhs="charge_density", solver="geometric_mg")
@@ -100,8 +100,8 @@ for _ in range(20):
 
 # Collective: every rank calls it; rank 0 writes the single .vti file.
 sim.write("out/state", format="vtk")
-if adc.my_rank() == 0:
-    print("ranks =", adc.n_ranks(), "t =", sim.time())
+if pops.my_rank() == 0:
+    print("ranks =", pops.n_ranks(), "t =", sim.time())
 ```
 
 For an advanced multi-box output, `sim.write(format="hdf5", parallel=True)` writes
@@ -117,7 +117,7 @@ Open the `.vti` output in ParaView following
 
 - To run multi-GPU on ROMEO, see the [parallel backends page](../backends/index.md).
 - A multi-thread (Kokkos OpenMP) Python module is available via the `python-parallel`
-  CMake preset, with the thread count set by `adc.set_threads(n)` right after `import adc`;
+  CMake preset, with the thread count set by `pops.set_threads(n)` right after `import adc`;
   there is no nvcc/CUDA Python module (GPU is C++-only). See the
   [installation page](../getting-started/installation.md).
 - The multi-rank Python API above is real and works under `mpirun`. What is missing is

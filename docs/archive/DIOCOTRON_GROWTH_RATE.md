@@ -17,7 +17,7 @@ radius > 1, erratic depending on the circle alignment). The warm start propagate
 divergence -> `phi` then the field went to `nan`. It was NEITHER the time step (already capped), NOR the
 density floor (the density stays bounded; only `phi` blows up, at the WALL RADIUS r=0.398).
 
-Fix: `GeometricMG::solve_robust` (`include/adc/elliptic/geometric_mg.hpp`). Phase 1 = the
+Fix: `GeometricMG::solve_robust` (`include/pops/elliptic/geometric_mg.hpp`). Phase 1 = the
 standard V-cycle (BIT-IDENTICAL when it converges or stalls); ONLY in case of true divergence
 (final residual > initial residual): STICKY hardening of the GS smoothing + cold restart until
 it becomes contractant again. Result: stable up to eff 1024 (uniform AND AMR `ml`), mass `~1e-14`,

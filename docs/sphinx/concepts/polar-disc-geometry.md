@@ -18,7 +18,7 @@ the boundary against the production features (MPI, AMR, fluid models) you can ke
 
 ## The Cartesian box with an embedded wall
 
-The default path is a square `adc.System`. The disc is not the mesh; it is a circular
+The default path is a square `pops.System`. The disc is not the mesh; it is a circular
 Poisson wall embedded inside the square. The transport runs on the full Cartesian
 grid, and the elliptic solve imposes the potential boundary condition on a circle cut
 through that grid.
@@ -35,7 +35,7 @@ diffuses that edge, and the diffusion grows as the ring sits closer to the wall.
 
 ## The native polar grid
 
-The alternative is a native polar mesh, `adc.PolarMesh`, a global ring in `(r, theta)`.
+The alternative is a native polar mesh, `pops.PolarMesh`, a global ring in `(r, theta)`.
 Here the circle *is* the grid: the radial and angular directions are the coordinate
 axes, so the boundary is exact and the ring edge is resolved cleanly. The transport, the
 polar Poisson solve, and the auxiliary fields all work in the local `e_r` / `e_theta`

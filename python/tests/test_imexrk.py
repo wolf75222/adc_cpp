@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Famille IMEX-RK, schema ARS(2,2,2) sur System cartesien (Linear ADC-69).
 
-adc.IMEXRK(scheme="ars222") cable le schema d'Ascher-Ruuth-Spiteri (1997) : transport explicite
+pops.IMEXRK(scheme="ars222") cable le schema d'Ascher-Ruuth-Spiteri (1997) : transport explicite
 (L = -div F) couple a la source raide implicite (backward-Euler local par cellule), ORDRE 2. C'est
-une famille DISTINCTE de adc.IMEX (backward-Euler local, ordre 1, INCHANGE).
+une famille DISTINCTE de pops.IMEX (backward-Euler local, ordre 1, INCHANGE).
 
 PROBLEME TEMOIN -- gyration cyclotron pure. Sur un etat UNIFORME (rho, m_x, m_y) + B_z uniforme, le
 flux isotherme a divergence NULLE (L == 0) et la dynamique se reduit a l'ODE de rotation
@@ -17,7 +17,7 @@ Verifie :
       (ordre 1) -- le test discriminant ;
   (b) STABILITE RAIDE : omega*dt = 50, etat fini et NON amplifie (pas d'explosion ; un explicite
       donnerait |1 + i*omega*dt|^k -> infini) ;
-  (c) DEFAUT INCHANGE / FAMILLE DISTINCTE : adc.IMEX.kind == "imex" != adc.IMEXRK.kind ==
+  (c) DEFAUT INCHANGE / FAMILLE DISTINCTE : pops.IMEX.kind == "imex" != pops.IMEXRK.kind ==
       "imexrk_ars222" ; sur le meme probleme les deux schemas DIVERGENT (chemins C++ distincts,
       pas un alias) ;
   (d) REJETS EXPLICITES : AMR, polaire et splitting Strang refusent IMEXRK (perimetre = System
@@ -30,7 +30,7 @@ import sys
 
 import numpy as np
 
-import adc
+import pops
 
 fails = 0
 
@@ -45,15 +45,15 @@ def chk(cond, label):
 def cyclotron_model(q):
     """Fluide isotherme + force magnetique q*(v x B). elliptic charge=0 -> Poisson trivial (phi=0),
     aucune force electrique : la dynamique d'un etat uniforme est la pure gyration cyclotron."""
-    return adc.Model(state=adc.FluidState("isothermal", cs2=0.5),
-                     transport=adc.IsothermalFlux(),
-                     source=adc.MagneticLorentzForce(charge=q),
-                     elliptic=adc.ChargeDensity(charge=0.0))
+    return pops.Model(state=pops.FluidState("isothermal", cs2=0.5),
+                     transport=pops.IsothermalFlux(),
+                     source=pops.MagneticLorentzForce(charge=q),
+                     elliptic=pops.ChargeDensity(charge=0.0))
 
 
 def build(time_policy, q, B0, rho0=1.0, u0=1.0, v0=0.0, n=8):
-    sim = adc.System(n=n, L=1.0, periodic=True)
-    sim.add_block("e", cyclotron_model(q), spatial=adc.FiniteVolume(limiter="minmod"),
+    sim = pops.System(n=n, L=1.0, periodic=True)
+    sim.add_block("e", cyclotron_model(q), spatial=pops.FiniteVolume(limiter="minmod"),
                   time=time_policy)
     sim.set_poisson(rhs="charge_density", solver="geometric_mg", bc="periodic")
     sim.set_magnetic_field(B0 * np.ones(n * n))
@@ -86,8 +86,8 @@ def err_ratio(make_policy):
     return e1, e2, (e1 / e2 if e2 > 0 else float("inf"))
 
 
-e1_rk, e2_rk, r_rk = err_ratio(lambda: adc.IMEXRK())
-e1_be, e2_be, r_be = err_ratio(lambda: adc.IMEX())
+e1_rk, e2_rk, r_rk = err_ratio(lambda: pops.IMEXRK())
+e1_be, e2_be, r_be = err_ratio(lambda: pops.IMEX())
 chk(3.2 <= r_rk <= 4.8, f"IMEXRK ARS(2,2,2) : ratio d'erreur ~4 (ordre 2) -> {r_rk:.2f}")
 chk(1.6 <= r_be <= 2.5, f"IMEX backward-Euler : ratio d'erreur ~2 (ordre 1) -> {r_be:.2f}")
 chk(r_rk > r_be + 1.0, f"IMEXRK converge plus vite que IMEX ({r_rk:.2f} > {r_be:.2f})")
@@ -98,21 +98,21 @@ print("== (b) stabilite raide : omega*dt = 50, etat fini, pas d'explosion ==")
 Q2, B2 = 1.0, 50.0  # omega = 50
 DT2 = 1.0           # omega*dt = 50
 mag0 = 1.0          # |m0| = sqrt(u0^2 + v0^2) = 1 (rho0 = 1)
-m_stiff = momentum_after(adc.IMEXRK(), Q2, B2, DT2, 10)
+m_stiff = momentum_after(pops.IMEXRK(), Q2, B2, DT2, 10)
 mag = float(np.linalg.norm(m_stiff))
 chk(np.all(np.isfinite(m_stiff)), f"IMEXRK raide : etat fini apres 10 pas (m = {m_stiff})")
 chk(mag <= mag0 + 1e-6, f"IMEXRK raide : |m| non amplifie (A-stable) -> {mag:.3e} <= {mag0}")
 
 # --- (c) DEFAUT INCHANGE / FAMILLE DISTINCTE --------------------------------------------
 print("== (c) defaut IMEX inchange + famille IMEXRK distincte ==")
-chk(adc.IMEX().kind == "imex", "adc.IMEX.kind == 'imex' (backward-Euler local, defaut)")
-chk(adc.IMEXRK().kind == "imexrk_ars222", "adc.IMEXRK.kind == 'imexrk_ars222' (famille distincte)")
-chk(adc.IMEX().kind != adc.IMEXRK().kind, "kinds distincts -> chemins C++ distincts (pas un alias)")
-chk(adc.IMEXRK().scheme == "ars222", "adc.IMEXRK.scheme == 'ars222'")
+chk(pops.IMEX().kind == "imex", "pops.IMEX.kind == 'imex' (backward-Euler local, defaut)")
+chk(pops.IMEXRK().kind == "imexrk_ars222", "pops.IMEXRK.kind == 'imexrk_ars222' (famille distincte)")
+chk(pops.IMEX().kind != pops.IMEXRK().kind, "kinds distincts -> chemins C++ distincts (pas un alias)")
+chk(pops.IMEXRK().scheme == "ars222", "pops.IMEXRK.scheme == 'ars222'")
 # Sur le MEME probleme, IMEX (ordre 1) et IMEXRK (ordre 2) donnent des etats DIFFERENTS : preuve
 # qu'IMEXRK n'emprunte PAS le chemin d'IMEX (sinon etats identiques).
-m_be = momentum_after(adc.IMEX(), Q, B, T / 10, 10)
-m_rk = momentum_after(adc.IMEXRK(), Q, B, T / 10, 10)
+m_be = momentum_after(pops.IMEX(), Q, B, T / 10, 10)
+m_rk = momentum_after(pops.IMEXRK(), Q, B, T / 10, 10)
 chk(float(np.linalg.norm(m_be - m_rk)) > 1e-4,
     f"IMEX != IMEXRK sur le meme pas (ecart {float(np.linalg.norm(m_be - m_rk)):.2e})")
 
@@ -120,40 +120,40 @@ chk(float(np.linalg.norm(m_be - m_rk)) > 1e-4,
 print("== (d) rejets explicites : AMR / polaire / Strang / masque partiel ==")
 
 # (d1) AMR
-amr = adc.AmrSystem(n=16, L=1.0, periodic=True, regrid_every=0)
+amr = pops.AmrSystem(n=16, L=1.0, periodic=True, regrid_every=0)
 try:
-    amr.add_block("e", cyclotron_model(1.0), spatial=adc.FiniteVolume(limiter="minmod"),
-                  time=adc.IMEXRK())
+    amr.add_block("e", cyclotron_model(1.0), spatial=pops.FiniteVolume(limiter="minmod"),
+                  time=pops.IMEXRK())
     chk(False, "AMR + IMEXRK aurait du lever")
 except (RuntimeError, ValueError, TypeError) as e:
     chk("imexrk" in str(e).lower() or "imex-rk" in str(e).lower(), f"AMR rejet explicite : {e}")
 
 # (d2) polaire (anneau) : la source raide implicite n'y est pas cablee
-simp = adc.System(mesh=adc.PolarMesh(r_min=0.2, r_max=1.0, nr=16, ntheta=16))
+simp = pops.System(mesh=pops.PolarMesh(r_min=0.2, r_max=1.0, nr=16, ntheta=16))
 try:
     simp.add_block("e",
-                   adc.Model(state=adc.Scalar(), transport=adc.ExB(B0=1.0),
-                             source=adc.NoSource(), elliptic=adc.BackgroundDensity()),
-                   spatial=adc.FiniteVolume(), time=adc.IMEXRK())
+                   pops.Model(state=pops.Scalar(), transport=pops.ExB(B0=1.0),
+                             source=pops.NoSource(), elliptic=pops.BackgroundDensity()),
+                   spatial=pops.FiniteVolume(), time=pops.IMEXRK())
     chk(False, "polaire + IMEXRK aurait du lever")
 except (RuntimeError, ValueError, TypeError) as e:
     chk("imex" in str(e).lower(), f"polaire rejet explicite : {e}")
 
-# (d3) Strang / Schur : l'etage hyperbolique doit etre un adc.Explicit (pas IMEXRK)
+# (d3) Strang / Schur : l'etage hyperbolique doit etre un pops.Explicit (pas IMEXRK)
 try:
-    adc.Strang(hyperbolic=adc.IMEXRK(),
-               source=adc.CondensedSchur(kind="electrostatic_lorentz", theta=0.5, alpha=1.0))
+    pops.Strang(hyperbolic=pops.IMEXRK(),
+               source=pops.CondensedSchur(kind="electrostatic_lorentz", theta=0.5, alpha=1.0))
     chk(False, "Strang(hyperbolic=IMEXRK) aurait du lever")
 except TypeError as e:
     chk("Explicit" in str(e), f"Strang rejet (hyperbolique doit etre Explicit) : {e}")
 
 # (d4) masque IMEX partiel : la source IMEXRK est pleinement implicite -> rejet a l'ajout du bloc
-sim_mask = adc.System(n=8, L=1.0, periodic=True)
+sim_mask = pops.System(n=8, L=1.0, periodic=True)
 try:
-    # adc.IMEXRK n'expose pas implicit_vars ; on force l'attribut pour exercer la garde C++.
-    pol = adc.IMEXRK()
+    # pops.IMEXRK n'expose pas implicit_vars ; on force l'attribut pour exercer la garde C++.
+    pol = pops.IMEXRK()
     pol.implicit_vars = ["rho_u"]
-    sim_mask.add_block("e", cyclotron_model(1.0), spatial=adc.FiniteVolume(limiter="minmod"),
+    sim_mask.add_block("e", cyclotron_model(1.0), spatial=pops.FiniteVolume(limiter="minmod"),
                        time=pol)
     chk(False, "IMEXRK + implicit_vars aurait du lever")
 except (RuntimeError, ValueError) as e:

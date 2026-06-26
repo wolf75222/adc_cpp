@@ -4,12 +4,12 @@ name: Quality
 # ne tourne JAMAIS sur un push ni sur une PR ordinaire (c'est ci.yml qui garde les PR). Il agrege
 # huit familles d'outils :
 #   - format       : clang-format --dry-run (.clang-format) [BLOQUANT] + ruff (lint python/) [info]
-#   - warnings     : build avec -Wall -Wextra -Wpedantic ... (ADC_ENABLE_WARNINGS)    [non bloquant]
+#   - warnings     : build avec -Wall -Wextra -Wpedantic ... (POPS_ENABLE_WARNINGS)    [non bloquant]
 #   - tidy         : run-clang-tidy sur les TU de tests/ (.clang-tidy)                 [non bloquant]
-#   - sanitizers   : ctest sous ASan + UBSan (ADC_ENABLE_SANITIZERS, preset ci-asan)  [non bloquant]
-#   - tsan         : ctest sous TSan, backend OpenMP (ADC_ENABLE_TSAN, preset ci-tsan)[non bloquant]
-#   - fuzz         : harnais libFuzzer 90 s/cible (ADC_BUILD_FUZZING, preset ci-fuzz) [BLOQUANT]
-#   - coverage     : ctest instrumente gcov + rapport gcovr (ADC_ENABLE_COVERAGE)     [non bloquant]
+#   - sanitizers   : ctest sous ASan + UBSan (POPS_ENABLE_SANITIZERS, preset ci-asan)  [non bloquant]
+#   - tsan         : ctest sous TSan, backend OpenMP (POPS_ENABLE_TSAN, preset ci-tsan)[non bloquant]
+#   - fuzz         : harnais libFuzzer 90 s/cible (POPS_BUILD_FUZZING, preset ci-fuzz) [BLOQUANT]
+#   - coverage     : ctest instrumente gcov + rapport gcovr (POPS_ENABLE_COVERAGE)     [non bloquant]
 #   - codeql       : code scanning C++ GitHub (repo public = gratuit)                 [-> onglet Security]
 #
 # DECLENCHEURS :
@@ -202,7 +202,7 @@ jobs:
           # reste l'autorite sur la compilabilite). Le code retour est ignore (set +e).
           set +e
           cmake --build --preset ci-warnings 2>&1 | tee build-warnings.log
-          echo "::remove-matcher owner=adc-gcc-warnings::"
+          echo "::remove-matcher owner=pops-gcc-warnings::"
       - name: Resume warnings
         if: always()
         run: |
@@ -249,7 +249,7 @@ jobs:
           RCT=$(command -v run-clang-tidy || command -v run-clang-tidy-18 \
                 || command -v run-clang-tidy-19 || echo run-clang-tidy)
           echo "wrapper : $RCT"
-          # Le HeaderFilter de .clang-tidy limite deja les diagnostics a include/adc/. On analyse les
+          # Le HeaderFilter de .clang-tidy limite deja les diagnostics a include/pops/. On analyse les
           # TU de tests/ (elles tirent l'essentiel des en-tetes du coeur). -extra-arg : la DB porte des
           # flags gcc -> on neutralise les options inconnues du frontend clang.
           set +e
@@ -508,7 +508,7 @@ jobs:
           ctest --preset ci-coverage --output-on-failure
           echo "ctest rc=$? (non bloquant ici)"
           set -e
-      - name: Rapport gcovr (filtre include/adc/)
+      - name: Rapport gcovr (filtre include/pops/)
         run: |
           mkdir -p coverage-report
           # --gcov-ignore-parse-errors : sans lui, UNE ligne gcov inattendue (vu en vrai sur
@@ -516,13 +516,13 @@ jobs:
           # en warnings : un fichier mal parse vaut mieux que zero rapport.
           pipx run gcovr --root . build-kokkos-coverage \
             --gcov-ignore-parse-errors=all \
-            --filter 'include/adc/' \
+            --filter 'include/pops/' \
             --print-summary \
             --txt coverage-report/coverage.txt \
             --xml coverage-report/coverage.xml \
             --html-details coverage-report/index.html
           {
-            echo "### Couverture (gcovr, filtre include/adc/)"
+            echo "### Couverture (gcovr, filtre include/pops/)"
             echo ""
             echo '```'
             tail -30 coverage-report/coverage.txt
@@ -563,15 +563,15 @@ jobs:
           queries: security-and-quality
           config-file: ./.github/codeql/codeql-config.yml
       # Build OBSERVE par le traceur CodeQL : un SOUS-ENSEMBLE de petites cibles de test a -O0
-      # (ADC_TESTS_FAST_O0 du preset), choisi pour couvrir les couches d'en-tetes du coeur
+      # (POPS_TESTS_FAST_O0 du preset), choisi pour couvrir les couches d'en-tetes du coeur
       # (mesh / amr / elliptique / numerics) avec un cout d'extraction BORNE.
       #  - Le cout de l'extracteur C++ de CodeQL est proportionnel aux INSTANCIATIONS de templates
-      #    du TU, pas a son -O : les ~140 tests (>2h38, 2 runs annules) comme le module _adc
+      #    du TU, pas a son -O : les ~140 tests (>2h38, 2 runs annules) comme le module _pops
       #    (3 TU geantes system.cpp/amr_system.cpp qui instancient TOUTES les facades : >45 min,
       #    timeout) sont pathologiques. Les petites cibles ci-dessous instancient chacune une
       #    tranche bornee du coeur -> minutes, pas heures.
       #  - CodeQL analyse un en-tete des qu'il est compile dans UN SEUL TU : la reunion des
-      #    tranches couvre l'essentiel de include/adc/ SAUF les facades runtime System/AmrSystem
+      #    tranches couvre l'essentiel de include/pops/ SAUF les facades runtime System/AmrSystem
       #    (instanciees uniquement par les TU geantes) -- trade-off assume, cf. ADC-173.
       #  - ccache OFF (-DADC_USE_CCACHE=OFF) GARDE : un hit ccache court-circuiterait la
       #    compilation et masquerait le TU a l'extracteur.

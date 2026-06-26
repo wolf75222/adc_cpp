@@ -11,7 +11,7 @@ The architecture decisions of `adc_cpp`, with their context and their cost. Comp
 shared via FetchContent). One option was to do the same for `adc_cpp`.
 
 **Decision.** MultiFab + BoxArray + DistributionMapping + seam stack written entirely in
-`include/adc/`, independent.
+`include/pops/`, independent.
 
 **Why.** The hyperbolic-elliptic coupling on distributed AMR (diocotron, two-fluid
 plasma) requires a mesh layer close to AMReX (distributed MultiFab, FluxRegister, FillPatch)
@@ -36,13 +36,13 @@ point. Inspired by the design of PLUTO (see BIBLIOGRAPHY).
 
 ## D-3. The `for_each_cell` seam (single dispatch)
 
-**Decision.** A single loop primitive `for_each_cell(box, lambda ADC_HD)` compiles
+**Decision.** A single loop primitive `for_each_cell(box, lambda POPS_HD)` compiles
 to `Kokkos::parallel_for` (Serial / OpenMP / Cuda execution space depending on the Kokkos install).
 Device-callable POD `Array4`, `device_fence()`, `comm.hpp` for MPI.
 
 **Why.** The physics is written once and runs everywhere. Kokkos is the only on-node
 backend and it is required (`-DADC_USE_KOKKOS=ON`, ON by default); the seam does not compile
-without `ADC_HAS_KOKKOS`. The backend remains a **property of the `adc` target**
+without `POPS_HAS_KOKKOS`. The backend remains a **property of the `adc` target**
 (target_compile_definitions INTERFACE), not a per-solver flag: the on-node target is
 chosen at the Kokkos install (`Kokkos_ENABLE_SERIAL` / `_OPENMP` / `_CUDA`), nothing in
 the code.
@@ -78,7 +78,7 @@ you choose without rewriting the coupler.
 
 **Decision.** The bindings (`python/bindings/core/bindings.cpp`) expose runtime COMPOSITION facades
 (`System`, `AmrSystem`), not named solvers. A model is a composition of
-generic bricks (`adc.Model(state, transport, source, elliptic)`) assembled by the
+generic bricks (`pops.Model(state, transport, source, elliptic)`) assembled by the
 `model_factory`; no scenario is named in the lib.
 
 **Why.** A stable and bindable surface, never `Coupler<Model, Elliptic>` on the outside. The

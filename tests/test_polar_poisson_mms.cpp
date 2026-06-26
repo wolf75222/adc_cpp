@@ -30,20 +30,20 @@
 // Host / Serial-safe : UNE box, n_ranks()==1 dans les 3 jobs CI (test non enregistre MPI ; le solveur
 // leve proprement sous MPI, hors scope Phase 2a).
 
-#include <adc/mesh/index/box2d.hpp>
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/storage/fab2d.hpp>
-#include <adc/mesh/execution/for_each.hpp>
-#include <adc/mesh/geometry/geometry.hpp>
-#include <adc/mesh/storage/multifab.hpp>
-#include <adc/mesh/boundary/physical_bc.hpp>
-#include <adc/numerics/elliptic/polar/polar_poisson_solver.hpp>
+#include <pops/mesh/index/box2d.hpp>
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/storage/fab2d.hpp>
+#include <pops/mesh/execution/for_each.hpp>
+#include <pops/mesh/geometry/geometry.hpp>
+#include <pops/mesh/storage/multifab.hpp>
+#include <pops/mesh/boundary/physical_bc.hpp>
+#include <pops/numerics/elliptic/polar/polar_poisson_solver.hpp>
 
 #include <cmath>
 #include <cstdio>
 #include <vector>
 
-using namespace adc;
+using namespace pops;
 
 static constexpr double kPiL = 3.14159265358979323846;
 static constexpr double kRmin = 0.30;

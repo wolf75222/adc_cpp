@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generateur generique de modeles de moments 2D (adc.moments) : l'algebre binomiale
+"""Generateur generique de modeles de moments 2D (pops.moments) : l'algebre binomiale
 M -> C -> S -> fermeture -> C' -> M' est DERIVEE en boucles sur l'AST de la DSL ; seule la
 fermeture (callable) est fournie. Reference de validation croisee : adc_cases/hyqmom15
 (flux generes == goldens MATLAB a 7.7e-13, == modele manuel a 2.6e-13 -- hors de ce depot).
@@ -36,9 +36,9 @@ import tempfile
 
 import numpy as np
 
-import adc
-from adc import dsl
-from adc.moments import (bgk_source, build_moment_model, gaussian_closure,
+import pops
+from pops import dsl
+from pops.moments import (bgk_source, build_moment_model, gaussian_closure,
                          lorentz_sources, maxwellian_moments, moment_indices,
                          moment_names)
 
@@ -300,21 +300,21 @@ if not cxx:
     sys.exit(1 if fails else 0)
 
 print("== (9) compile AOT + System riemann='hll' ==")
-tmp = tempfile.mkdtemp(prefix="adc_moments_")
+tmp = tempfile.mkdtemp(prefix="pops_moments_")
 try:
     compiled = build_moment_model("g2sys", 2, gaussian_closure(2)).compile(
         os.path.join(tmp, "g2sys.so"), INCLUDE, backend="aot")
 except RuntimeError as ex:
     if "Kokkos" in str(ex):
-        print("Kokkos introuvable (ADC_KOKKOS_ROOT) : test (9) saute --", str(ex)[:60])
+        print("Kokkos introuvable (POPS_KOKKOS_ROOT) : test (9) saute --", str(ex)[:60])
         print("FAILS =", fails)
         sys.exit(1 if fails else 0)
     raise
 n = 16
-sim = adc.System(n=n, L=1.0, periodic=True)
+sim = pops.System(n=n, L=1.0, periodic=True)
 sim.add_equation("mom", model=compiled,
-                 spatial=adc.FiniteVolume(limiter="none", riemann="hll"),
-                 time=adc.Explicit())
+                 spatial=pops.FiniteVolume(limiter="none", riemann="hll"),
+                 time=pops.Explicit())
 x = (np.arange(n) + 0.5) / n
 X, Y = np.meshgrid(x, x, indexing="ij")
 pert = 1.0 + 0.1 * np.sin(2 * np.pi * X) * np.cos(2 * np.pi * Y)

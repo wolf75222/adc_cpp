@@ -11,15 +11,15 @@ This page assumes you have already built the `adc` Python module. If you have no
 
 ## Choose a writing front
 
-Both fronts produce the same computational object on the C++ core and plug into an `adc.System`
+Both fronts produce the same computational object on the C++ core and plug into an `pops.System`
 the same way. Pick the front by whether the bricks you need already exist:
 
 - Use **native bricks** when the bricks you need already exist. You compose four generic,
-  pre-compiled bricks with `adc.Model(state, transport, source, elliptic)`. There is no
+  pre-compiled bricks with `pops.Model(state, transport, source, elliptic)`. There is no
   just-in-time compilation, and you keep full production parity (MPI, AMR, GPU). Follow
   [Write a model with bricks](../tutorials/write-a-model-with-bricks.md).
 - Use the **symbolic DSL** when the model you want does not exist as a native brick. You write
-  the equation as formulas with `adc.dsl.Model`, then compile it into a `.so`. Follow
+  the equation as formulas with `pops.dsl.Model`, then compile it into a `.so`. Follow
   [Write a model with the DSL](../tutorials/write-a-model-with-dsl.md).
 
 The two fronts are interchangeable and produce an identical numerical kernel. The full brick
@@ -28,11 +28,11 @@ are in the [DSL reference](../reference/symbolic-dsl.md).
 
 ## Define the model
 
-For native bricks, compose the four slots and let `adc.Model` validate the
+For native bricks, compose the four slots and let `pops.Model` validate the
 state-versus-transport consistency:
 
 ```python
-model = adc.Model(state=adc.Scalar(), transport=adc.ExB(B0=1.0), source=adc.NoSource(), elliptic=adc.BackgroundDensity(alpha=1.0, n0=0.0))
+model = pops.Model(state=pops.Scalar(), transport=pops.ExB(B0=1.0), source=pops.NoSource(), elliptic=pops.BackgroundDensity(alpha=1.0, n0=0.0))
 ```
 
 For the DSL, declare the conservative variables, the auxiliary fields, the flux, the eigenvalues
@@ -45,22 +45,22 @@ compiled = diocotron_model(n_i0).compile(backend="production")
 
 Replace `production` with `aot` for a marshaled, mono-rank `.so` for CPU debug or bench. The
 default backend of `m.compile` is `auto`, which auto-selects `production` under toolchain parity
-with the installed `_adc`, otherwise falls back to `aot`; the explicit values
+with the installed `_pops`, otherwise falls back to `aot`; the explicit values
 `prototype | aot | production` are still available. For the backend trade-offs, see the
 [backend matrix](../reference/backend-matrix.md).
 
 ## Run the model
 
 Build a system, add the model as a block, set the Poisson coupling, set the initial density and
-advance in time. The same `model` object plugs into `adc.System` (uniform grid) or `adc.AmrSystem`
+advance in time. The same `model` object plugs into `pops.System` (uniform grid) or `pops.AmrSystem`
 (adaptive refinement) without change:
 
 ```python
-sim = adc.System(n=96, L=1.0, periodic=True)
+sim = pops.System(n=96, L=1.0, periodic=True)
 ```
 
 ```python
-sim.add_block("ne", model=model, spatial=adc.Spatial(minmod=True), time=adc.Explicit())
+sim.add_block("ne", model=model, spatial=pops.Spatial(minmod=True), time=pops.Explicit())
 ```
 
 ```python
@@ -81,6 +81,6 @@ Replace `ne0` with your initial density: a contiguous 2D array indexed `ne[j, i]
 
 - [Write a model with bricks](../tutorials/write-a-model-with-bricks.md) for the native front.
 - [Write a model with the DSL](../tutorials/write-a-model-with-dsl.md) for the formula front.
-- [Models overview](../models/index.md) for the hybrid front (`adc.CompositeModel`) and the
+- [Models overview](../models/index.md) for the hybrid front (`pops.CompositeModel`) and the
   `PhysicalModel` contract.
 - [Configure a simulation](../simulation/index.md) to wire the system, Poisson and time integration.

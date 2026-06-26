@@ -1,36 +1,36 @@
-# Blackboard-style DSL (`adc.physics`, `adc.math`)
+# Blackboard-style DSL (`pops.physics`, `pops.math`)
 
 The blackboard DSL is the layer-1 user API of spec 3: it lets you write a model and
 a time scheme the way they appear on a blackboard, and lowers them to the
 operator-first IR ({doc}`operator-modules`) that the compiler and runtime consume.
-It adds no new execution path: `adc.physics` reuses the {doc}`symbolic-dsl` codegen,
+It adds no new execution path: `pops.physics` reuses the {doc}`symbolic-dsl` codegen,
 and the board time sugar lowers to the same Program IR as the {doc}`time-program`
 primitive calls.
 
 ```{admonition} Three layers
 :class: note
 Layer 1 (this page) is the blackboard notation. Layer 2 is the typed operator-first
-IR (`adc.model.Module`: spaces, signatures, operators). Layer 3 is the C++ that
+IR (`pops.model.Module`: spaces, signatures, operators). Layer 3 is the C++ that
 executes -- native bricks in `include/adc` and the generated `problem.so`. Python
 describes and composes; C++ runs.
 ```
 
-## Notation (`adc.math`)
+## Notation (`pops.math`)
 
-`adc.math` is numerics-free notation: `ddt` / `rate` (time derivative), `div`
+`pops.math` is numerics-free notation: `ddt` / `rate` (time derivative), `div`
 (flux divergence), `grad` / `dx` / `dy` (field gradient), `laplacian` (elliptic
 operator), `sqrt`, `integral` (invariant value), `unknown` (a solve unknown), `==`
 (an equation) and `@` (operator application). These build a small board IR that the
 model and time APIs destructure; they carry no arrays.
 
-## Authoring a model (`adc.physics.Model`)
+## Authoring a model (`pops.physics.Model`)
 
 A model is written as equations over a state, primitives, parameters, a flux, an
 elliptic field solve, sources and local linear operators:
 
 ```python
-from adc.physics import Model
-from adc.math import sqrt, grad, div, laplacian, ddt
+from pops.physics import Model
+from pops.math import sqrt, grad, div, laplacian, ddt
 
 m = Model("euler_poisson_lorentz")
 U = m.state("U", components=["rho", "mx", "my"],
@@ -63,19 +63,19 @@ m.operator("implicit_operator", C)
 m.check()
 ```
 
-`m.module` is the typed `adc.model.Module` this lowers to (state space, field space,
+`m.module` is the typed `pops.model.Module` this lowers to (state space, field space,
 and the typed operators `explicit_rate`, `electric`, `lorentz`, `fields_from_state`).
 The spec-1 PDE methods (`m.flux` / `m.source_term` / `m.linear_source` /
-`m.elliptic_field` on `adc.dsl.Model`) remain valid; the board API is sugar over them.
+`m.elliptic_field` on `pops.dsl.Model`) remain valid; the board API is sugar over them.
 
-## Authoring a time scheme (`adc.time.Program` sugar)
+## Authoring a time scheme (`pops.time.Program` sugar)
 
 The board time sugar mirrors the blackboard stages and lowers to the same IR as the
 primitive `solve_fields` / `linear_combine` / `solve_local_linear` / `commit` calls:
 
 ```python
-from adc.time import Program
-from adc.math import unknown
+from pops.time import Program
+from pops.math import unknown
 
 T = Program("predictor_corrector")
 dt = T.dt
@@ -111,9 +111,9 @@ explicit operator-first level):
 @module.operator(...)        # and module.operator(...)
 module.state_space(...)
 module.field_space(...)
-adc.model.Signature(...)
-adc.model.Rate(...)
-adc.model.LocalLinearOperator(...)
+pops.model.Signature(...)
+pops.model.Rate(...)
+pops.model.LocalLinearOperator(...)
 P.call(...)
 P.linear_combine(...)
 P.apply(...)
@@ -142,8 +142,8 @@ runtime (the board program and the primitive program have identical IR), and the
 
 ```{admonition} One semantic kernel
 :class: important
-There is a single semantic kernel: `adc.model.Module` (spaces, signatures, operators,
-RateBundle) and `adc.time.Program` (P.call / linear_combine / solve_local_linear /
+There is a single semantic kernel: `pops.model.Module` (spaces, signatures, operators,
+RateBundle) and `pops.time.Program` (P.call / linear_combine / solve_local_linear /
 solve_linear / commit / commit_many). The board facade has NO registry, type system,
 scheduler, codegen, runtime, solve semantics or commit semantics of its own; it only
 builds or calls these Spec 2 objects. If the board and the operator-first level ever seem
@@ -175,22 +175,22 @@ local_linear_operator object 'C(B)' is not a callable operator. Register it with
 m.operator('C(B)', returns=...) or @module.operator(...) first.
 ```
 
-## Typed brick catalog (`adc.lib`)
+## Typed brick catalog (`pops.lib`)
 
-`adc.lib` is a catalog of descriptors and IR macros, never a Python numerics library.
-`adc.lib.riemann.HLLC()` and `adc.lib.reconstruction.WENO5Z()` compute nothing: they
-name native C++ bricks (`adc::HLLCFlux`, `adc::Weno5`) and carry the requirements
+`pops.lib` is a catalog of descriptors and IR macros, never a Python numerics library.
+`pops.lib.riemann.HLLC()` and `pops.lib.reconstruction.WENO5Z()` compute nothing: they
+name native C++ bricks (`pops::HLLCFlux`, `pops::Weno5`) and carry the requirements
 those bricks place on the model. A catalogued brick with no native symbol yet carries
-`available=False` and an empty `native_id` (never a fabricated id). `adc.lib.time.*` are macros
-that build Program IR (they forward to `adc.time` `std`). Other namespaces:
+`available=False` and an empty `native_id` (never a fabricated id). `pops.lib.time.*` are macros
+that build Program IR (they forward to `pops.time` `std`). Other namespaces:
 `limiters`, `spatial`, `fields`, `solvers`, `preconditioners`, `diagnostics`,
 `projections`, `invariants`.
 
 ## Generic multi-output and invariants
 
-`adc.model.RateBundle` is a typed multi-output of arbitrary arity: a coupled operator
+`pops.model.RateBundle` is a typed multi-output of arbitrary arity: a coupled operator
 returns one `Rate(StateSpace)` per participating block, and a wrong rate on a wrong
-state is rejected. `adc.physics.Model.invariant(name, expression, over=...)` declares
+state is rejected. `pops.physics.Model.invariant(name, expression, over=...)` declares
 a generic invariant from an `integral(...)`; nothing about mass, charge, momentum or
 energy is built in.
 

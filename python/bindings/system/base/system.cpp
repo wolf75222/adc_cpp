@@ -1,44 +1,44 @@
-#include <adc/runtime/system.hpp>
+#include <pops/runtime/system.hpp>
 
-#include <adc/core/state/variables.hpp>  // VariableSet + VariableRole: role descriptor carried by each block
-#include <adc/runtime/dynamic/abi_key.hpp>  // adc::abi_key + detail::abi_key_string (ABI boundary of the native loader)
-#include <adc/runtime/builders/block/block_builder.hpp>  // GridContext + make_block/make_max_speed (compiled closures)
-#include <adc/runtime/builders/block/block_seam.hpp>  // ADC-335: per-transport build seam (build_block_exb/.../polar)
-#include <adc/runtime/builders/factory/model_factory.hpp>  // detail::dispatch_model + compiled bricks
-#include <adc/runtime/dynamic/model_registry.hpp>  // unknown_transport_msg: single-source transport rejection (ADC-331)
-#include <adc/coupling/schur/source/condensed_schur_source_stepper.hpp>  // Schur-condensed source stage (adc.Split / CondensedSchur, #126)
-#include <adc/coupling/schur/source/polar_condensed_schur_source_stepper.hpp>  // POLAR counterpart of the condensed source stage (Path A step 2c, #212)
-#include <adc/coupling/source/coupled_source_program.hpp>  // CoupledSourceKernel: generic coupled source (DSL P5, bytecode)
-#include <adc/numerics/elliptic/mg/geometric_mg.hpp>
-#include <adc/numerics/elliptic/poisson/poisson_fft_solver.hpp>
-#include <adc/numerics/elliptic/polar/polar_poisson_solver.hpp>  // PolarPoissonSolver (direct polar Poisson, REUSED)
-#include <adc/runtime/system/system_field_solver.hpp>  // SystemFieldSolver: elliptic solve + field derivation (Batch B)
-#include <adc/runtime/system/system_stepper.hpp>  // SystemStepper: time advance (step/advance/step_cfl/step_adaptive) (Batch B)
-#include <adc/runtime/system/system_block_store.hpp>  // SystemBlockStore: block management (BlockState + registry + index/copy/write) (Batch B.3)
-#include <adc/runtime/builders/block/block_builder_polar.hpp>  // POLAR block closures (assemble_rhs_polar, REUSED)
-#include <adc/numerics/time/integrators/implicit_stepper.hpp>  // backward_euler_source
-#include <adc/numerics/time/integrators/time_steppers.hpp>  // ForwardEuler, SSPRK2Step (core RK math)
-#include <adc/numerics/spatial_operator.hpp>  // assemble_rhs, SourceFreeModel, max_wave_speed_mf, load_state
+#include <pops/core/state/variables.hpp>  // VariableSet + VariableRole: role descriptor carried by each block
+#include <pops/runtime/dynamic/abi_key.hpp>  // pops::abi_key + detail::abi_key_string (ABI boundary of the native loader)
+#include <pops/runtime/builders/block/block_builder.hpp>  // GridContext + make_block/make_max_speed (compiled closures)
+#include <pops/runtime/builders/block/block_seam.hpp>  // ADC-335: per-transport build seam (build_block_exb/.../polar)
+#include <pops/runtime/builders/factory/model_factory.hpp>  // detail::dispatch_model + compiled bricks
+#include <pops/runtime/dynamic/model_registry.hpp>  // unknown_transport_msg: single-source transport rejection (ADC-331)
+#include <pops/coupling/schur/source/condensed_schur_source_stepper.hpp>  // Schur-condensed source stage (pops.Split / CondensedSchur, #126)
+#include <pops/coupling/schur/source/polar_condensed_schur_source_stepper.hpp>  // POLAR counterpart of the condensed source stage (Path A step 2c, #212)
+#include <pops/coupling/source/coupled_source_program.hpp>  // CoupledSourceKernel: generic coupled source (DSL P5, bytecode)
+#include <pops/numerics/elliptic/mg/geometric_mg.hpp>
+#include <pops/numerics/elliptic/poisson/poisson_fft_solver.hpp>
+#include <pops/numerics/elliptic/polar/polar_poisson_solver.hpp>  // PolarPoissonSolver (direct polar Poisson, REUSED)
+#include <pops/runtime/system/system_field_solver.hpp>  // SystemFieldSolver: elliptic solve + field derivation (Batch B)
+#include <pops/runtime/system/system_stepper.hpp>  // SystemStepper: time advance (step/advance/step_cfl/step_adaptive) (Batch B)
+#include <pops/runtime/system/system_block_store.hpp>  // SystemBlockStore: block management (BlockState + registry + index/copy/write) (Batch B.3)
+#include <pops/runtime/builders/block/block_builder_polar.hpp>  // POLAR block closures (assemble_rhs_polar, REUSED)
+#include <pops/numerics/time/integrators/implicit_stepper.hpp>  // backward_euler_source
+#include <pops/numerics/time/integrators/time_steppers.hpp>  // ForwardEuler, SSPRK2Step (core RK math)
+#include <pops/numerics/spatial_operator.hpp>  // assemble_rhs, SourceFreeModel, max_wave_speed_mf, load_state
 
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/layout/distribution_mapping.hpp>
-#include <adc/mesh/execution/for_each.hpp>  // device_fence
-#include <adc/mesh/geometry/geometry.hpp>
-#include <adc/mesh/storage/mf_arith.hpp>  // sum
-#include <adc/mesh/storage/multifab.hpp>
-#include <adc/mesh/boundary/physical_bc.hpp>      // fill_ghosts, fill_boundary
-#include <adc/runtime/dynamic/dynamic_model.hpp>  // IModel: model loaded at runtime (dynamic block)
-#include <adc/runtime/builders/compiled/native_loader.hpp>  // .so loading (JIT/AOT/native) + ABI guard: VERBATIM, included after the Impl def below (templates instantiated lower down)
-#include <adc/runtime/context/wall_predicate.hpp>  // detail::wall_predicate (wall shared by System/AmrSystem)
-#include <adc/runtime/program/module_metadata.hpp>  // read_module_metadata / required_aux: install-time requirement validation (ADC-446)
-#include <adc/runtime/program/program_context.hpp>  // ProgramContext: wraps the System for the .so dt_bound call (ADC-417)
-#include <adc/runtime/program/profiler.hpp>  // Profiler / ProfileScope: per-node / per-brick timing (ADC-459)
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/layout/distribution_mapping.hpp>
+#include <pops/mesh/execution/for_each.hpp>  // device_fence
+#include <pops/mesh/geometry/geometry.hpp>
+#include <pops/mesh/storage/mf_arith.hpp>  // sum
+#include <pops/mesh/storage/multifab.hpp>
+#include <pops/mesh/boundary/physical_bc.hpp>      // fill_ghosts, fill_boundary
+#include <pops/runtime/dynamic/dynamic_model.hpp>  // IModel: model loaded at runtime (dynamic block)
+#include <pops/runtime/builders/compiled/native_loader.hpp>  // .so loading (JIT/AOT/native) + ABI guard: VERBATIM, included after the Impl def below (templates instantiated lower down)
+#include <pops/runtime/context/wall_predicate.hpp>  // detail::wall_predicate (wall shared by System/AmrSystem)
+#include <pops/runtime/program/module_metadata.hpp>  // read_module_metadata / required_aux: install-time requirement validation (ADC-446)
+#include <pops/runtime/program/program_context.hpp>  // ProgramContext: wraps the System for the .so dt_bound call (ADC-417)
+#include <pops/runtime/program/profiler.hpp>  // Profiler / ProfileScope: per-node / per-brick timing (ADC-459)
 
 #include <algorithm>
 #include <cmath>
-#include <cstdio>   // ADC_TRACE_SOLVE_FIELDS: device diagnostic trace (env-gated, inert by default)
+#include <cstdio>   // POPS_TRACE_SOLVE_FIELDS: device diagnostic trace (env-gated, inert by default)
 #include <cstdlib>  // getenv
-#include <adc/runtime/dynamic/dynlib.hpp>  // portable dlopen<->LoadLibraryW layer (ADC-99); <dlfcn.h> on POSIX
+#include <pops/runtime/dynamic/dynlib.hpp>  // portable dlopen<->LoadLibraryW layer (ADC-99); <dlfcn.h> on POSIX
 #include <functional>
 #include <limits>  // std::numeric_limits (per-block CFL: dt = min over blocks)
 #include <map>     // std::map (per-block runtime params registry, P7-b)
@@ -48,23 +48,23 @@
 #include <variant>
 #include <vector>
 
-namespace adc {
+namespace pops {
 
-// The DIAGNOSTIC trace of the solve_fields path (adc_trace_sf / adc_sf_mark, milestone #93) was extracted
-// with SystemFieldSolver into include/adc/runtime/system_field_solver.hpp (namespace field_solver);
-// it stays env-gated (ADC_TRACE_SOLVE_FIELDS) and inert by default.
-// resolve_implicit_components moved to model_factory.hpp (adc::detail) so the per-transport seam TUs
+// The DIAGNOSTIC trace of the solve_fields path (pops_trace_sf / pops_sf_mark, milestone #93) was extracted
+// with SystemFieldSolver into include/pops/runtime/system_field_solver.hpp (namespace field_solver);
+// it stays env-gated (POPS_TRACE_SOLVE_FIELDS) and inert by default.
+// resolve_implicit_components moved to model_factory.hpp (pops::detail) so the per-transport seam TUs
 // (python/system_<transport>.cpp, ADC-335) share one definition; it is otherwise unchanged.
 
-// MODULE ABI key (frozen at compile time of this TU). Defined here so the _adc module
-// exports it (ADC_EXPORT): add_native_block compares it to the key baked into the loader .so.
-ADC_EXPORT std::string abi_key() {
+// MODULE ABI key (frozen at compile time of this TU). Defined here so the _pops module
+// exports it (POPS_EXPORT): add_native_block compares it to the key baked into the loader .so.
+POPS_EXPORT std::string abi_key() {
   return detail::abi_key_string();
 }
 
 // Convenience static method (Python binding + add_native_block): delegates to the module's free key.
 std::string System::abi_key() {
-  return adc::abi_key();
+  return pops::abi_key();
 }
 
 namespace {
@@ -95,7 +95,7 @@ struct System::Impl {
   // BLOCK MANAGEMENT extracted into SystemBlockStore (Batch B.3, last P0 extraction from the god-class):
   // the block struct (formerly Species, renamed BlockState), the ordered registry (blocks_.blocks), the
   // by-name access (index / find) and the state marshaling (copy_comp0 / copy_state / write_state) now
-  // live there. See include/adc/runtime/system_block_store.hpp.
+  // live there. See include/pops/runtime/system_block_store.hpp.
   //
   // COMPATIBILITY ALIASES. The already-extracted header templates (SystemFieldSolver, SystemStepper,
   // native_loader) iterate `owner_->sp` / `P->sp` and name `Impl::Species`; we keep these two
@@ -167,7 +167,7 @@ struct System::Impl {
   std::function<void(double)>
       program_step_;  // compiled time Program macro-step body (ADC-399); empty = historical path
   // OPTIONAL compiled-Program dt bound (epic ADC-399 / ADC-417, spec s18). When a generated .so exports
-  // adc_program_has_dt_bound() == true, install_program stores a closure here that runs the .so's
+  // pops_program_has_dt_bound() == true, install_program stores a closure here that runs the .so's
   // lowered dt_bound expression (a scalar reading state + reductions / hmin / max_wave_speed) for a
   // given cfl. step_cfl then tightens dt to min(native CFL dt, program dt bound). Empty = no program dt
   // bound -> the native CFL is used UNCHANGED. Referenced by SystemStepper::step_cfl (so the MockImpl in
@@ -179,13 +179,13 @@ struct System::Impl {
   // macro-steps with eff_dt = M*dt (GLOBAL hold-then-catch-up). Set by System::set_program_cadence.
   int program_substeps_ = 1;
   int program_stride_ = 1;
-  // IR hash of the installed compiled Program (the .so's adc_program_hash, ADC-406b). Empty until
+  // IR hash of the installed compiled Program (the .so's pops_program_hash, ADC-406b). Empty until
   // install_program records it. Serialized in the checkpoint so a restart against a DIFFERENT compiled
   // Program is rejected fail-loud (mismatched buffers / cadence would be meaningless).
   std::string installed_program_hash_;
   // NAME-BASED block binding (Spec 3 criterion 23, ADC-457): program-index -> system-index map. entry
   // p holds the System block index that the Program's block p (in P.state declaration order) names.
-  // Built by install_program from the .so's adc_program_block_name table; read by ProgramContext to
+  // Built by install_program from the .so's pops_program_block_name table; read by ProgramContext to
   // resolve a Program block index to the name-matched System block. EMPTY = identity (single-block /
   // order-matching Program, or a ProgramContext built directly in a C++ test). Not referenced by
   // SystemStepper -> no MockImpl impact (like program_diagnostics_ / installed_program_hash_).
@@ -198,12 +198,12 @@ struct System::Impl {
   // PER-NODE / PER-BRICK PROFILER (ADC-459, Spec 3 section 29-30): System-owned, like the diagnostics
   // above -- NOT referenced by SystemStepper, so no MockImpl impact. Disabled by default (no hot-path
   // cost when off). System::step / solve_fields wrap themselves in a ProfileScope into it.
-  adc::runtime::program::Profiler profiler_;
+  pops::runtime::program::Profiler profiler_;
   // SCHEDULER VALUE CACHE (ADC-458, Spec 3 section 17-18 + 30): the held-node cache (every(N).hold /
   // accumulate_dt) keyed by IR node id. SYSTEM-OWNED (not the .so step closure) so the checkpoint can
   // serialize it, exactly like the history rings above; every ProgramContext forwards its cache_* seam
   // ops to this single manager. Empty by default -> a program with no held schedule never touches it.
-  adc::runtime::program::CacheManager program_cache_;
+  pops::runtime::program::CacheManager program_cache_;
   // MULTISTEP HISTORY (ADC-406a): SYSTEM-OWNED ring buffers for multistep schemes (Adams-Bashforth and
   // friends). A name maps to a ring of (depth = max lag + 1) MultiFabs, newest at [0], each
   // co-distributed with block 0's state (ba/dm, the block's ncomp). The history lives HERE (not in the
@@ -310,7 +310,7 @@ struct System::Impl {
         // the box<->slab scatter/gather inside solve(), so the field-solve path stays layout-agnostic
         // (np==1 uses the single-rank PoissonFFTSolver; a genuinely slab-distributed domain would use
         // DistributedFFTSolver instead). Stated here so the coupling is visible at the layout's source;
-        // see include/adc/numerics/elliptic/poisson_fft_solver.hpp (RemappedFFTSolver CONTRACT).
+        // see include/pops/numerics/elliptic/poisson_fft_solver.hpp (RemappedFFTSolver CONTRACT).
         ba(index_boxarray(c)),
         dm(ba.size(), n_ranks()),
         bc_(make_bc(c)),
@@ -325,14 +325,14 @@ struct System::Impl {
   // config, the coefficient fields and the aux application buffers (B_z, T_e). owner_ = this: the
   // helper reads the SHARED aux/sp/cfg/geom/pgeom_/ba/dm/bc_/dom/per_/periodic_/polar_ of Impl. None of
   // these accesses dereferences Impl at CONSTRUCTION (pure back-pointer) -> init at end of list without
-  // ordering dependency. See include/adc/runtime/system_field_solver.hpp.
+  // ordering dependency. See include/pops/runtime/system_field_solver.hpp.
   field_solver::SystemFieldSolver<Impl> fields_;
 
   // Time advance (Batch B). ORCHESTRATES step / advance / step_cfl / step_adaptive, the cadence filter
   // (stride_due), the condensed source stage (run_source_stage) and the couplings (apply_couplings). owner_
   // = this: the stepper reads the SHARED sp / fields_ / aux / couplings / t / macro_step_ / geom / pgeom_ / polar_
   // of Impl via its back-pointer. Pure back-pointer at construction (no dereferencing) ->
-  // init at end of list without ordering dependency. See include/adc/runtime/system_stepper.hpp.
+  // init at end of list without ordering dependency. See include/pops/runtime/system_stepper.hpp.
   stepper::SystemStepper<Impl> stepper_;
 
   // Guarantees an aux width >= ncomp (SHARED channel). Reallocating the aux KEEPS its address (member:
@@ -507,13 +507,13 @@ struct System::Impl {
   }
 
   // push_dynamic<NV> (DYNAMIC IModel<NV> block loaded from a .so) was EXTRACTED VERBATIM into
-  // adc::native_loader::push_dynamic (include/adc/runtime/native_loader.hpp, template over Impl);
+  // pops::native_loader::push_dynamic (include/pops/runtime/native_loader.hpp, template over Impl);
   // add_dynamic_block below instantiates it with System::Impl. See SYSTEM_CPP_EXTRACTION_PLAN.md.
 };
 
 namespace {
 // Geometry guard (polar-grid project). The geometry CHOICE is carried by the config
-// (adc.CartesianMesh / adc.PolarMesh). "cartesian": historical path, bit-identical. "polar": global
+// (pops.CartesianMesh / pops.PolarMesh). "cartesian": historical path, bit-identical. "polar": global
 // ring (r, theta) wired into System.step (Phase 2b): polar transport (assemble_rhs_polar) +
 // polar Poisson (PolarPoissonSolver) + aux in local basis (e_r, e_theta). We validate HERE the radial
 // bounds of the ring (r_max > r_min >= 0); the Python (PolarMesh) already validates them, but a caller
@@ -525,7 +525,7 @@ void check_geometry(const SystemConfig& c) {
     if (!(c.r_max > c.r_min && c.r_min >= 0.0))
       throw std::runtime_error(
           "System : geometry='polar' requires a ring r_max > r_min >= 0 (r_min > 0 avoids the "
-          "r=0 coordinate singularity) ; cf. adc.PolarMesh");
+          "r=0 coordinate singularity) ; cf. pops.PolarMesh");
     // nr >= 3 ENFORCED: the radial derivative of the aux (derive_aux_polar) uses a 2nd-order
     // OFF-CENTERED stencil at both walls (reads phi(i+1),phi(i+2) at r_min and phi(i-1),phi(i-2) at r_max). phi is
     // allocated WITHOUT ghost by the direct solver (its valid box IS its allocation): nr < 3 would read
@@ -535,7 +535,7 @@ void check_geometry(const SystemConfig& c) {
       throw std::runtime_error(
           "System : geometry='polar' requires nr >= 3 (2nd-order off-centered radial stencil at "
           "the walls ; "
-          "phi without ghost) ; cf. adc.PolarMesh");
+          "phi without ghost) ; cf. pops.PolarMesh");
     // THETA SPLIT of the transport (theta_boxes, ADC-67). 1 (default) = mono-box, bit-identical. > 1:
     // theta bands -- we require 1 <= theta_boxes <= ntheta (at least one azimuthal cell per band) AND
     // theta_boxes DIVIDES ntheta (EQUAL bands: the per-box split must not depend on the remainder,
@@ -544,21 +544,21 @@ void check_geometry(const SystemConfig& c) {
     const int nth = c.ntheta > 0 ? c.ntheta : c.n;
     if (c.theta_boxes < 1)
       throw std::runtime_error(
-          "System : geometry='polar' requires theta_boxes >= 1 (cf. adc.PolarMesh)");
+          "System : geometry='polar' requires theta_boxes >= 1 (cf. pops.PolarMesh)");
     if (c.theta_boxes > nth)
       throw std::runtime_error(
           "System : geometry='polar' requires theta_boxes <= ntheta (at least one azimuthal cell "
           "per "
-          "band) ; cf. adc.PolarMesh");
+          "band) ; cf. pops.PolarMesh");
     if (nth % c.theta_boxes != 0)
       throw std::runtime_error(
           "System : geometry='polar' requires that theta_boxes DIVIDES ntheta (equal azimuthal "
           "bands) ; "
-          "cf. adc.PolarMesh");
+          "cf. pops.PolarMesh");
     return;
   }
   throw std::runtime_error("System : geometry '" + c.geometry +
-                           "' unknown (cartesian | polar) ; cf. adc.CartesianMesh / adc.PolarMesh");
+                           "' unknown (cartesian | polar) ; cf. pops.CartesianMesh / pops.PolarMesh");
 }
 
 // UPSTREAM configuration guard (ADC-299): validate the SystemConfig invariants BEFORE constructing
@@ -812,13 +812,13 @@ void System::add_block(const std::string& name, const ModelSpec& model, const st
 
 // Real grid context (mesh + BC + aux): used by the add_compiled_model template to build
 // the closures of an AOT-compiled model on the real System fields (native parity, without marshaling).
-ADC_EXPORT GridContext System::grid_context() {
+POPS_EXPORT GridContext System::grid_context() {
   return p_->grid_ctx();
 }
 
 // Installs a block from already-built closures (by dispatch_model on the add_block side, or by
 // block_builder on the add_compiled_model side). Centralizes the creation of the species (U, names, scheme).
-ADC_EXPORT void System::install_block(const std::string& name, int ncomp,
+POPS_EXPORT void System::install_block(const std::string& name, int ncomp,
                                       const VariableSet& cons_vars, const VariableSet& prim_vars,
                                       double gamma, BlockClosures closures,
                                       std::function<Real(const MultiFab&)> max_speed,
@@ -854,9 +854,9 @@ ADC_EXPORT void System::install_block(const std::string& name, int ncomp,
 }
 
 // Width-aware reallocation of a block state (delegates to Impl::set_block_ghosts). Exposed
-// (ADC_EXPORT) so that the add_compiled_model header template (native path, .so loader) can
+// (POPS_EXPORT) so that the add_compiled_model header template (native path, .so loader) can
 // widen the compiled block to block_n_ghost(limiter) -- 3 for weno5 -- as add_block does.
-ADC_EXPORT void System::set_block_ghosts(const std::string& name, int n_ghost) {
+POPS_EXPORT void System::set_block_ghosts(const std::string& name, int n_ghost) {
   p_->set_block_ghosts(name, n_ghost);
 }
 
@@ -907,8 +907,8 @@ System::SourceNewtonReport System::newton_report(const std::string& name) const 
   if (it == p_->newton_reports_.end())
     throw std::runtime_error(
         "System::newton_report : Newton diagnostics not enabled for block '" + name +
-        "' ; add the block with newton_diagnostics=true (adc.IMEX(newton_diagnostics=True) / "
-        "adc.SourceImplicit(newton_diagnostics=True))");
+        "' ; add the block with newton_diagnostics=true (pops.IMEX(newton_diagnostics=True) / "
+        "pops.SourceImplicit(newton_diagnostics=True))");
   const NewtonReport& r = *it->second;
   return SourceNewtonReport{r.enabled,
                             r.converged,
@@ -920,14 +920,14 @@ System::SourceNewtonReport System::newton_report(const std::string& name) const 
                             r.failed_comp};
 }
 
-// Body EXTRACTED VERBATIM into adc::native_loader::add_dynamic_block (native_loader.hpp); instantiated
+// Body EXTRACTED VERBATIM into pops::native_loader::add_dynamic_block (native_loader.hpp); instantiated
 // here with System::Impl (defined above, private to this TU). Bit-identical: pure delegation.
 void System::add_dynamic_block(const std::string& name, const std::string& so_path, int substeps,
                                const std::vector<std::string>& names, const std::string& recon) {
   native_loader::add_dynamic_block(this, p_.get(), name, so_path, substeps, names, recon);
 }
 
-// Body EXTRACTED VERBATIM into adc::native_loader::add_compiled_block (native_loader.hpp); instantiated
+// Body EXTRACTED VERBATIM into pops::native_loader::add_compiled_block (native_loader.hpp); instantiated
 // here with System::Impl. Bit-identical: pure delegation.
 void System::add_compiled_block(const std::string& name, const std::string& so_path,
                                 const std::string& limiter, const std::string& riemann,
@@ -961,7 +961,7 @@ void System::set_block_params(const std::string& name, const std::vector<double>
   pv = values;  // the vector is SHARED with the closures (shared_ptr): effect at the next step
 }
 
-// Body EXTRACTED VERBATIM into adc::native_loader::add_native_block (native_loader.hpp); instantiated
+// Body EXTRACTED VERBATIM into pops::native_loader::add_native_block (native_loader.hpp); instantiated
 // here with System::Impl. Bit-identical: pure delegation (this marshals to the unchanged native loader).
 void System::add_native_block(const std::string& name, const std::string& so_path,
                               const std::string& limiter, const std::string& riemann,
@@ -1039,7 +1039,7 @@ void System::set_disc_domain(double cx, double cy, double R, const std::string& 
     Array4 m = P->domain_mask_.fab(li).array();
     // box WITH ghosts: we also classify the ghosts (the mask-aware transport reads the edge neighbors).
     const Box2D g = P->domain_mask_.fab(li).grown_box();
-    for_each_cell(g, [=] ADC_HD(int i, int j) {
+    for_each_cell(g, [=] POPS_HD(int i, int j) {
       m(i, j, 0) = disc.cell_active(geom.x_cell(i), geom.y_cell(j)) ? Real(1) : Real(0);
     });
   }
@@ -1136,7 +1136,7 @@ void System::set_reaction_field(const std::vector<double>& kappa) {
   p_->fields_.ell_.reset();  // operator rebuilt with - kappa phi at the next solve_fields
 }
 
-ADC_EXPORT void System::ensure_aux_width(int ncomp) {
+POPS_EXPORT void System::ensure_aux_width(int ncomp) {
   p_->ensure_aux_width(ncomp);
 }
 
@@ -1285,7 +1285,7 @@ void System::add_ionization(const std::string& electron, const std::string& ion,
       Array4 ue = Ue.fab(li).array();
       Array4 ui = P->sp[ii].U.fab(li).array();
       Array4 ug = P->sp[ig].U.fab(li).array();
-      for_each_cell(Ue.box(li), [=] ADC_HD(int i, int j) {  // on device (reads n_e, n_g)
+      for_each_cell(Ue.box(li), [=] POPS_HD(int i, int j) {  // on device (reads n_e, n_g)
         const Real dn = dt * k * ue(i, j, de) * ug(i, j, dg);
         ug(i, j, dg) -= dn;
         ui(i, j, di) += dn;
@@ -1331,7 +1331,7 @@ void System::add_collision(const std::string& a, const std::string& b, double ra
     for (int li = 0; li < Ua.local_size(); ++li) {
       Array4 ua = Ua.fab(li).array();
       Array4 ub = P->sp[ib].U.fab(li).array();
-      for_each_cell(Ua.box(li), [=] ADC_HD(int i, int j) {  // on device
+      for_each_cell(Ua.box(li), [=] POPS_HD(int i, int j) {  // on device
         const Real fx = dt * k * (ua(i, j, mxa) / ua(i, j, da) - ub(i, j, mxb) / ub(i, j, db));
         ua(i, j, mxa) -= fx;
         ub(i, j, mxb) += fx;
@@ -1380,7 +1380,7 @@ void System::add_thermal_exchange(const std::string& a, const std::string& b, do
     for (int li = 0; li < Ua.local_size(); ++li) {
       Array4 ua = Ua.fab(li).array();
       Array4 ub = P->sp[ib].U.fab(li).array();
-      for_each_cell(Ua.box(li), [=] ADC_HD(int i, int j) {  // on device
+      for_each_cell(Ua.box(li), [=] POPS_HD(int i, int j) {  // on device
         const Real ra = ua(i, j, da), rb = ub(i, j, db);
         const Real pa =
             (ga - Real(1)) *
@@ -1642,7 +1642,7 @@ void System::set_source_stage(const std::string& name, const std::string& kind, 
       if (idx < 0)
         throw std::runtime_error(
             "System::set_source_stage : block '" + name + "' does not expose the role " + label +
-            " required by adc.CondensedSchur (the model must declare Density / MomentumX / "
+            " required by pops.CondensedSchur (the model must declare Density / MomentumX / "
             "MomentumY ; Energy optional), and no explicit descriptor is provided (pass "
             "density=/momentum=... with a role name or a block variable name).");
       return idx;
@@ -1675,7 +1675,7 @@ void System::set_source_stage(const std::string& name, const std::string& kind, 
   if (P->fields_.bz_field_.empty())
     throw std::runtime_error("System::set_source_stage : block '" + name +
                              "' has no B_z field (aux Omega) ; "
-                             "adc.CondensedSchur requires set_magnetic_field(B_z) (the Lorentz "
+                             "pops.CondensedSchur requires set_magnetic_field(B_z) (the Lorentz "
                              "term reads Omega = B_z).");
   // Aux channel of the magnetic field: canonical (kAuxBaseComps) by default, redirectable by
   // bz_aux_component (transported descriptor). NOTE: apply_bz populates the CANONICAL channel; a
@@ -1792,7 +1792,7 @@ void System::set_density(const std::string& name, const std::vector<double>& rho
       set_cell(u, i, j, rho[static_cast<std::size_t>(j - v.lo[1]) * ni + (i - v.lo[0])]);
 }
 
-ADC_EXPORT void System::set_block_conversion(const std::string& name, CellConvert prim_to_cons,
+POPS_EXPORT void System::set_block_conversion(const std::string& name, CellConvert prim_to_cons,
                                              CellConvert cons_to_prim) {
   Impl::Species& s = p_->find(name);
   s.prim_to_cons = std::move(prim_to_cons);
@@ -1859,7 +1859,7 @@ std::vector<double> System::get_primitive_state(const std::string& name) {
 }
 
 void System::solve_fields() {
-  adc::runtime::program::ProfileScope s(p_->profiler_, "field_solve");
+  pops::runtime::program::ProfileScope s(p_->profiler_, "field_solve");
   p_->solve_fields();
 }
 
@@ -1884,8 +1884,8 @@ std::string System::profile_report() const {
 }
 // The System-owned Profiler reference (ADC-459): the compiled-program ProgramContext::profile_node
 // times each Program node into it, so per-node scopes accumulate in the SAME table as the coarse
-// step / field_solve phases. ADC_EXPORT: resolved by a generated problem.so across the dlopen boundary.
-ADC_EXPORT adc::runtime::program::Profiler& System::profiler() {
+// step / field_solve phases. POPS_EXPORT: resolved by a generated problem.so across the dlopen boundary.
+POPS_EXPORT pops::runtime::program::Profiler& System::profiler() {
   return p_->profiler_;
 }
 
@@ -1896,25 +1896,25 @@ void System::solve_fields_from_state(int block_idx, const MultiFab& U_stage) {
 // Coupled multi-block field solve (Spec 3 criterion 24, ADC-457): forwards to the field solver, which
 // assembles the system Poisson RHS as Sum_s elliptic_rhs_s(U_s) reading EVERY block's stage state at
 // once (U_stages indexed by block index; nullptr -> the block's live state), then re-fills the shared
-// aux. ADC_EXPORT: resolved by a generated problem.so (ProgramContext) across the dlopen boundary.
-ADC_EXPORT void System::solve_fields_from_blocks(const std::vector<const MultiFab*>& U_stages) {
-  adc::runtime::program::ProfileScope s(p_->profiler_, "field_solve");
+// aux. POPS_EXPORT: resolved by a generated problem.so (ProgramContext) across the dlopen boundary.
+POPS_EXPORT void System::solve_fields_from_blocks(const std::vector<const MultiFab*>& U_stages) {
+  pops::runtime::program::ProfileScope s(p_->profiler_, "field_solve");
   p_->solve_fields_from_blocks(U_stages);
 }
 
 // NAMED multi-elliptic field (ADC-428): a SECOND elliptic solve for @p field from block @p block_idx's
 // stage state. Forwards to the field solver, which assembles the per-field RHS (sum of the blocks'
 // named bricks), solves with a dedicated native solver, and writes the field's OWN aux components.
-ADC_EXPORT void System::solve_fields_from_state(const std::string& field, int block_idx,
+POPS_EXPORT void System::solve_fields_from_state(const std::string& field, int block_idx,
                                                 const MultiFab& U_stage) {
   p_->solve_named_field_from_state(field, block_idx, U_stage);
 }
 
 // Register a named elliptic field (ADC-428): records WHERE the field's solved phi / centered grad land
 // in the aux channel (@p phi_comp / @p gx_comp / @p gy_comp, the model's named aux slots). The native
-// loader calls this for each m.elliptic_field after the block is installed. ADC_EXPORT: resolved by the
+// loader calls this for each m.elliptic_field after the block is installed. POPS_EXPORT: resolved by the
 // generated problem.so / native loader across the dlopen boundary.
-ADC_EXPORT void System::register_elliptic_field(const std::string& field, int phi_comp, int gx_comp,
+POPS_EXPORT void System::register_elliptic_field(const std::string& field, int phi_comp, int gx_comp,
                                                 int gy_comp) {
   p_->register_elliptic_field(field, phi_comp, gx_comp, gy_comp);
 }
@@ -1922,8 +1922,8 @@ ADC_EXPORT void System::register_elliptic_field(const std::string& field, int ph
 // Attach a named elliptic-field RHS closure to block @p block_name (ADC-428): the per-field Poisson
 // right-hand side brick += elliptic_field_rhs(U). The native loader builds it (make_poisson_rhs of the
 // named brick) and attaches it here; solve_fields_from_state(field, ...) then sums it over the blocks.
-// @throws if the block is unknown. ADC_EXPORT: resolved across the dlopen boundary.
-ADC_EXPORT void System::set_block_elliptic_field(
+// @throws if the block is unknown. POPS_EXPORT: resolved across the dlopen boundary.
+POPS_EXPORT void System::set_block_elliptic_field(
     const std::string& block_name, const std::string& field,
     std::function<void(const MultiFab&, MultiFab&)> rhs) {
   p_->blocks_.find(block_name).named_poisson_rhs[field] = std::move(rhs);
@@ -1934,7 +1934,7 @@ ADC_EXPORT void System::set_block_elliptic_field(
 // hold-then-catch-up semantics of the macro-step counter, the condensed source stage and the couplings live
 // now in the header (bit-identical). The public API stays unchanged.
 void System::step(double dt) {
-  adc::runtime::program::ProfileScope s(p_->profiler_, "step");
+  pops::runtime::program::ProfileScope s(p_->profiler_, "step");
   p_->profiler_.count("steps");
   p_->stepper_.step(dt);
 }
@@ -2153,19 +2153,19 @@ void System::store_history(const std::string& name, const MultiFab& value) {
   std::vector<MultiFab>& ring = it->second;
   // Copy the valid cells of value into the current slot [0] (identical layout: ring slots and the
   // block state share (ba, dm); lincomb(dst, 1, src, 0, src) is a valid-cell deep copy).
-  adc::lincomb(ring[0], Real(1), value, Real(0), value);
+  pops::lincomb(ring[0], Real(1), value, Real(0), value);
   if (!p_->hist_.initialized[name]) {
     // COLD START (first store): broadcast into every deeper slot so a multistep step 0 reads the same
     // value at every lag (degenerating to a one-step method). Deterministic + machine-precision exact.
     for (std::size_t k = 1; k < ring.size(); ++k)
-      adc::lincomb(ring[k], Real(1), value, Real(0), value);
+      pops::lincomb(ring[k], Real(1), value, Real(0), value);
     p_->hist_.initialized[name] = true;
   }
 }
 
 void System::rotate_histories() {
   // Shift each ring one step (slot k gets slot k-1's value, newest-to-oldest), called ONCE at the end
-  // of a macro-step. O(1) std::swap of the MultiFab handles (not a deep adc::lincomb copy): the swap
+  // of a macro-step. O(1) std::swap of the MultiFab handles (not a deep pops::lincomb copy): the swap
   // chain from the deepest slot down to 1 leaves every read slot k >= 1 holding slot k-1's old value
   // (identical to a copy-shift) and RECYCLES the now-oldest buffer into slot [0]. Slot [0] is always
   // overwritten by the next store before any read (the AB2 body stores then reads lag 1), so recycling
@@ -2261,24 +2261,24 @@ void System::set_history_initialized(const std::string& name, bool initialized) 
 
 // Load a generated problem.so and install its compiled time Program. Mirrors add_native_block
 // (native_loader.hpp): self-promote this module to the global scope so the .so resolves the System
-// seam accessors (ADC_EXPORT) against it, dlopen, fail-loud on ABI-key mismatch, then call
-// adc_install_program(this) which wraps the System in a ProgramContext and installs the macro-step
+// seam accessors (POPS_EXPORT) against it, dlopen, fail-loud on ABI-key mismatch, then call
+// pops_install_program(this) which wraps the System in a ProgramContext and installs the macro-step
 // closure. The .so stays loaded for the process lifetime (the closure runs every step).
-ADC_EXPORT void System::install_program(const std::string& so_path) {
+POPS_EXPORT void System::install_program(const std::string& so_path) {
 #if defined(_WIN32)
-  // Windows: the generated .dll links against _adc.lib at compile time; no global promotion needed.
-  adc::dynlib::handle h = adc::dynlib::open(so_path);
+  // Windows: the generated .dll links against _pops.lib at compile time; no global promotion needed.
+  pops::dynlib::handle h = pops::dynlib::open(so_path);
   if (!h) {
     throw std::runtime_error("System::install_program: LoadLibrary('" + so_path +
-                             "'): " + adc::dynlib::last_error());
+                             "'): " + pops::dynlib::last_error());
   }
 #else
   {
     // Promote the already-loaded module (found via an exported symbol) to the global scope so the
-    // .so's undefined System seam symbols (ADC_EXPORT) resolve against it. macOS: harmless (the .so
+    // .so's undefined System seam symbols (POPS_EXPORT) resolve against it. macOS: harmless (the .so
     // is built with -undefined dynamic_lookup).
     Dl_info info;
-    if (dladdr(reinterpret_cast<void*>(&adc::abi_key), &info) && info.dli_fname)
+    if (dladdr(reinterpret_cast<void*>(&pops::abi_key), &info) && info.dli_fname)
       dlopen(info.dli_fname, RTLD_NOW | RTLD_GLOBAL | RTLD_NOLOAD);
   }
   void* h = dlopen(so_path.c_str(), RTLD_NOW | RTLD_GLOBAL);
@@ -2286,43 +2286,43 @@ ADC_EXPORT void System::install_program(const std::string& so_path) {
     const char* e = dlerror();
     throw std::runtime_error(
         "System::install_program: dlopen('" + so_path + "'): " + std::string(e ? e : "?") +
-        " (the adc::System seam accessors must be exported AND the module loaded "
-        "globally; cf. ADC_EXPORT)");
+        " (the pops::System seam accessors must be exported AND the module loaded "
+        "globally; cf. POPS_EXPORT)");
   }
 #endif
-  auto key_fn = reinterpret_cast<const char* (*)()>(adc::dynlib::sym(h, "adc_program_abi_key"));
+  auto key_fn = reinterpret_cast<const char* (*)()>(pops::dynlib::sym(h, "pops_program_abi_key"));
   if (!key_fn) {
-    adc::dynlib::close(h);
-    throw std::runtime_error("System::install_program: adc_program_abi_key missing from '" +
+    pops::dynlib::close(h);
+    throw std::runtime_error("System::install_program: pops_program_abi_key missing from '" +
                              so_path +
                              "' (regenerate the problem module with the current adc headers)");
   }
   const std::string loader_key = key_fn();
-  const std::string module_key = adc::abi_key();
+  const std::string module_key = pops::abi_key();
   if (loader_key != module_key) {
-    adc::dynlib::close(h);
+    pops::dynlib::close(h);
     throw std::runtime_error(
         "System::install_program: compiled program ABI mismatch: expected '" + module_key +
         "', got '" + loader_key +
         "'. Recompile the problem module with the SAME compiler, C++ standard and "
-        "adc headers as the _adc module.");
+        "adc headers as the _pops module.");
   }
-  auto install = reinterpret_cast<void (*)(void*)>(adc::dynlib::sym(h, "adc_install_program"));
+  auto install = reinterpret_cast<void (*)(void*)>(pops::dynlib::sym(h, "pops_install_program"));
   if (!install) {
-    adc::dynlib::close(h);
-    throw std::runtime_error("System::install_program: adc_install_program missing from '" +
+    pops::dynlib::close(h);
+    throw std::runtime_error("System::install_program: pops_install_program missing from '" +
                              so_path + "'");
   }
 #if !defined(_WIN32)
   // Spec-2 criterion 24 (ADC-446): install-time requirement validation. The problem.so carries, per
-  // operator, the aux fields its body reads (adc_module_operator_requirements -> read_module_metadata).
+  // operator, the aux fields its body reads (pops_module_operator_requirements -> read_module_metadata).
   // Reject BEFORE installing the program if the simulation did not provide a required field, with a
   // spec-style message, instead of a cryptic failure mid-step. A pre-Spec-2 .so (present == false) or
   // an operator with no aux requirement carries nothing to check -> skip (backward compatible). Only
   // the user-supplied application fields (B_z, T_e) are hard requirements; derived/lazy fields cannot
   // block (see SystemFieldSolver::provides_aux). POSIX only: read_module_metadata uses dlsym directly.
   {
-    const auto meta = adc::runtime::program::read_module_metadata(h);
+    const auto meta = pops::runtime::program::read_module_metadata(h);
     const std::vector<std::string> sys_block_names = block_names();
     const std::string configured_solver = poisson_solver();
     auto has_block = [&sys_block_names](const std::string& want) {
@@ -2336,9 +2336,9 @@ ADC_EXPORT void System::install_program(const std::string& so_path) {
     for (const auto& op : meta.operators) {
       // (a) AUX FIELD requirements (ADC-446): the user-supplied application fields B_z / T_e. Only
       // these are hard requirements (provides_aux); the derived fields phi/grad cannot block.
-      for (const auto& aux : adc::runtime::program::required_aux(op.requirements)) {
+      for (const auto& aux : pops::runtime::program::required_aux(op.requirements)) {
         if (!p_->fields_.provides_aux(aux)) {
-          adc::dynlib::close(h);
+          pops::dynlib::close(h);
           throw std::runtime_error(
               "System::install_program: operator '" + op.name + "' requires aux field '" + aux +
               "', but simulation did not provide it (B_z -> set_magnetic_field, T_e -> "
@@ -2348,9 +2348,9 @@ ADC_EXPORT void System::install_program(const std::string& so_path) {
       // (b) BLOCK-INSTANCE requirements (ADC-466, Spec criterion 24): an operator that reads another
       // species (e.g. collisions) names the block instance it needs; reject if it was not added. The
       // verbatim spec message names the operator and the missing instance.
-      for (const auto& blk : adc::runtime::program::required_blocks(op.requirements)) {
+      for (const auto& blk : pops::runtime::program::required_blocks(op.requirements)) {
         if (!has_block(blk)) {
-          adc::dynlib::close(h);
+          pops::dynlib::close(h);
           throw std::runtime_error("operator '" + op.name + "' requires block instance '" + blk +
                                    "'");
         }
@@ -2358,9 +2358,9 @@ ADC_EXPORT void System::install_program(const std::string& so_path) {
       // (c) SOLVER requirement (ADC-466): a field operator that requires a named field solver is
       // rejected at install when the configured Poisson solver (set_poisson) does not match. The
       // verbatim spec message names the field operator and the required solver.
-      const std::string need_solver = adc::runtime::program::required_solver(op.requirements);
+      const std::string need_solver = pops::runtime::program::required_solver(op.requirements);
       if (!need_solver.empty() && need_solver != configured_solver) {
-        adc::dynlib::close(h);
+        pops::dynlib::close(h);
         throw std::runtime_error("field operator '" + op.name + "' requires solver '" + need_solver +
                                  "'");
       }
@@ -2368,7 +2368,7 @@ ADC_EXPORT void System::install_program(const std::string& so_path) {
   }
 #endif
   // NAME-based block binding (Spec 3 criterion 23, ADC-457). A compiled Program numbers its blocks in
-  // P.state declaration order (the .so's adc_program_block_name table); the System numbers its blocks
+  // P.state declaration order (the .so's pops_program_block_name table); the System numbers its blocks
   // in add order (block_names). They need NOT agree -- bind by NAME, not add-order. Read the .so's
   // block names, map each Program block index to the System block of that name, and store the
   // program-index -> system-index map (read by ProgramContext to resolve every ctx.state / rhs_into /
@@ -2379,8 +2379,8 @@ ADC_EXPORT void System::install_program(const std::string& so_path) {
   {
     using count_t = int (*)();
     using name_t = const char* (*)(int);
-    auto block_count = reinterpret_cast<count_t>(adc::dynlib::sym(h, "adc_program_block_count"));
-    auto block_name = reinterpret_cast<name_t>(adc::dynlib::sym(h, "adc_program_block_name"));
+    auto block_count = reinterpret_cast<count_t>(pops::dynlib::sym(h, "pops_program_block_count"));
+    auto block_name = reinterpret_cast<name_t>(pops::dynlib::sym(h, "pops_program_block_name"));
     if (block_count && block_name) {
       const std::vector<std::string> sys_names = block_names();
       const int n = block_count();
@@ -2394,7 +2394,7 @@ ADC_EXPORT void System::install_program(const std::string& so_path) {
             break;
           }
         if (found < 0) {
-          adc::dynlib::close(h);
+          pops::dynlib::close(h);
           throw std::runtime_error("Program requires block instance '" + want +
                                    "', but simulation did not instantiate it");
         }
@@ -2406,25 +2406,25 @@ ADC_EXPORT void System::install_program(const std::string& so_path) {
     }
   }
   install(static_cast<void*>(this));
-  // Record the program's IR hash (ADC-406b): the optional adc_program_hash export (a stable IR key,
+  // Record the program's IR hash (ADC-406b): the optional pops_program_hash export (a stable IR key,
   // cf. _PROGRAM_CPP_TEMPLATE) is serialized in the checkpoint so a restart against a DIFFERENT
   // compiled Program is rejected fail-loud. Missing symbol (older module) -> empty hash, no guard.
-  auto hash_fn = reinterpret_cast<const char* (*)()>(adc::dynlib::sym(h, "adc_program_hash"));
+  auto hash_fn = reinterpret_cast<const char* (*)()>(pops::dynlib::sym(h, "pops_program_hash"));
   p_->installed_program_hash_ = hash_fn ? std::string(hash_fn()) : std::string();
   // OPTIONAL dt bound (epic ADC-399 / ADC-417, spec s18). A Program may export a SECOND ABI pair --
-  // adc_program_has_dt_bound() and adc_program_dt_bound(ProgramContext*, Real cfl) -- alongside
-  // adc_install_program. When present AND has_dt_bound() is true, store a closure that builds a
+  // pops_program_has_dt_bound() and pops_program_dt_bound(ProgramContext*, Real cfl) -- alongside
+  // pops_install_program. When present AND has_dt_bound() is true, store a closure that builds a
   // ProgramContext over THIS System and runs the .so's lowered dt_bound expression for a given cfl;
   // step_cfl tightens dt to min(native CFL, program dt bound). A Program WITHOUT a dt bound (older
   // module / has_dt_bound() == false) clears the closure -> the native CFL is used UNCHANGED.
   using has_dt_t = bool (*)();
-  using dt_bound_t = adc::Real (*)(adc::runtime::program::ProgramContext*, adc::Real);
-  auto has_dt = reinterpret_cast<has_dt_t>(adc::dynlib::sym(h, "adc_program_has_dt_bound"));
-  auto dt_bound = reinterpret_cast<dt_bound_t>(adc::dynlib::sym(h, "adc_program_dt_bound"));
+  using dt_bound_t = pops::Real (*)(pops::runtime::program::ProgramContext*, pops::Real);
+  auto has_dt = reinterpret_cast<has_dt_t>(pops::dynlib::sym(h, "pops_program_has_dt_bound"));
+  auto dt_bound = reinterpret_cast<dt_bound_t>(pops::dynlib::sym(h, "pops_program_dt_bound"));
   if (has_dt && dt_bound && has_dt()) {
     System* self = this;
     p_->program_dt_bound_ = [self, dt_bound](Real cfl) -> Real {
-      adc::runtime::program::ProgramContext ctx(self);
+      pops::runtime::program::ProgramContext ctx(self);
       return dt_bound(&ctx, cfl);
     };
   } else {
@@ -2436,9 +2436,9 @@ std::string System::installed_program_hash() const {
   return p_->installed_program_hash_;
 }
 // SCHEDULER VALUE CACHE (ADC-458): the System-owned CacheManager every ProgramContext forwards to. The
-// .so resolves this across the dlopen boundary (ADC_EXPORT), so the step closure's cache_store_aux /
+// .so resolves this across the dlopen boundary (POPS_EXPORT), so the step closure's cache_store_aux /
 // cache_should_update reach the SAME manager the checkpoint serializes.
-ADC_EXPORT adc::runtime::program::CacheManager& System::program_cache() { return p_->program_cache_; }
+POPS_EXPORT pops::runtime::program::CacheManager& System::program_cache() { return p_->program_cache_; }
 // Scheduler-cache checkpoint/restart seam (ADC-458, Spec 3 section 30): the System owns the cache, so
 // the facade (sim.checkpoint / sim.restart) gathers and restores it DIRECTLY -- reusing the SAME global
 // gather (gather_global, via copy_state) / scatter (write_state) machinery as the block state and the
@@ -2488,7 +2488,7 @@ std::string System::poisson_solver() const {
 }
 // NAME-based block binding seam (Spec 3 criterion 23, ADC-457). install_program builds the map after
 // matching the .so's block names; ProgramContext reads it to translate a Program block index to the
-// name-matched System block index. ADC_EXPORT: resolved by the generated .so across the dlopen boundary.
+// name-matched System block index. POPS_EXPORT: resolved by the generated .so across the dlopen boundary.
 void System::set_program_block_map(const std::vector<int>& prog_to_sys) {
   p_->program_block_map_ = prog_to_sys;
 }
@@ -2702,4 +2702,4 @@ std::vector<double> System::local_state(const std::string& name, int li) const {
   return out;
 }
 
-}  // namespace adc
+}  // namespace pops

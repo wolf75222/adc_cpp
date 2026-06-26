@@ -1,6 +1,6 @@
-"""Coherence contract for adc.capabilities() (ADC-297).
+"""Coherence contract for pops.capabilities() (ADC-297).
 
-adc.capabilities() is the published source of truth for what the runtime can dispatch
+pops.capabilities() is the published source of truth for what the runtime can dispatch
 (Riemann fluxes, time methods, stability bounds, Poisson, geometry, Schur, DSL backends,
 IO, AMR layout, aux). It is a hand-written dict, so it can silently drift from the gates it
 claims to mirror. These checks pin the capability surface to facts that are verified
@@ -27,11 +27,11 @@ documentation update:
        Decision 5), with the mono-block / compiled .so paths declared component-0 only; guards
        the "regrid is component-0 only" doc regression now that a selector exists.
 
-The test is pure Python: it only reads adc.capabilities() and adc.dsl._BACKEND_CAPS, so it
-needs the _adc extension to import but does not build or run any model.
+The test is pure Python: it only reads pops.capabilities() and pops.dsl._BACKEND_CAPS, so it
+needs the _pops extension to import but does not build or run any model.
 """
-import adc
-from adc import dsl
+import pops
+from pops import dsl
 
 EXPECTED_TOP_KEYS = {
     "dimension", "riemann", "time", "stability_policy", "poisson", "geometry", "schur",
@@ -40,13 +40,13 @@ EXPECTED_TOP_KEYS = {
 
 
 def test_top_level_keys_present():
-    caps = adc.capabilities()
+    caps = pops.capabilities()
     missing = EXPECTED_TOP_KEYS - set(caps)
     assert not missing, "capabilities() lost published top-level key(s): %s" % sorted(missing)
 
 
 def test_riemann_surface_matches_dispatch():
-    riemann = adc.capabilities()["riemann"]
+    riemann = pops.capabilities()["riemann"]
     assert riemann["system_cartesian"] == ["rusanov", "hll", "hllc", "roe"], riemann["system_cartesian"]
     assert riemann["amr"] == ["rusanov", "hll", "hllc", "roe"], riemann["amr"]
     # Polar has no energy-flux brick: hllc/roe are rejected by make_block_polar, only
@@ -56,7 +56,7 @@ def test_riemann_surface_matches_dispatch():
 
 
 def test_backends_dsl_flags_match_backend_caps():
-    caps_b = adc.capabilities()["backends_dsl"]
+    caps_b = pops.capabilities()["backends_dsl"]
     for backend in ("prototype", "aot", "production"):
         ref = dsl._BACKEND_CAPS[backend]
         got = caps_b[backend]
@@ -67,13 +67,13 @@ def test_backends_dsl_flags_match_backend_caps():
 
 
 def test_polar_stability_bounds_advertised_wired():
-    polar = " ".join(adc.capabilities()["stability_policy"]["system_polar"])
+    polar = " ".join(pops.capabilities()["stability_policy"]["system_polar"])
     for bound in ("stability_speed", "stability_dt", "source_frequency"):
         assert bound in polar, "polar stability bound %r missing from capabilities()" % bound
 
 
 def test_amr_schur_advertised_implemented():
-    amr_schur = adc.capabilities()["schur"]["amr"]
+    amr_schur = pops.capabilities()["schur"]["amr"]
     assert amr_schur and "Phase 4a" in amr_schur, \
         "schur.amr should advertise the implemented Phase 4a composite stage, got: %r" % amr_schur
     assert "the implementation does not" not in amr_schur
@@ -84,7 +84,7 @@ def test_dimension_invariant_2d():
     # structured scalar (not prose) so scripts and the limitations doc can introspect it, and it is
     # a SEPARATE top-level key, NOT nested under "geometry" (polar is a second geometry at the SAME
     # dimension, not a third axis).
-    caps = adc.capabilities()
+    caps = pops.capabilities()
     dim = caps["dimension"]
     assert dim == 2, "capabilities()['dimension'] should declare the 2D-core invariant, got %r" % (dim,)
     # bool is a subclass of int in Python; pin to a plain int so True / 2.0 / "2" cannot pass.
@@ -98,7 +98,7 @@ def test_regrid_variable_selector_advertised():
     # ADC-296 / ADR-0001 Decision 5: the multi-block regrid variable is selectable by name/role
     # (default = component 0). The mono-block and compiled .so paths stay component-0 only. The
     # surface mirrors AmrSystem.set_refinement(threshold, variable=, role=).
-    regrid = adc.capabilities()["regrid"]
+    regrid = pops.capabilities()["regrid"]
     assert set(regrid["variable_selector"]) == {"component_0", "by_name", "by_role"}, \
         regrid["variable_selector"]
     assert "by_name" in regrid["multi_block"] and "by_role" in regrid["multi_block"], regrid["multi_block"]
@@ -109,29 +109,29 @@ def test_regrid_variable_selector_advertised():
 def test_aux_named_surface_and_limit_parity():
     # ADC-291: named aux is advertised on System (cartesian + polar) AND AMR (single + multi block),
     # no longer "cartesian System only". The remaining compile-time limit (kAuxMaxExtra) is published
-    # as an introspectable scalar and MUST match BOTH the C++ source (_adc.__aux_max_extra__) and the
+    # as an introspectable scalar and MUST match BOTH the C++ source (_pops.__aux_max_extra__) and the
     # DSL mirror (dsl.AUX_NAMED_MAX) -- this pins the hand-maintained Python<->C++ mirror so it cannot
     # silently drift (the historical #51-class risk the issue calls out).
-    from adc import _adc
-    named = adc.capabilities()["aux"]["named"]
+    from pops import _pops
+    named = pops.capabilities()["aux"]["named"]
     assert set(named["backends"]) >= {"system_cartesian", "system_polar", "amr_single_block",
                                       "amr_multi_block"}, named["backends"]
     # the limit is the SINGLE C++ source, mirrored by the DSL constant.
-    assert named["limit"] == _adc.__aux_max_extra__ == dsl.AUX_NAMED_MAX, \
+    assert named["limit"] == _pops.__aux_max_extra__ == dsl.AUX_NAMED_MAX, \
         "aux named limit drift: caps=%r, C++=%r, dsl=%r" % (
-            named["limit"], _adc.__aux_max_extra__, dsl.AUX_NAMED_MAX)
+            named["limit"], _pops.__aux_max_extra__, dsl.AUX_NAMED_MAX)
     # the aux ghost width is explicit (the configurable-radius mechanism is a documented follow-up).
     assert named["halo_radius"] == 1, named["halo_radius"]
     # the other mirrored aux constants stay coherent C++ <-> DSL.
-    assert _adc.__aux_named_base__ == dsl.AUX_NAMED_BASE, "AUX_NAMED_BASE drift"
-    assert _adc.__aux_base_comps__ == dsl.AUX_BASE_COMPS, "AUX_BASE_COMPS drift"
-    assert _adc.__aux_max_comps__ == _adc.__aux_named_base__ + _adc.__aux_max_extra__
+    assert _pops.__aux_named_base__ == dsl.AUX_NAMED_BASE, "AUX_NAMED_BASE drift"
+    assert _pops.__aux_base_comps__ == dsl.AUX_BASE_COMPS, "AUX_BASE_COMPS drift"
+    assert _pops.__aux_max_comps__ == _pops.__aux_named_base__ + _pops.__aux_max_extra__
     # the C++ canonical name->component table mirrors the Python AUX_CANONICAL exactly.
-    assert dict(_adc.__aux_canonical__) == dict(dsl.AUX_CANONICAL), \
+    assert dict(_pops.__aux_canonical__) == dict(dsl.AUX_CANONICAL), \
         "C++ aux_names table != Python AUX_CANONICAL: %r vs %r" % (
-            dict(_adc.__aux_canonical__), dict(dsl.AUX_CANONICAL))
+            dict(_pops.__aux_canonical__), dict(dsl.AUX_CANONICAL))
     # no stale "cartesian System only" claim survives in the aux surface.
-    blob = repr(adc.capabilities()["aux"]).lower()
+    blob = repr(pops.capabilities()["aux"]).lower()
     assert "cartesian system only" not in blob, "stale 'cartesian System only' aux claim"
 
 

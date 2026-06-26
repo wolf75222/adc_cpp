@@ -15,18 +15,18 @@
 // bench/run_scaling.sh. Le libelle --scaling est juste recopie dans le JSON. Compile/lance avec le MEME
 // backend que la lib (Serie / Kokkos OpenMP / Cuda) et sous MPI sans changement. ZERO optimisation.
 
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/layout/distribution_mapping.hpp>
-#include <adc/mesh/boundary/fill_boundary.hpp>
-#include <adc/mesh/geometry/geometry.hpp>
-#include <adc/mesh/storage/mf_arith.hpp>  // dot (brique des reductions)
-#include <adc/mesh/storage/multifab.hpp>
-#include <adc/mesh/boundary/physical_bc.hpp>
-#include <adc/numerics/elliptic/mg/geometric_mg.hpp>
-#include <adc/numerics/spatial_operator.hpp>
-#include <adc/parallel/comm.hpp>
-#include <adc/physics/bricks/bricks.hpp>
-#include <adc/physics/fluids/euler.hpp>
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/layout/distribution_mapping.hpp>
+#include <pops/mesh/boundary/fill_boundary.hpp>
+#include <pops/mesh/geometry/geometry.hpp>
+#include <pops/mesh/storage/mf_arith.hpp>  // dot (brique des reductions)
+#include <pops/mesh/storage/multifab.hpp>
+#include <pops/mesh/boundary/physical_bc.hpp>
+#include <pops/numerics/elliptic/mg/geometric_mg.hpp>
+#include <pops/numerics/spatial_operator.hpp>
+#include <pops/parallel/comm.hpp>
+#include <pops/physics/bricks/bricks.hpp>
+#include <pops/physics/fluids/euler.hpp>
 
 #include <algorithm>
 #include <chrono>
@@ -38,15 +38,15 @@
 #include <string>
 #include <vector>
 
-using namespace adc;
+using namespace pops;
 using Clock = std::chrono::steady_clock;
 static constexpr double kPi = 3.14159265358979323846;
 
-#ifndef ADC_BUILD_SHA
-#define ADC_BUILD_SHA "unknown"
+#ifndef POPS_BUILD_SHA
+#define POPS_BUILD_SHA "unknown"
 #endif
-#ifndef ADC_BUILD_BRANCH
-#define ADC_BUILD_BRANCH "unknown"
+#ifndef POPS_BUILD_BRANCH
+#define POPS_BUILD_BRANCH "unknown"
 #endif
 
 using SafeEuler = CompositeModel<Euler, NoSource, ChargeDensity>;
@@ -148,9 +148,9 @@ static void fill_smooth_rhs(MultiFab& rhs, const Geometry& geom) {
   }
 }
 
-// Checkpoint de debug rang-tagge (gate par $ADC_DBG) pour localiser un deadlock multi-rang.
+// Checkpoint de debug rang-tagge (gate par $POPS_DBG) pour localiser un deadlock multi-rang.
 static void dbg(const char* m) {
-  if (std::getenv("ADC_DBG")) {
+  if (std::getenv("POPS_DBG")) {
     std::fprintf(stderr, "[r%d] %s\n", my_rank(), m);
     std::fflush(stderr);
   }
@@ -188,11 +188,11 @@ int main(int argc, char** argv) {
   if (workload == "amr") {
     if (my_rank() == 0)
       std::printf(
-          "{\"schema\":\"adc_perf_v1\",\"front\":\"cpp_scaling\",\"workload\":\"amr\","
+          "{\"schema\":\"pops_perf_v1\",\"front\":\"cpp_scaling\",\"workload\":\"amr\","
           "\"status\":\"not_implemented\",\"reason\":\"AmrSystem C++ entry not wired into bench; "
           "generic AMR path does not compile under nvcc (see notes). Run AMR scaling via a dedicated "
-          "AmrSystem program.\",\"adc_cpp_sha\":\"%s\",\"adc_cpp_branch\":\"%s\",\"n\":%d}\n",
-          ADC_BUILD_SHA, ADC_BUILD_BRANCH, n);
+          "AmrSystem program.\",\"pops_cpp_sha\":\"%s\",\"pops_cpp_branch\":\"%s\",\"n\":%d}\n",
+          POPS_BUILD_SHA, POPS_BUILD_BRANCH, n);
     comm_finalize();
     return 0;
   }
@@ -337,8 +337,8 @@ int main(int argc, char** argv) {
 
   if (my_rank() == 0) {
     std::printf(
-        "{\"schema\":\"adc_perf_v1\",\"front\":\"cpp_scaling\","
-        "\"adc_cpp_sha\":\"%s\",\"adc_cpp_branch\":\"%s\","
+        "{\"schema\":\"pops_perf_v1\",\"front\":\"cpp_scaling\","
+        "\"pops_cpp_sha\":\"%s\",\"pops_cpp_branch\":\"%s\","
         "\"backend\":\"%s\",\"machine\":\"%s\",\"ranks\":%d,\"threads\":%d,\"gpus\":%d,"
         "\"workload\":\"%s\",\"scaling\":\"%s\",\"nx\":%d,\"ny\":%d,\"boxes\":%d,\"max_grid\":%d,"
         "\"warmup\":%d,\"steps\":%d,"
@@ -346,7 +346,7 @@ int main(int argc, char** argv) {
         "\"phases_ms_per_step\":{\"halos\":%.6e,\"transport\":%.6e,\"poisson\":%.6e,"
         "\"reduction\":%.6e,\"alloc_tmp\":%.6e,\"diag\":%.6e},"
         "\"cells_per_s\":%.6e,\"invariants\":%s}\n",
-        ADC_BUILD_SHA, ADC_BUILD_BRANCH, backend.c_str(), machine.c_str(), n_ranks(), threads, 0,
+        POPS_BUILD_SHA, POPS_BUILD_BRANCH, backend.c_str(), machine.c_str(), n_ranks(), threads, 0,
         workload.c_str(), scaling.c_str(), n, n, ba.size(), max_grid, warmup, steps, med, p10, p90,
         cv, halos_ms, transport_ms, poisson_ms, reduction_ms, alloc_ms, diag_ms, cells_per_s, invbuf);
   }

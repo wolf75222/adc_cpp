@@ -38,29 +38,29 @@
 // CIBLE le MULTI-BOX intra-rang (a np=1 : 8 boites theta / pavage 2x2 sur UN rang). Les solves et les
 // normes L2 sont COLLECTIFS (all_reduce sur tous les rangs) -> le test est aussi CORRECT sous MPI (la
 // parite tient cross-rang ; le cross-rang A=I est par ailleurs couvert par test_mpi_polar_schur).
-// Enregistre serie (adc_add_test). Independant du backend (header-only, propriete algebrique ; tous les
+// Enregistre serie (pops_add_test). Independant du backend (header-only, propriete algebrique ; tous les
 // kernels du chemin sont des foncteurs nommes device-clean).
 
-#include <adc/mesh/index/box2d.hpp>
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/layout/distribution_mapping.hpp>
-#include <adc/mesh/storage/fab2d.hpp>
-#include <adc/mesh/geometry/geometry.hpp>
-#include <adc/mesh/storage/multifab.hpp>
-#include <adc/mesh/boundary/physical_bc.hpp>
-#include <adc/numerics/elliptic/polar/polar_tensor_operator.hpp>
-#include <adc/parallel/comm.hpp>
+#include <pops/mesh/index/box2d.hpp>
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/layout/distribution_mapping.hpp>
+#include <pops/mesh/storage/fab2d.hpp>
+#include <pops/mesh/geometry/geometry.hpp>
+#include <pops/mesh/storage/multifab.hpp>
+#include <pops/mesh/boundary/physical_bc.hpp>
+#include <pops/numerics/elliptic/polar/polar_tensor_operator.hpp>
+#include <pops/parallel/comm.hpp>
 
 #include <cmath>
 #include <cstdio>
 #include <stdexcept>
 #include <vector>
 
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
 #include <Kokkos_Core.hpp>
 #endif
 
-using namespace adc;
+using namespace pops;
 
 static constexpr double kPiL = 3.14159265358979323846;
 static constexpr double kRmin = 0.30;
@@ -279,11 +279,11 @@ static double err_l2(const MultiFab& phi, const PolarGeometry& g, Problem prob, 
 
 int main(int argc, char** argv) {
   comm_init(&argc, &argv);
-  // `ok` declare AVANT le bloc Kokkos-garde : sous ADC_HAS_KOKKOS la paire init/finalize ouvre
+  // `ok` declare AVANT le bloc Kokkos-garde : sous POPS_HAS_KOKKOS la paire init/finalize ouvre
   // un bloc { } autour du corps. Le `return ok ? 0 : 1;` final est APRES la fermeture de ce bloc,
   // donc `ok` doit vivre dans la portee de main() pour rester visible dans LES DEUX builds.
   bool ok = true;
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   Kokkos::initialize(argc, argv);
   {
 #endif
@@ -433,7 +433,7 @@ int main(int argc, char** argv) {
     SAY("\n=== VERDICT : %s ===\n", ok ? "SUCCESS" : "ECHEC");
     if (ok)
       SAY("OK test_polar_schur_multibox\n");
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   }
   Kokkos::finalize();
 #endif

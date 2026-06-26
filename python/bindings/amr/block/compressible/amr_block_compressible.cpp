@@ -2,9 +2,9 @@
 // leaf (all fluxes + the SourceFreeModel IMEX doubling). ADC-359 flux subdivision: this TU is now the thin
 // riemann dispatcher, routing to the per-flux build_amr_block_compressible_<flux> seam TUs (each compiles
 // ONE flux's build_amr_block leaves in parallel). See amr_block_seam.hpp.
-#include <adc/runtime/builders/block/amr_block_seam.hpp>
+#include <pops/runtime/builders/block/amr_block_seam.hpp>
 
-namespace adc::detail {
+namespace pops::detail {
 
 AmrRuntimeBlock build_amr_block_compressible(const AmrBlockBuildArgs& a, const SharedAmrLayout& S) {
   // Every flux is valid for Euler (no capability rejection here); an unknown flux is caught by the shared
@@ -22,4 +22,4 @@ AmrRuntimeBlock build_amr_block_compressible(const AmrBlockBuildArgs& a, const S
   throw_registry_dispatch_mismatch("add_block(AmrSystem, multi-block)", "flux", a.riemann);
 }
 
-}  // namespace adc::detail
+}  // namespace pops::detail

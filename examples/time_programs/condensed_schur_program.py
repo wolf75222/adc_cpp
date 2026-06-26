@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Condensed-Schur: the Program macro + a matrix-free Schur-like solve (epic ADC-399 / ADC-421).
 
-``adc.time.std.condensed_schur`` (ADC-421) lowers the implicit electrostatic-Lorentz source stage to a
+``pops.time.std.condensed_schur`` (ADC-421) lowers the implicit electrostatic-Lorentz source stage to a
 compiled Program -- the anisotropic coefficient assembly (``P.schur_coeffs`` -> the native
 ``A = I + c*rho*B^{-1}`` tensor), the coefficiented matrix-free matvec (``P.apply_laplacian_coeff``),
 the fused RHS (``P.schur_rhs``) and the closed-B^{-1} reconstruction (``P.schur_reconstruct``) solved
@@ -12,17 +12,17 @@ with ``P.solve_linear`` (BiCGStab) -- mirroring the native ``CondensedSchurSourc
       operator is the SCALAR Schur-like flux operator A(phi) = phi - alpha*div(grad phi) (the
       div(flux) structure of the condensed Poisson operator on the WIDE-stencil Laplacian), checked
       against an offline NumPy CG on the SAME discrete operator (like divergence_solve.py);
-  (b) shows ``adc.time.std.condensed_schur(P, "blk", alpha=1.0, theta=1.0)`` lowering the full
+  (b) shows ``pops.time.std.condensed_schur(P, "blk", alpha=1.0, theta=1.0)`` lowering the full
       assemble / solve / reconstruct chain, and the deferred ``theta != 1`` extrapolation raising. The
       end-to-end parity vs an offline reference is in ``python/tests/test_time_condensed_schur.py``; the
-      native ``adc.CondensedSchur`` source stepper stays fully supported.
+      native ``pops.CondensedSchur`` source stepper stays fully supported.
 
 The wide-stencil centered div(grad) is the Laplacian (x(i+2) - 2 x(i) + x(i-2))/(4 h^2); A is a
 well-posed SPD Helmholtz operator on it. Run::
 
     python examples/time_programs/condensed_schur_program.py
 
-Requires a compiler + a visible Kokkos (``ADC_KOKKOS_ROOT``); prints a skip notice and exits 0
+Requires a compiler + a visible Kokkos (``POPS_KOKKOS_ROOT``); prints a skip notice and exits 0
 otherwise. cf. docs/sphinx/reference/time-program.md.
 """
 import sys
@@ -30,9 +30,9 @@ import sys
 try:
     import numpy as np
 
-    import adc
-    from adc import dsl
-    from adc import time as adctime
+    import pops
+    from pops import dsl
+    from pops import time as adctime
 except Exception as exc:  # noqa: BLE001
     print("skip condensed_schur_program (adc/numpy unavailable: %s)" % exc)
     sys.exit(0)
@@ -135,8 +135,8 @@ def show_macro():
 
 def main():
     n = 16
-    if not hasattr(adc.System(n=8, L=1.0, periodic=True), "install_program"):
-        print("skip condensed_schur_program (_adc lacks the install_program binding; rebuild _adc)")
+    if not hasattr(pops.System(n=8, L=1.0, periodic=True), "install_program"):
+        print("skip condensed_schur_program (_pops lacks the install_program binding; rebuild _pops)")
         return 0
 
     # (b) the macro lowering is pure Python -- it always runs (no toolchain needed).
@@ -144,17 +144,17 @@ def main():
 
     # (a) the available primitives: a matrix-free Schur-like solve.
     try:
-        compiled = adc.compile_problem(model=passive_model("cs_prog"), time=schur_like_program())
+        compiled = pops.compile_problem(model=passive_model("cs_prog"), time=schur_like_program())
         block_model = passive_model("cs_blk").compile(backend="production")
     except RuntimeError as exc:  # no compiler / no Kokkos visible / compile failed
         print("skip condensed_schur_program (compile_problem could not build the .so: %s)"
               % str(exc)[:160])
         return 0
 
-    sim = adc.System(n=n, L=1.0, periodic=True)
+    sim = pops.System(n=n, L=1.0, periodic=True)
     sim.add_equation("blk", block_model,
-                     spatial=adc.FiniteVolume(limiter="none", riemann="rusanov"),
-                     time=adc.Explicit(method="euler"))
+                     spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                     time=pops.Explicit(method="euler"))
     x = (np.arange(n) + 0.5) / n
     X, Y = np.meshgrid(x, x, indexing="ij")
     b = 1.0 + 0.3 * np.sin(2 * np.pi * X) * np.cos(2 * np.pi * Y)  # the right-hand side (= U)

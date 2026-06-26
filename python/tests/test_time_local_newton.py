@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""adc.time LOCAL NON-LINEAR SOLVE codegen, end to end (epic ADC-399 / ADC-422).
+"""pops.time LOCAL NON-LINEAR SOLVE codegen, end to end (epic ADC-399 / ADC-422).
 
 `P.solve_local_nonlinear` (spec op 10) now LOWERS a per-cell Newton iteration: from the initial guess
 U0, ``emit_cpp_program`` emits a device kernel that re-evaluates an inlined residual ``r(U)`` (built
 from the residual sub-block -- named ``source`` / ``apply`` per-cell Exprs + the iterate / frozen guess
 + affine combines), forms an in-kernel finite-difference Jacobian, and solves the Newton step
-``J dU = -r`` with the SAME stack dense inverse ``adc::detail::mat_inverse<N>`` ``solve_local_linear``
+``J dU = -r`` with the SAME stack dense inverse ``pops::detail::mat_inverse<N>`` ``solve_local_linear``
 uses -- iterating to ``max_c |r_c| < tol`` or the budget. No heap / std::function / Eigen in the kernel
 (only stack scalars + fixed ``[N]`` / ``[N][N]`` arrays).
 
@@ -20,16 +20,16 @@ uses -- iterating to ``max_c |r_c| < tol`` or the budget. No heap / std::functio
     step(dt). The implicit step has the closed form rho = (-1 + sqrt(1 + 4*dt*k*rho0))/(2*dt*k); the
     stepped rho must match it AND an offline numpy Newton on the identical residual to ~1e-10, with the
     offline Newton taking > 1 iteration and its residual dropping by many orders. Skips (exit 0) without
-    numpy / _adc / a compiler / a visible Kokkos, or if the .so compile fails -- never faking the engine.
+    numpy / _pops / a compiler / a visible Kokkos, or if the .so compile fails -- never faking the engine.
 """
 import sys
 
 
 def _adc_time():
     try:
-        import adc.time as t
+        import pops.time as t
     except Exception as exc:  # noqa: BLE001 -- adc not importable here -> skip, never fake
-        print("skip test_time_local_newton (adc.time unavailable: %s)" % exc)
+        print("skip test_time_local_newton (pops.time unavailable: %s)" % exc)
         sys.exit(0)
     return t
 
@@ -96,9 +96,9 @@ def chk(cond, label):
 def section_a(t):
     print("== (A) solve_local_nonlinear validation + codegen ==")
     try:
-        from adc import dsl
-    except Exception as exc:  # noqa: BLE001 -- dsl needs _adc; A still skips cleanly, never fakes
-        print("-- (A) skipped: adc.dsl unavailable (%s) --" % exc)
+        from pops import dsl
+    except Exception as exc:  # noqa: BLE001 -- dsl needs _pops; A still skips cleanly, never fakes
+        print("-- (A) skipped: pops.dsl unavailable (%s) --" % exc)
         return
 
     # --- builder validation ---
@@ -150,10 +150,10 @@ def section_a(t):
     # --- the codegen lowers a per-cell Newton kernel ---
     m = reaction_model(dsl, "react_cg", 2.0)
     src = reaction_program(t, "react_cg").emit_cpp_program(model=m)
-    for frag in ("auto residual_eval = [&]", "adc::detail::mat_inverse<1>(",
+    for frag in ("auto residual_eval = [&]", "pops::detail::mat_inverse<1>(",
                  "for (int it_ = 0;", "J_[1][1]", "std::fmax(rmax_, std::fabs(r_",
-                 "if (rmax_ < static_cast<adc::Real>(1e-12)) break;",
-                 "const adc::Real eps_", "U_[i_] -= du_;", "adc::for_each_cell("):
+                 "if (rmax_ < static_cast<pops::Real>(1e-12)) break;",
+                 "const pops::Real eps_", "U_[i_] -= du_;", "pops::for_each_cell("):
         chk(frag in src, "the Newton kernel has %r" % frag)
     # The residual is the affine r = U - U0 - dt*S(U); S(U) = -k U^2 reads the iterate stack.
     chk("Gval[0] = u" in src, "the frozen guess is read into a stack vector")
@@ -186,14 +186,14 @@ def section_b(t):
     try:
         import numpy as np
 
-        import adc
-        from adc import dsl
+        import pops
+        from pops import dsl
     except Exception as exc:  # noqa: BLE001
         print("-- (B) skipped: adc/numpy unavailable: %s --" % exc)
         return
 
-    if not hasattr(adc.System(n=8, L=1.0, periodic=True), "install_program"):
-        print("-- (B) skipped: _adc lacks the install_program binding (rebuild _adc) --")
+    if not hasattr(pops.System(n=8, L=1.0, periodic=True), "install_program"):
+        print("-- (B) skipped: _pops lacks the install_program binding (rebuild _pops) --")
         return
 
     print("== (B) end-to-end: per-cell implicit reaction vs analytic + offline Newton ==")
@@ -222,21 +222,21 @@ def section_b(t):
 
     # ---- compile the Program + a native reaction block, run one implicit step ----
     try:
-        compiled = adc.compile_problem(model=reaction_model(dsl, "react_prog", k),
+        compiled = pops.compile_problem(model=reaction_model(dsl, "react_prog", k),
                                        time=reaction_program(t, "react_step"))
     except RuntimeError as exc:  # no compiler / no Kokkos visible / .so compile failed
         _skip("compile_problem could not build the .so: %s" % str(exc)[:160])
 
     chk(compiled.program_name == "react_step", "handle carries the program name")
 
-    sim = adc.System(n=n, L=1.0, periodic=True)
+    sim = pops.System(n=n, L=1.0, periodic=True)
     try:
         compiled_model = reaction_model(dsl, "react_block", k).compile(backend="production")
     except RuntimeError as exc:
         _skip("model compile could not build the .so: %s" % str(exc)[:160])
     sim.add_equation("blk", compiled_model,
-                     spatial=adc.FiniteVolume(limiter="none", riemann="rusanov"),
-                     time=adc.Explicit(method="euler"))
+                     spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                     time=pops.Explicit(method="euler"))
 
     # A KNOWN positive field with spatial variation (each cell solves its own scalar Newton).
     x = (np.arange(n) + 0.5) / n

@@ -8,17 +8,17 @@
 // Invariant au nombre de rangs : reussit en serie (np=1, chemin local) comme en
 // distribue (np>1, chemin MPI). Couvre aussi les coins (shifts diagonaux).
 
-#include <adc/mesh/index/box2d.hpp>
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/boundary/fill_boundary.hpp>
-#include <adc/mesh/storage/multifab.hpp>
-#include <adc/parallel/comm.hpp>
-#include <adc/parallel/load_balance.hpp>
+#include <pops/mesh/index/box2d.hpp>
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/boundary/fill_boundary.hpp>
+#include <pops/mesh/storage/multifab.hpp>
+#include <pops/parallel/comm.hpp>
+#include <pops/parallel/load_balance.hpp>
 
 #include <cmath>
 #include <cstdio>
 
-using namespace adc;
+using namespace pops;
 
 int main(int argc, char** argv) {
   comm_init(&argc, &argv);

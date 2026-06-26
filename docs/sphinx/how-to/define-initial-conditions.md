@@ -9,7 +9,7 @@ page assumes you already have a `System` with at least one block and a configure
 ## Set a scalar density
 
 `set_density(NAME, ARR)` sets the density (component 0) of block `NAME` and leaves the rest at
-rest. `ARR` is an `(n, n)` array; `n` is the per-side cell count passed to `adc.System`. Use it
+rest. `ARR` is an `(n, n)` array; `n` is the per-side cell count passed to `pops.System`. Use it
 for a scalar transport block.
 
 1. Build the cell-center coordinates and the field.

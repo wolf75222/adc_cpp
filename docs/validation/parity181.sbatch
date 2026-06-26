@@ -26,7 +26,7 @@
 #   3. La brique DSL hyqmom15_brick.hpp et l'etat initial ic_128.raw sont GENERES (pas
 #      versionnes : artefacts derives, bit-reproductibles) par make_brick_and_ic.py sur une
 #      machine disposant du module python adc (ex. build local) puis rsync dans WORK :
-#        ADC_CASES=/chemin/adc_cases PYTHONPATH=/chemin/adc_cpp/python \
+#        POPS_CASES=/chemin/adc_cases PYTHONPATH=/chemin/adc_cpp/python \
 #          python docs/validation/make_brick_and_ic.py --ns 128 --out WORK
 #      (IC + brique sont deterministes : md5 stable d'un run a l'autre.)
 #   4. sbatch docs/validation/parity181.sbatch
@@ -40,9 +40,9 @@ g++ --version | head -1
 SRC="${ADC181_SRC:-$HOME/adc_cpp/docs/validation}"
 WORK="${ADC181_WORK:-$HOME/adc181_work}"
 SCR="/scratch_p/$USER/adc181"
-KSRC="$HOME/adc_gpu_p1/kokkos"
+KSRC="$HOME/pops_gpu_p1/kokkos"
 KSER="$SCR/kserial"
-KGPU="$HOME/adc_gpu_p1/kinstall"
+KGPU="$HOME/pops_gpu_p1/kinstall"
 NVCC="$KGPU/bin/nvcc_wrapper"
 ADCINC="$HOME/adc_cpp/include"
 mkdir -p "$SCR" "$WORK"

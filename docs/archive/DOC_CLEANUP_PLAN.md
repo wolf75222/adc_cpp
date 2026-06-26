@@ -20,7 +20,7 @@ After cleanup, each document has an exclusive scope:
 | `DSL_MODEL_DESIGN.md` (or future Sphinx) | Python user API: facade `dsl.Model`, `CompositeModel`, `add_equation`, status by phase |
 | `GPU_RUNTIME_PORT.md` | GH200 validation log: phases, numeric results, fixed bugs, perf caveats |
 | `PAPER_ROADMAP.md` | Science: Hoffart target, O5 sweep, ring-edge blocker, baskets 1-4 |
-| `COUPLER_HIERARCHY.md` | Exhaustive reference of the couplers in `include/adc/coupling/` |
+| `COUPLER_HIERARCHY.md` | Exhaustive reference of the couplers in `include/pops/coupling/` |
 | `SCHUR_CONDENSATION_DESIGN.md` | Spec of the Schur source stage (design only, PR0-PR8) |
 | `AMR_MULTIBLOCK_DESIGN.md` | Spec of the Phase 1 multi-block AMR (design only, PR i-viii) |
 | `BACKEND_COVERAGE.md` (to create) | Backend matrix: which path (add_block/aot/production/amr), which GPU/MPI/AMR, which limit |
@@ -195,7 +195,7 @@ anchors, the full definition is here). OK as is.
 | Current limits (AmrSystem mono-block, fft refused with MPI, AmrSystem.potential() IN PROGRESS) | README + DSL_MODEL_DESIGN 0bis | DSL_MODEL_DESIGN 0bis only |
 | Python add_block multi-species example | README + DSL_MODEL_DESIGN | README (brief) + DSL_MODEL_DESIGN (detail) |
 | GH200 validation status (phases 1-11, numbers) | README "Validation" + GPU_RUNTIME_PORT | GPU_RUNTIME_PORT only |
-| CMake backends (ADC_USE_KOKKOS, ADC_USE_MPI...) | README + ARCHITECTURE | README (CMake snippet, 6 lines); ARCHITECTURE section 9 (detail) |
+| CMake backends (POPS_USE_KOKKOS, POPS_USE_MPI...) | README + ARCHITECTURE | README (CMake snippet, 6 lines); ARCHITECTURE section 9 (detail) |
 | Seam for_each_cell + device_fence | README + ARCHITECTURE + ALGORITHMS | ARCHITECTURE section 4 + ALGORITHMS section 20 (1 link) |
 | Backend capability matrix (GPU/MPI/AMR per path) | DSL_MODEL_DESIGN section 5 | DSL_MODEL_DESIGN section 5 AND BACKEND_COVERAGE.md (to create) |
 | Status of the GPU/MPI production paths | README + PAPER_ROADMAP + DSL_MODEL_DESIGN + GPU_RUNTIME_PORT | GPU_RUNTIME_PORT only, with links in the others |

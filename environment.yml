@@ -1,18 +1,18 @@
-# adc_cpp development environment (conda / mamba, conda-forge channel).
+# PoPS development environment (conda / mamba, conda-forge channel).
 #
 # In ONE command, conda provides ALL the tooling -- a recent CMake, Ninja, the Python
 # interpreter, NumPy, pybind11 -- AND the local parallel backends (Kokkos, MPI, OpenMP),
 # without depending on system tools, a pip venv, or modules to load:
 #
-#     conda env create -f environment.yml      # creates the "adc" env
-#     conda activate adc
+#     conda env create -f environment.yml      # creates the "pops" env
+#     conda activate pops
 #     # then the usual build (cf. README / docs/sphinx/getting-started/installation.md)
 #
 # Update after editing this file:
 #     conda env update -f environment.yml --prune
 #
 # This env removes the recurring config traps:
-#   - ONE single Python 3.12 (build AND import of the module -> no more "ModuleNotFoundError: adc._adc"
+#   - ONE single Python 3.12 (build AND import of the module -> no more "ModuleNotFoundError: pops._pops"
 #     from a cpython ABI divergence);
 #   - pybind11 present -> no network FetchContent nor deprecation warning;
 #   - Kokkos / OpenMPI / libomp installed -> find_package(Kokkos|MPI|OpenMP) succeeds once the env is
@@ -35,17 +35,17 @@
 # KNOWN COMPILER TRAP (real bug): some conda/mambaforge envs expose an OLD `gcc`/`c++` on the PATH;
 # the adc DSL (backend "production") compiling .so at runtime could pick it up and fail
 # ("error: invalid value 'c++23' in '-std=c++23'"). Protections in place: the DSL prefers the compiler
-# that built _adc (baked into the module), `export ADC_CXX=...` wins explicitly, and
-# `python -c "import adc; adc.doctor()"` diagnoses the whole chain.
+# that built _pops (baked into the module), `export POPS_CXX=...` wins explicitly, and
+# `python -c "import adc; pops.doctor()"` diagnoses the whole chain.
 #
 # GPU / cluster NOTE: GPU validation (Grace-Hopper) and heavy parallelism run on ROMEO via Spack/modules,
 # NOT via conda. The backends below serve LOCAL (CPU) development.
-name: adc
+name: pops
 channels:
   - conda-forge
 dependencies:
   # --- Build tooling (always) ---
-  - python=3.12          # the _adc extension is pinned to the ABI of THIS interpreter (cpython-312)
+  - python=3.12          # the _pops extension is pinned to the ABI of THIS interpreter (cpython-312)
   - cmake>=3.27          # conda-forge ships a recent version (>= the project's minimum 3.20)
   - ninja                # recommended generator (-G Ninja)
   - ccache               # compilation cache (auto-detected by CMake): fast re-builds
@@ -54,17 +54,17 @@ dependencies:
                          # pinned stack instead of a fresh, unpinned pip build venv.
 
   # --- Python module (always) ---
-  - numpy>=1.24          # required at the module IMPORT (python/adc/dsl.py does `import numpy`)
+  - numpy>=1.24          # required at the module IMPORT (python/pops/dsl.py does `import numpy`)
   - pybind11>=2.13,<3    # bindings. ADC-338: pinned to the 2.x line (the conservative/validated stack);
                          # bindings.cpp also compiles against 3.x (verified with 3.0.4), so drop the
                          # `<3` if you want conda-forge's 3.x. The configure ALWAYS prefers the pybind11
                          # of the ACTIVE interpreter (python -m pybind11 --cmakedir); the FetchContent
                          # fallback v2.13.6 is only an out-of-env safety net.
 
-  # --- Local parallel backends (CPU): ADC_USE_KOKKOS / ADC_USE_MPI / ADC_USE_OPENMP ---
+  # --- Local parallel backends (CPU): POPS_USE_KOKKOS / POPS_USE_MPI / POPS_USE_OPENMP ---
   # NOTE (verified on the conda-forge feedstock, reconfirm at install time): the conda-forge `kokkos`
   # package is typically built with the Serial backend ONLY (no OpenMP; the CUDA variant is a separate
-  # package, see the KOKKOS CPU/CUDA TRAP above). Serial is enough to compile/validate ADC_USE_KOKKOS=ON
+  # package, see the KOKKOS CPU/CUDA TRAP above). Serial is enough to compile/validate POPS_USE_KOKKOS=ON
   # but DOES NOT scale across threads. Real multi-threading IN ONE COMMAND (Kokkos OpenMP compiled IN the
   # env, ~2 min, tooling already provided by this env):
   #     bash scripts/kokkos_openmp_conda.sh
@@ -82,11 +82,11 @@ dependencies:
   - llvm-openmp          # libomp + headers: standalone OpenMP (deprecated) + -fopenmp runtime
 
   # --- Optional: uncomment as needed ---
-  # - "hdf5=*=mpi_openmpi_*"  # ADC_USE_HDF5=ON, parallel DataWriter (MPI variant, consistent with openmpi)
+  # - "hdf5=*=mpi_openmpi_*"  # POPS_USE_HDF5=ON, parallel DataWriter (MPI variant, consistent with openmpi)
   # - cxx-compiler            # conda C++ toolchain: clang (osx-arm64) / gcc 14.2 (linux), both
   #                           # C++23-capable. Recommended on Linux/cluster without a recent gcc. On macOS,
-  #                           # possible but ALL-CONDA then: build _adc with it AND export
-  #                           # ADC_CXX=$CONDA_PREFIX/bin/clang++ (do not mix with AppleClang).
+  #                           # possible but ALL-CONDA then: build _pops with it AND export
+  #                           # POPS_CXX=$CONDA_PREFIX/bin/clang++ (do not mix with AppleClang).
   # - sphinx>=7.0             # documentation (otherwise docs/sphinx/requirements.txt via pip)
   # - furo
   # - myst-parser

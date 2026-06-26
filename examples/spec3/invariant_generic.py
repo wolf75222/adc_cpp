@@ -6,8 +6,8 @@ name carries no special meaning.
 
 Run: python3 examples/spec3/invariant_generic.py
 """
-from adc.physics import Model
-from adc.math import integral
+from pops.physics import Model
+from pops.math import integral
 
 
 def build():

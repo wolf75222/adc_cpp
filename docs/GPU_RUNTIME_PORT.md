@@ -23,29 +23,29 @@ simply the active Kokkos backend ; the same .cpp files switch to `exec=Serial`/`
 the host-side MPI CI verifies). `nvcc_wrapper` is only the compiler required by the Kokkos Cuda backend.
 The core is now **100% Kokkos** : the unified allocator uses
 `Kokkos::kokkos_malloc<Kokkos::SharedSpace>` + `Kokkos::fence` (no longer `cudaMallocManaged` /
-`cudaDeviceSynchronize`), and `ADC_HD` delegates to `KOKKOS_FUNCTION`. NO hand-written CUDA API
-remains ; only a `__host__ __device__` fallback survives in the NON-Kokkos branch of `ADC_HD` (inert
+`cudaDeviceSynchronize`), and `POPS_HD` delegates to `KOKKOS_FUNCTION`. NO hand-written CUDA API
+remains ; only a `__host__ __device__` fallback survives in the NON-Kokkos branch of `POPS_HD` (inert
 in our case). `SharedSpace` being a portable alias (`CudaUVMSpace` / `HIPManagedSpace` /
 `SYCLSharedUSMSpace` / `HostSpace`), the same core would also target AMD/Intel via the Kokkos backends.
 
 ## Design asset : the seam does not change the call sites
 
 `adc/mesh/execution/for_each.hpp` (`for_each_cell`, `for_each_cell_reduce_*`) switches CPU <-> GPU at
-COMPILE TIME without touching the operators. `ADC_HD` makes the whole core device-callable. So the GPU
+COMPILE TIME without touching the operators. `POPS_HD` makes the whole core device-callable. So the GPU
 port is mostly a job of data RESIDENCE on device + porting of the still-host steps,
 not a rewrite of the compute kernels.
 
 ## Already device-ready (verified on GH200)
 
 - `for_each_cell` / reductions -> `Kokkos::parallel_for` / `parallel_reduce` (`Cuda` space).
-- `ADC_HD`, `StateVec`, `Aux` : device-callable ; flux + `eigenvalues` + bricks (Euler/iso/ExB).
-- DSL-generated brick : compiles with nvcc `sm_90`, == `adc::Euler` to the bit (CUDA) / to 1 ULP (Kokkos).
+- `POPS_HD`, `StateVec`, `Aux` : device-callable ; flux + `eigenvalues` + bricks (Euler/iso/ExB).
+- DSL-generated brick : compiles with nvcc `sm_90`, == `pops::Euler` to the bit (CUDA) / to 1 ULP (Kokkos).
 - Full 2D Euler case (80 steps, CFL, Rusanov, periodic) on GH200 : mass conserved, == CPU.
 
 ## Runtime port phases (by increasing dependency)
 
 1. **Device-resident MultiFab.** [x] DONE (verified GH200). Observation : `fab_allocator` under
-   `ADC_HAS_KOKKOS + __CUDACC__` is `ManagedAllocator` (cudaMallocManaged) -> the Fabs are in UNIFIED
+   `POPS_HAS_KOKKOS + __CUDACC__` is `ManagedAllocator` (cudaMallocManaged) -> the Fabs are in UNIFIED
    MEMORY, hence already device-accessible, and `assemble_rhs` (via `for_each_cell` -> Kokkos) runs on
    the device by CONSTRUCTION. A FULL Euler transport (80 steps, fill_boundary + assemble_rhs +
    SSPRK/FE update on the REAL adc stack) gives on GH200 a result BIT-IDENTICAL to the CPU
@@ -121,7 +121,7 @@ not a rewrite of the compute kernels.
    (MPI CI job, np=1/2/4, Kokkos Serial on CPU) AND run on GH200 (Kokkos Cuda) : the SAME source,
    compiled by nvcc_wrapper and launched by `srun -n {1,2,4} --gpus-per-task=1` (OpenMPI 4.1.7 CUDA-aware,
    armgpu node), gives `dmax = 0.00e+00` at the three rank counts, `maxK`/`max1`/`L2` identical to the
-   CPU run. A `Kokkos::fence()` (guarded by `ADC_HAS_KOKKOS`) precedes the HOST read of the residual (async
+   CPU run. A `Kokkos::fence()` (guarded by `POPS_HAS_KOKKOS`) precedes the HOST read of the residual (async
    `for_each_cell` kernels under Cuda). What this validates HONESTLY on device : the
    `make_block`/`add_compiled_model` path (named functors) + multi-box `fill_ghosts` intra-rank AND
    cross-rank MPI multi-GPU, for the residual of one step. What it does NOT validate : AMR integration
@@ -229,7 +229,7 @@ The CI only runs Release / Python / MPI / Kokkos SERIAL (CPU). Several bricks me
 master AFTER #48 have a DEVICE PATH but had only been exercised on CPU. We confirmed them on
 GH200 (`armgpu` node, `module load cuda/12.6`, Kokkos 4.4.01 `Kokkos_ARCH_HOPPER90`, `nvcc_wrapper`),
 each by the SAME logic compiled in `exec=Cuda` (Kokkos Cuda backend, `srun -n 1 --gpus-per-task=1`)
-AND in `exec=Serial` oracle (g++, `ADC_HAS_KOKKOS` off), with BIT-BY-BIT comparison cell by cell
+AND in `exec=Serial` oracle (g++, `POPS_HAS_KOKKOS` off), with BIT-BY-BIT comparison cell by cell
 (`diff_bin`, `dmax = max|cuda - serial|`). `for_each_cell` is ASYNC under Cuda : each harness does
 `device_fence()` before the host read / the dump. Versioned harnesses (outside CI, guarded by `srun`/sbatch) :
 `python/tests/gpu/{gpu_aux_validate,gpu_epm_validate,gpu_amr_bz_validate,diff_bin}.cpp`,
@@ -238,7 +238,7 @@ AND in `exec=Serial` oracle (g++, `ADC_HAS_KOKKOS` off), with BIT-BY-BIT compari
 - **T_e read via `load_aux<5>` (aux component 4) (#50/#51).** [x] VALIDATED DEVICE. The previous
   port had only validated `load_aux<4>` (B_z, comp 3) ; we add comp 4 (T_e). A toy model `n_aux=5`
   (zero flux, source `S = T_e u`) reads `a.T_e = a(i,j,4)` in `assemble_rhs` -> `load_aux<5>` (named
-  functor `AssembleRhsKernel`, `for_each_cell` ADC_HD) on device. NON-CONSTANT profile `T_e = 1 + x + 2y`.
+  functor `AssembleRhsKernel`, `for_each_cell` POPS_HD) on device. NON-CONSTANT profile `T_e = 1 + x + 2y`.
   exec=Cuda : `R = T_e u` in [2.1875, 7.8125] (per-cell read), `max|R - T_e u| = 0`.
   **`dmax = 0.000e+00`** vs Serial (256 cells). Bit-identical.
   HONESTY NOTE : we validate HERE the REAL device path of the T_e read (`assemble_rhs`, named
@@ -250,7 +250,7 @@ AND in `exec=Serial` oracle (g++, `ADC_HAS_KOKKOS` off), with BIT-BY-BIT compari
   marshaling of the System path (`apply_te`, `copy_state` comp 4) thus stays covered only in Serial CI.
 
 - **SCREENED EPM / Helmholtz `div(eps grad phi) - kappa phi = f` (#44, `GeometricMG::set_reaction`).**
-  [x] VALIDATED DEVICE. The `kappa` term lives in the ADC_HD `for_each_cell` of the red-black smoother, the
+  [x] VALIDATED DEVICE. The `kappa` term lives in the POPS_HD `for_each_cell` of the red-black smoother, the
   residual and the apply (`numerics/elliptic/poisson_operator.hpp`) -> device under Cuda. MMS `eps=1+0.5x`
   + `kappa=50`, exact Dirichlet, V-cycles with the same criterion as `tests/test_screened_poisson.cpp`.
   exec=Cuda : cycles 8/9/9 (IDENTICAL to Serial), order 2 convergence (Linf ratios 3.69 / 3.85).
@@ -258,14 +258,14 @@ AND in `exec=Serial` oracle (g++, `ADC_HAS_KOKKOS` off), with BIT-BY-BIT compari
 
 - **ANISOTROPIC EPM `div(diag(eps_x, eps_y) grad phi) = f` (#52/#56, `set_epsilon_anisotropic`).**
   [x] VALIDATED DEVICE. The second field `eps_y` (faces normal to y) is read in the same
-  ADC_HD `for_each_cell` as above. MMS `eps_x=1+0.5x`, `eps_y=1+0.3y` (cf.
+  POPS_HD `for_each_cell` as above. MMS `eps_x=1+0.5x`, `eps_y=1+0.3y` (cf.
   `tests/test_anisotropic_epsilon.cpp`). exec=Cuda : cycles 9/10/11 (IDENTICAL to Serial), order 2
   (Linf ratios 4.00 / 4.00). **`dmax = 0.000e+00`** vs Serial on phi (n=64, 4096 cells).
 
 - **Per-level B_z in the AMR path (#53, `AmrSystemCoupler::fill_bz`).** [x] VALIDATED DEVICE. B_z(x,y)
   is set at the centers OF EACH LEVEL (`geom.refine(1<<k)`, dx = dx_coarse / 2^k) on the
   `kAuxBaseComps` comp of the shared aux channel ; the model reads it `load_aux<4>` in the AMR source kernel
-  (`for_each_cell` ADC_HD) level by level. NON-CONSTANT profile `B_z = 1 + sin(2 pi x) cos(2 pi y)`
+  (`for_each_cell` POPS_HD) level by level. NON-CONSTANT profile `B_z = 1 + sin(2 pi x) cos(2 pi y)`
   to distinguish the levels. exec=Cuda : `B_z` re-read = 0.80865828 at level 0 (center (4,4)),
   0.90245484 at level 1 (center (8,8)), DISTINCT VALUES, each == its level center ; the
   source consumes the right B_z per level (coarse and fine evolve with THEIR B_z). **`dmax = 0.000e+00`**
@@ -341,7 +341,7 @@ The single-GPU Kokkos Cuda being device-clean (6/6 after #150+#152), we exercise
 INVARIANCE of the ELLIPTIC / Schur / Poisson / system-solve stack under MPI + Kokkos Cuda on SEVERAL
 GH200 (1 GPU per rank).
 
-- Provenance : `origin/master` 2674d64 (archive, fresh rsync under `~/adc_gpu_p1/mpicuda/` on ROMEO).
+- Provenance : `origin/master` 2674d64 (archive, fresh rsync under `~/pops_gpu_p1/mpicuda/` on ROMEO).
 - Node `romeo-a057` (`armgpu`), 4x GH200 visible. Kokkos SERIAL+CUDA, `Kokkos_ARCH_HOPPER90`,
   `nvcc_wrapper`. MPI = OpenMPI 4.1.7 CUDA-aware (`+cuda cuda_arch=90 fabrics=ucx schedulers=slurm`,
   hash `nkokjyt`). Launch `srun -n {1,2,4} --gpus-per-task=1` (1 GPU/rank). Single build

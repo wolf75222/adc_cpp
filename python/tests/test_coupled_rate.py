@@ -7,9 +7,9 @@ Python, locally testable); the C++ coupled-rate kernel codegen is the deferred r
 """
 import pytest
 
-from adc import dsl, model
+from pops import dsl, model
 
-adctime = pytest.importorskip("adc.time")
+adctime = pytest.importorskip("pops.time")
 
 
 def _two_fluid_module():
@@ -118,5 +118,5 @@ def test_coupled_rate_now_lowers_to_cpp():
                    "ions": P.linear_combine("i1", i_n + P.dt * C["ions"])})
     P._check_lowerable(None)  # no longer raises for a cons-only coupled_rate
     src = P.emit_cpp_program(model=None)
-    assert src.count("adc::for_each_cell") == 1
-    assert "const adc::Real ne =" in src and "const adc::Real ni =" in src
+    assert src.count("pops::for_each_cell") == 1
+    assert "const pops::Real ne =" in src and "const pops::Real ni =" in src

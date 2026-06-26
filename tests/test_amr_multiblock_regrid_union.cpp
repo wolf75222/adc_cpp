@@ -28,11 +28,11 @@
 // des lambdas generiques sous concept : ils sont evalues dans la boucle HOTE de tag_cells (pas sur
 // device), donc une std::function les capturant est licite et compile partout (CPU + Kokkos).
 
-#include <adc/runtime/builders/compiled/amr_dsl_block.hpp>  // detail::make_shared_amr_layout / dispatch_amr_block
-#include <adc/runtime/amr/amr_runtime.hpp>    // AmrRuntime, AmrRuntimeBlock
-#include <adc/runtime/amr_system.hpp>  // facade AmrSystem (deverrouillage multi-blocs + regrid_every>0)
-#include <adc/runtime/builders/factory/model_factory.hpp>  // detail::dispatch_model
-#include <adc/runtime/config/model_spec.hpp>
+#include <pops/runtime/builders/compiled/amr_dsl_block.hpp>  // detail::make_shared_amr_layout / dispatch_amr_block
+#include <pops/runtime/amr/amr_runtime.hpp>    // AmrRuntime, AmrRuntimeBlock
+#include <pops/runtime/amr_system.hpp>  // facade AmrSystem (deverrouillage multi-blocs + regrid_every>0)
+#include <pops/runtime/builders/factory/model_factory.hpp>  // detail::dispatch_model
+#include <pops/runtime/config/model_spec.hpp>
 
 #include <algorithm>
 #include <cmath>
@@ -41,11 +41,11 @@
 #include <string>
 #include <vector>
 
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
 #include <Kokkos_Core.hpp>
 #endif
 
-using namespace adc;
+using namespace pops;
 
 // Spec ExB scalaire (1 var, role density) a charge q. Transport ExB : la densite advecte le long du
 // champ ExB, donc une structure se DEPLACE -> la region taguee bouge -> le layout fin change (cas a).
@@ -176,7 +176,7 @@ static AmrRuntime make_two_block(int N, double L, double B0, double q0, double q
 }
 
 int main(int argc, char** argv) {
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   Kokkos::ScopeGuard guard(argc, argv);
 #else
   (void)argc;

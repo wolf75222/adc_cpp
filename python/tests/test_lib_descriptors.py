@@ -1,34 +1,34 @@
-"""Spec 3 adc.lib: a catalog of typed brick descriptors and IR macros.
+"""Spec 3 pops.lib: a catalog of typed brick descriptors and IR macros.
 
-adc.lib never computes in Python. A descriptor names a brick (native C++ id,
+pops.lib never computes in Python. A descriptor names a brick (native C++ id,
 generated, macro or external) and carries its requirements / capabilities; the
 codegen and runtime consume it. These tests check that the descriptors are
 lightweight metadata that lower to native ids -- not numerical code.
 """
 import pytest
 
-lib = pytest.importorskip("adc.lib")
+lib = pytest.importorskip("pops.lib")
 
 
 def test_riemann_hllc_is_a_native_descriptor():
     d = lib.riemann.HLLC()
     assert d.brick_type == "native"
     assert d.available
-    assert d.native_id == "adc::HLLCFlux"   # the EXACT C++ symbol (namespace adc)
+    assert d.native_id == "pops::HLLCFlux"   # the EXACT C++ symbol (namespace pops)
     assert d.scheme == "hllc"               # the runtime scheme string
 
 
 def test_riemann_native_ids_are_exact():
-    # Guard against the wrong-namespace overclaim: ids must be the real adc:: symbols.
-    assert lib.riemann.Rusanov().native_id == "adc::RusanovFlux"
-    assert lib.riemann.HLL().native_id == "adc::HLLFlux"
-    assert lib.riemann.Roe().native_id == "adc::RoeFlux"
+    # Guard against the wrong-namespace overclaim: ids must be the real pops:: symbols.
+    assert lib.riemann.Rusanov().native_id == "pops::RusanovFlux"
+    assert lib.riemann.HLL().native_id == "pops::HLLFlux"
+    assert lib.riemann.Roe().native_id == "pops::RoeFlux"
 
 
 def test_reconstruction_weno5z_is_native():
     d = lib.reconstruction.WENO5Z()
     assert d.brick_type == "native"
-    assert d.native_id == "adc::Weno5"      # adc::Weno5 IS the WENO5-Z reconstruction
+    assert d.native_id == "pops::Weno5"      # pops::Weno5 IS the WENO5-Z reconstruction
     assert d.scheme == "weno5"
 
 
@@ -44,7 +44,7 @@ def test_available_native_ids_exist_and_are_namespaced():
     for d in (lib.fields.GeometricMG(), lib.solvers.CG(), lib.solvers.GMRES(),
               lib.solvers.Schur(), lib.projections.positivity()):
         assert d.available
-        assert d.native_id.startswith("adc::")
+        assert d.native_id.startswith("pops::")
 
 
 def test_riemann_descriptors_compute_nothing():

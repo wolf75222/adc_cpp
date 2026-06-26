@@ -3,7 +3,7 @@
 Verrouille les rejets HONETES du System polaire : chaque test EXIGE que l'appel leve une exception.
 Un test echoue si le rejet est supprime (l'appel passe sans lever).
 
-Rejets confirmes (lus dans python/system.cpp et include/adc/runtime/block_builder_polar.hpp) :
+Rejets confirmes (lus dans python/system.cpp et include/pops/runtime/block_builder_polar.hpp) :
   R1 - transport non-ExB (ex. compressible) sur un System polaire :
        dispatch_transport_polar leve RuntimeError :
        "transport polaire '...' non supporte (Phase 2b : seul 'exb' ...)"
@@ -13,7 +13,7 @@ Rejets confirmes (lus dans python/system.cpp et include/adc/runtime/block_builde
        NB : 'hll' est desormais CABLE en polaire (fluide isotherme, gate model.wave_speeds) -- voir
        test_polar_hll.py ; sur un transport ExB SCALAIRE (pas de wave_speeds) 'hll' leve aussi un
        rejet clair (teste R2c ci-dessous).
-  R3 - time=adc.IMEX() sur un System polaire :
+  R3 - time=pops.IMEX() sur un System polaire :
        add_block leve RuntimeError :
        "System::add_block (polaire) : time='imex' non supporte ..."
   R4 - set_epsilon_field / set_epsilon_anisotropic_field / set_reaction_field puis step() :
@@ -24,13 +24,13 @@ Rejets confirmes (lus dans python/system.cpp et include/adc/runtime/block_builde
 Ce qui n'est PAS teste ici (deja couvert) :
   - PolarMesh(nr<3) -> voir test_polar_system.py : test_polar_rejects_nr_below_3.
 
-Note sur PolarMesh : config.n = nr (cf. python/adc/__init__.py), donc set_epsilon_field
+Note sur PolarMesh : config.n = nr (cf. python/pops/__init__.py), donc set_epsilon_field
 exige un tableau de taille nr*nr.
 """
 import numpy as np
 import pytest
 
-import adc
+import pops
 
 
 # ---------------------------------------------------------------------------
@@ -39,22 +39,22 @@ import adc
 
 def _exb_model():
     """Bloc ExB scalaire standard : le seul transport valide en Phase 2b."""
-    return adc.Model(
-        state=adc.Scalar(),
-        transport=adc.ExB(B0=1.0),
-        source=adc.NoSource(),
-        elliptic=adc.ChargeDensity(charge=1.0),
+    return pops.Model(
+        state=pops.Scalar(),
+        transport=pops.ExB(B0=1.0),
+        source=pops.NoSource(),
+        elliptic=pops.ChargeDensity(charge=1.0),
     )
 
 
 def _compressible_model():
     """Bloc fluide compressible : transport NON supporte en polaire (Phase 2b).
     Le second membre elliptique est neutre (fond nul) ; seul le transport est teste ici."""
-    return adc.Model(
-        state=adc.FluidState(kind="compressible", gamma=1.4),
-        transport=adc.CompressibleFlux(),
-        source=adc.NoSource(),
-        elliptic=adc.BackgroundDensity(alpha=0.0, n0=0.0),
+    return pops.Model(
+        state=pops.FluidState(kind="compressible", gamma=1.4),
+        transport=pops.CompressibleFlux(),
+        source=pops.NoSource(),
+        elliptic=pops.BackgroundDensity(alpha=0.0, n0=0.0),
     )
 
 
@@ -64,14 +64,14 @@ _RMIN, _RMAX = 0.3, 1.0
 
 def _make_polar_sim():
     """System polaire minimal (ExB scalaire, Rusanov, Explicit), sans bloc encore ajoute."""
-    return adc.System(mesh=adc.PolarMesh(r_min=_RMIN, r_max=_RMAX, nr=_NR, ntheta=_NTH))
+    return pops.System(mesh=pops.PolarMesh(r_min=_RMIN, r_max=_RMAX, nr=_NR, ntheta=_NTH))
 
 
 def _make_polar_sim_ready(solver="polar"):
     """System polaire minimal avec bloc ExB et densite initiale : pret pour step()."""
-    sim = adc.System(mesh=adc.PolarMesh(r_min=_RMIN, r_max=_RMAX, nr=_NR, ntheta=_NTH))
+    sim = pops.System(mesh=pops.PolarMesh(r_min=_RMIN, r_max=_RMAX, nr=_NR, ntheta=_NTH))
     sim.add_block("ne", model=_exb_model(),
-                  spatial=adc.Spatial(minmod=True), time=adc.Explicit())
+                  spatial=pops.Spatial(minmod=True), time=pops.Explicit())
     sim.set_poisson(rhs="charge_density", solver=solver, bc="dirichlet")
     sim.set_density("ne", [1.0] * (_NR * _NTH))
     return sim
@@ -92,7 +92,7 @@ def test_polar_rejects_non_exb_transport():
     msg = ""
     try:
         sim.add_block("fluid", model=_compressible_model(),
-                      spatial=adc.Spatial(minmod=True), time=adc.Explicit())
+                      spatial=pops.Spatial(minmod=True), time=pops.Explicit())
     except RuntimeError as e:
         raised = True
         msg = str(e)
@@ -112,7 +112,7 @@ def test_polar_rejects_non_exb_transport():
 def test_polar_rejects_non_rusanov_flux():
     """R2 : add_block avec flux='hllc' sur PolarMesh doit lever RuntimeError.
 
-    Confirme (include/adc/runtime/block_builder_polar.hpp : make_block_polar) :
+    Confirme (include/pops/runtime/block_builder_polar.hpp : make_block_polar) :
       "System (polaire) : flux Riemann 'hllc' non supporte ..."
     """
     sim = _make_polar_sim()
@@ -120,7 +120,7 @@ def test_polar_rejects_non_rusanov_flux():
     msg = ""
     try:
         sim.add_block("ne", model=_exb_model(),
-                      spatial=adc.Spatial(flux="hllc"), time=adc.Explicit())
+                      spatial=pops.Spatial(flux="hllc"), time=pops.Explicit())
     except RuntimeError as e:
         raised = True
         msg = str(e)
@@ -136,7 +136,7 @@ def test_polar_rejects_roe_flux():
     raised = False
     try:
         sim.add_block("ne", model=_exb_model(),
-                      spatial=adc.Spatial(flux="roe"), time=adc.Explicit())
+                      spatial=pops.Spatial(flux="roe"), time=pops.Explicit())
     except RuntimeError:
         raised = True
     assert raised, "add_block avec flux='roe' sur PolarMesh aurait du lever RuntimeError"
@@ -155,7 +155,7 @@ def test_polar_rejects_hll_on_scalar_exb():
     msg = ""
     try:
         sim.add_block("ne", model=_exb_model(),
-                      spatial=adc.Spatial(flux="hll"), time=adc.Explicit())
+                      spatial=pops.Spatial(flux="hll"), time=pops.Explicit())
     except RuntimeError as e:
         raised = True
         msg = str(e)
@@ -166,11 +166,11 @@ def test_polar_rejects_hll_on_scalar_exb():
 
 
 # ---------------------------------------------------------------------------
-# R3 : time=adc.IMEX() sur un System polaire
+# R3 : time=pops.IMEX() sur un System polaire
 # ---------------------------------------------------------------------------
 
 def test_polar_rejects_imex_time():
-    """R3 : add_block avec time=adc.IMEX() sur PolarMesh doit lever RuntimeError.
+    """R3 : add_block avec time=pops.IMEX() sur PolarMesh doit lever RuntimeError.
 
     Confirme (python/system.cpp, chemin polaire dans add_block) :
       "System::add_block (polaire) : time='imex' non supporte ..."
@@ -180,7 +180,7 @@ def test_polar_rejects_imex_time():
     msg = ""
     try:
         sim.add_block("ne", model=_exb_model(),
-                      spatial=adc.Spatial(minmod=True), time=adc.IMEX())
+                      spatial=pops.Spatial(minmod=True), time=pops.IMEX())
     except RuntimeError as e:
         raised = True
         msg = str(e)

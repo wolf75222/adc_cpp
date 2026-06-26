@@ -1,23 +1,23 @@
-"""Configuration Sphinx pour la documentation Python d'adc_cpp."""
+"""Configuration Sphinx pour la documentation Python de PoPS."""
 
 from __future__ import annotations
 
 import sys
 from pathlib import Path
 
-# Rendre le module compile `adc` importable s'il a ete construit
-# (-DADC_BUILD_PYTHON=ON) : autodoc en a besoin pour reference/python-api.md. Non
+# Rendre le module compile `pops` importable s'il a ete construit
+# (-DPOPS_BUILD_PYTHON=ON) : autodoc en a besoin pour reference/python-api.md. Non
 # fatal s'il manque (les classes apparaissent alors sans signature). On n'ajoute QUE
-# des dossiers de BUILD (qui contiennent l'extension `_adc*.so` a cote du paquet) :
-# surtout PAS le `python/` source, dont le paquet adc/ n'a pas de _adc.so -> il
-# masquerait le build et `import adc` echouerait sur `from ._adc import ...`.
+# des dossiers de BUILD (qui contiennent l'extension `_pops*.so` a cote du paquet) :
+# surtout PAS le `python/` source, dont le paquet pops/ n'a pas de _pops.so -> il
+# masquerait le build et `import pops` echouerait sur `from ._pops import ...`.
 _repo = Path(__file__).parent.parent.parent
 for _cand in (_repo / "build-py" / "python", _repo / "build" / "python",
               _repo / "build-master" / "python"):
     if _cand.is_dir():
         sys.path.insert(0, str(_cand))
 
-project = "adc_cpp"
+project = "PoPS"
 author = "Romain Despoullains"
 copyright = "2026, Romain Despoullains"
 def _version_from_cmake(_path: Path) -> str | None:
@@ -27,7 +27,7 @@ def _version_from_cmake(_path: Path) -> str | None:
         _txt = _path.read_text(encoding="utf-8")
     except OSError:
         return None
-    _m = re.search(r"project\s*\(\s*adc_cpp\b.*?VERSION\s+([0-9]+\.[0-9]+\.[0-9]+)", _txt, re.S)
+    _m = re.search(r"project\s*\(\s*PoPS\b.*?VERSION\s+([0-9]+\.[0-9]+\.[0-9]+)", _txt, re.S)
     return _m.group(1) if _m else None
 
 
@@ -85,7 +85,7 @@ if not (Path(__file__).parent / "doxygen" / "index.rst").is_file():
     suppress_warnings += ["toc.excluded", "toc.not_readable"]
 
 html_theme = "furo"
-html_title = f"adc_cpp {release}"
+html_title = f"PoPS {release}"
 html_theme_options = {
     "source_repository": "https://github.com/wolf75222/adc_cpp",
     "source_branch": "master",

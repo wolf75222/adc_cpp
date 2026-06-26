@@ -1,6 +1,6 @@
 """Spec 2 (S2-4): operator-first standard macros.
 
-adc.time.std.predictor_corrector_local_linear / explicit_rk / imex_local_linear take typed
+pops.time.std.predictor_corrector_local_linear / explicit_rk / imex_local_linear take typed
 operator NAMES (not physical terms) and compose them with P.call against the Module bound to
 the Program. The macros are model-free (their source mentions no physics) and reusable across
 any Module with matching signatures. Pure Python (emit only); skips if adc is not importable.
@@ -9,8 +9,8 @@ import inspect
 import sys
 
 try:
-    from adc import dsl
-    from adc import time as adctime
+    from pops import dsl
+    from pops import time as adctime
 except Exception as exc:  # adc not importable here -> skip, never fake
     print("skip test_operator_macros (adc unavailable: %s)" % exc)
     sys.exit(0)
@@ -53,7 +53,7 @@ def test_predictor_corrector_macro():
         explicit_rate_operator="explicit_rhs", implicit_operator="lorentz")
     P.validate()
     src = P.emit_cpp_program(model=m)
-    assert "adc_install_program" in src
+    assert "pops_install_program" in src
     print("OK  predictor_corrector_local_linear composes 3 typed operators -> .so source")
 
 
@@ -64,7 +64,7 @@ def test_explicit_rk_macro():
                             fields_operator="fields_from_state",
                             tableau=adctime.std.SSPRK2_TABLEAU)
     P.validate()
-    assert "adc_install_program" in P.emit_cpp_program(model=m)
+    assert "pops_install_program" in P.emit_cpp_program(model=m)
     print("OK  explicit_rk over a typed rate operator (SSPRK2 tableau)")
 
 
@@ -75,7 +75,7 @@ def test_imex_local_linear_macro():
                                   implicit_operator="lorentz",
                                   fields_operator="fields_from_state", theta=1.0)
     P.validate()
-    assert "adc_install_program" in P.emit_cpp_program(model=m)
+    assert "pops_install_program" in P.emit_cpp_program(model=m)
     print("OK  imex_local_linear (theta-implicit local linear solve)")
 
 
@@ -89,7 +89,7 @@ def test_macro_reused_across_modules():
 
     src_a = build(_model("A", 1.0))
     src_b = build(_model("B", 2.0))
-    assert "adc_install_program" in src_a and src_a != src_b
+    assert "pops_install_program" in src_a and src_a != src_b
     print("OK  the same predictor-corrector macro is reused across two modules")
 
 

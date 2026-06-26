@@ -1,6 +1,6 @@
 # Simulation
 
-`adc.System` is the composition facade of the solver: you declare one block per physical model
+`pops.System` is the composition facade of the solver: you declare one block per physical model
 (one species), you share one system Poisson across all blocks, you set initial conditions
 in numpy, then you advance the whole thing step by step. The core names no scenario (diocotron,
 Euler-Poisson... live on the `adc_cases` side); here you assemble generic bricks.

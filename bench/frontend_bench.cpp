@@ -1,5 +1,5 @@
-#include <adc/runtime/config/model_spec.hpp>
-#include <adc/runtime/system.hpp>
+#include <pops/runtime/config/model_spec.hpp>
+#include <pops/runtime/system.hpp>
 
 #include <chrono>
 #include <cmath>
@@ -7,11 +7,11 @@
 #include <cstdlib>
 #include <vector>
 
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
 #include <Kokkos_Core.hpp>
 #endif
 
-using namespace adc;
+using namespace pops;
 
 namespace {
 
@@ -40,7 +40,7 @@ std::vector<double> initial_state(int n, double gamma) {
 }  // namespace
 
 int main(int argc, char** argv) {
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   Kokkos::initialize(argc, argv);
 #endif
 
@@ -72,12 +72,12 @@ int main(int argc, char** argv) {
     sim.set_state("gas", initial_state(n, gamma));
 
     for (int s = 0; s < warmup; ++s) sim.step(dt);
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
     Kokkos::fence();
 #endif
     const auto t0 = std::chrono::steady_clock::now();
     sim.advance(dt, steps);
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
     Kokkos::fence();
 #endif
     const auto t1 = std::chrono::steady_clock::now();
@@ -95,7 +95,7 @@ int main(int argc, char** argv) {
       "total_ms=%.6f mass=%.17e\n",
       n, steps, warmup, dt, advance_ms, extract_ms, advance_ms + extract_ms, mass);
 
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   Kokkos::finalize();
 #endif
   return 0;

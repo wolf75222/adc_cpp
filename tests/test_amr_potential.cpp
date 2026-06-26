@@ -10,19 +10,19 @@
 //   (4) apres quelques pas (regrid inclus), potential() reste fini et non trivial (rafraichi).
 // Le modele est un transport ExB pur + fond neutralisant (briques exb / none / background), proche du
 // scenario diocotron qui echantillonne phi sur un cercle median (FFT azimutale).
-#include <adc/runtime/amr_system.hpp>
-#include <adc/runtime/config/model_spec.hpp>
-#include <adc/runtime/system.hpp>
+#include <pops/runtime/amr_system.hpp>
+#include <pops/runtime/config/model_spec.hpp>
+#include <pops/runtime/system.hpp>
 
 #include <cmath>
 #include <cstdio>
 #include <vector>
 
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
 #include <Kokkos_Core.hpp>
 #endif
 
-using namespace adc;
+using namespace pops;
 
 // Bulle de densite lisse autour du centre, periodique. Moyenne retiree pour neutraliser la source
 // (fond background n0 = moyenne) : Poisson periodique exige une integrale de second membre nulle.
@@ -52,7 +52,7 @@ static ModelSpec exb_background(double n0) {
 }
 
 int main(int argc, char** argv) {
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   Kokkos::ScopeGuard guard(argc, argv);
 #else
   (void)argc;

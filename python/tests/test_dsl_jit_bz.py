@@ -12,8 +12,8 @@ import tempfile
 
 import numpy as np
 
-import adc
-from adc import dsl
+import pops
+from pops import dsl
 
 INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "include"))
 
@@ -45,7 +45,7 @@ def main():
     try:
         so = m.compile_so(os.path.join(tmp, "bzscalar.so"), INCLUDE)
 
-        sim = adc.System(n=n, L=L, periodic=True)
+        sim = pops.System(n=n, L=L, periodic=True)
         sim.add_dynamic_block("bz", so, names=["n"])  # IModel.n_aux()=4 -> ensure_aux_width(4)
         sim.set_poisson(rhs="charge_density", solver="geometric_mg")
         sim.set_density("bz", np.ones((n, n)))

@@ -1,14 +1,14 @@
 """Genere un harnais KOKKOS : la brique EulerGen GENEREE tourne dans un Kokkos::parallel_for
-(backend CUDA sur GH200), comparee a adc::Euler sur hote. Placeholder __BRICK__."""
+(backend CUDA sur GH200), comparee a pops::Euler sur hote. Placeholder __BRICK__."""
 import sys
 sys.path.insert(0, "python/tests")
 from test_dsl_brick import build_euler_brick
 
 brick = build_euler_brick().emit_cpp_brick(name="EulerGen")  # CSE active
 
-HARNESS = r"""// harnais Kokkos : brique generee via Kokkos::parallel_for (CUDA/GH200) vs adc::Euler hote.
+HARNESS = r"""// harnais Kokkos : brique generee via Kokkos::parallel_for (CUDA/GH200) vs pops::Euler hote.
 #include <Kokkos_Core.hpp>
-#include <adc/physics/fluids/euler.hpp>
+#include <pops/physics/fluids/euler.hpp>
 __BRICK__
 #include <cstdio>
 #include <cmath>
@@ -26,10 +26,10 @@ int main(int argc, char** argv) {
     Kokkos::deep_copy(dU, hUv);
 
     Kokkos::parallel_for("flux", n, KOKKOS_LAMBDA(int t) {
-      adc::StateVec<4> u{};
+      pops::StateVec<4> u{};
       for (int i = 0; i < 4; ++i) u[i] = dU(t * 4 + i);
-      adc::Aux a{};
-      adc_generated::EulerGen gen;                  // brique GENEREE, sur le device via Kokkos
+      pops::Aux a{};
+      pops_generated::EulerGen gen;                  // brique GENEREE, sur le device via Kokkos
       auto fx = gen.flux(u, a, 0);
       auto fy = gen.flux(u, a, 1);
       for (int i = 0; i < 4; ++i) { dFx(t * 4 + i) = fx[i]; dFy(t * 4 + i) = fy[i]; }
@@ -41,9 +41,9 @@ int main(int argc, char** argv) {
     Kokkos::deep_copy(hFx, dFx);
     Kokkos::deep_copy(hFy, dFy);
 
-    adc::Euler ref; ref.gamma = 1.4; adc::Aux a{};
+    pops::Euler ref; ref.gamma = 1.4; pops::Aux a{};
     for (int t = 0; t < n; ++t) {
-      adc::StateVec<4> u{};
+      pops::StateVec<4> u{};
       for (int i = 0; i < 4; ++i) u[i] = hU[t * 4 + i];
       auto rx = ref.flux(u, a, 0); auto ry = ref.flux(u, a, 1);
       for (int i = 0; i < 4; ++i) {
@@ -51,7 +51,7 @@ int main(int argc, char** argv) {
         md = fmax(md, fabs(ry[i] - hFy(t * 4 + i)));
       }
     }
-    printf("exec_space=%s  maxdiff(Kokkos EulerGen vs hote adc::Euler)=%.3e\n",
+    printf("exec_space=%s  maxdiff(Kokkos EulerGen vs hote pops::Euler)=%.3e\n",
            Kokkos::DefaultExecutionSpace::name(), md);
   }
   Kokkos::finalize();

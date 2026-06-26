@@ -7,23 +7,23 @@
 // main (sans System), puis on verifie que make_block / make_max_speed / make_poisson_rhs produisent
 // exactement le residu / la vitesse d'onde / le second membre de Poisson du chemin direct, et que
 // l'avance SSPRK2 conserve la masse. Si ca compile et passe, un .so genere peut faire de meme.
-#include <adc/physics/bricks/bricks.hpp>  // CompositeModel, NoSource, GravityForce, GravityCoupling
-#include <adc/physics/fluids/euler.hpp>   // Euler (brique hyperbolique compressible)
-#include <adc/runtime/builders/block/block_builder.hpp>
+#include <pops/physics/bricks/bricks.hpp>  // CompositeModel, NoSource, GravityForce, GravityCoupling
+#include <pops/physics/fluids/euler.hpp>   // Euler (brique hyperbolique compressible)
+#include <pops/runtime/builders/block/block_builder.hpp>
 
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/layout/distribution_mapping.hpp>
-#include <adc/mesh/execution/for_each.hpp>
-#include <adc/mesh/geometry/geometry.hpp>
-#include <adc/mesh/storage/mf_arith.hpp>
-#include <adc/mesh/storage/multifab.hpp>
-#include <adc/mesh/boundary/physical_bc.hpp>
-#include <adc/numerics/spatial_operator.hpp>
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/layout/distribution_mapping.hpp>
+#include <pops/mesh/execution/for_each.hpp>
+#include <pops/mesh/geometry/geometry.hpp>
+#include <pops/mesh/storage/mf_arith.hpp>
+#include <pops/mesh/storage/multifab.hpp>
+#include <pops/mesh/boundary/physical_bc.hpp>
+#include <pops/numerics/spatial_operator.hpp>
 
 #include <cmath>
 #include <cstdio>
 
-using namespace adc;
+using namespace pops;
 static constexpr double kPi = 3.14159265358979323846;
 
 int main() {

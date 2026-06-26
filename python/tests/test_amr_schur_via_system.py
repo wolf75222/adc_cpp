@@ -5,15 +5,15 @@ Pendant AMR de test_schur_via_system.py. L'etage AmrCondensedSchurSourceStepper 
 STANDALONE (parite mono-niveau) dans test_amr_condensed_schur_source_stepper (C++) ; ici on exerce
 le chemin FACADE de bout en bout :
 
-  adc.AmrSystem.add_equation(time=adc.Strang(source=adc.CondensedSchur(...)))
-    -> add_equation(time=time.hyperbolic = adc.Explicit())   # transport SOURCE-FREE (NoSource)
+  pops.AmrSystem.add_equation(time=pops.Strang(source=pops.CondensedSchur(...)))
+    -> add_equation(time=time.hyperbolic = pops.Explicit())   # transport SOURCE-FREE (NoSource)
       -> _s.add_block (ModelSpec -> dispatch_amr_compiled -> AmrCouplerMP)
     -> _s.set_source_stage(name, kind, theta, alpha)          # etage condense GLOBAL
     -> _s.set_time_scheme("lie"|"strang")                     # splitting
   sim.step(dt)
     -> AmrCouplerMP : update() ; advance_transport (source-free) ; amr_schur_source ; ...
 
-MODELE NATIF (CI-safe, sans compilateur C++) : adc.FluidState(isothermal) + adc.IsothermalFlux()
+MODELE NATIF (CI-safe, sans compilateur C++) : pops.FluidState(isothermal) + pops.IsothermalFlux()
 expose Density / MomentumX / MomentumY (les roles exiges par l'etage condense) avec source=NoSource
 (le transport est source-free ; l'etage condense porte la source electrostatique/Lorentz). Hierarchie
 MONO-NIVEAU (set_refinement(1e30) -> aucun patch fin) : l'etage degenere en l'etage uniforme.
@@ -32,7 +32,7 @@ import sys
 import numpy as np
 
 try:
-    import adc
+    import pops
 except ImportError as e:
     print("skip  module adc absent (PYTHONPATH ?) : %s" % e)
     sys.exit(0)
@@ -41,11 +41,11 @@ except ImportError as e:
 def iso_model(cs2=1.0, alpha=1.0):
     """Fluide isotherme NATIF : roles Density / MomentumX / MomentumY, source NoSource (transport
     source-free), Poisson de fond alpha*(n - 0)."""
-    return adc.Model(
-        state=adc.FluidState(kind="isothermal", cs2=cs2),
-        transport=adc.IsothermalFlux(),
-        source=adc.NoSource(),
-        elliptic=adc.BackgroundDensity(alpha=alpha, n0=0.0),
+    return pops.Model(
+        state=pops.FluidState(kind="isothermal", cs2=cs2),
+        transport=pops.IsothermalFlux(),
+        source=pops.NoSource(),
+        elliptic=pops.BackgroundDensity(alpha=alpha, n0=0.0),
     )
 
 
@@ -63,25 +63,25 @@ def build_amr(n=24, L=1.0, B0=4.0, alpha=3.0, theta=1.0, with_schur=True, strang
               cs2=1.0, set_bz=True):
     """AmrSystem MONO-NIVEAU (set_refinement desactive) avec un bloc isotherme natif.
 
-    with_schur=True : add_equation(adc.Strang/Split(source=CondensedSchur)) -> etage condense GLOBAL.
-    with_schur=False : add_equation(adc.Explicit()) -> transport seul (reference sans source)."""
-    sim = adc.AmrSystem(n=n, L=L, periodic=False, regrid_every=0)
+    with_schur=True : add_equation(pops.Strang/Split(source=CondensedSchur)) -> etage condense GLOBAL.
+    with_schur=False : add_equation(pops.Explicit()) -> transport seul (reference sans source)."""
+    sim = pops.AmrSystem(n=n, L=L, periodic=False, regrid_every=0)
     sim.set_poisson(rhs="charge_density", solver="geometric_mg", bc="dirichlet")
     sim.set_refinement(1e30)  # aucun raffinement -> hierarchie MONO-NIVEAU (niveau fin seed vide)
     if set_bz:
         sim.set_magnetic_field(B0 * np.ones((n, n)))
     if with_schur:
-        cls = adc.Strang if strang else adc.Split
+        cls = pops.Strang if strang else pops.Split
         time_policy = cls(
-            hyperbolic=adc.Explicit(),  # SSPRK2 -> kind 'explicit' (l'AMR n'a pas ssprk3)
-            source=adc.CondensedSchur(kind="electrostatic_lorentz", theta=theta, alpha=alpha),
+            hyperbolic=pops.Explicit(),  # SSPRK2 -> kind 'explicit' (l'AMR n'a pas ssprk3)
+            source=pops.CondensedSchur(kind="electrostatic_lorentz", theta=theta, alpha=alpha),
         )
     else:
-        time_policy = adc.Explicit()
+        time_policy = pops.Explicit()
     sim.add_equation(
         "electrons",
         model=iso_model(cs2=cs2, alpha=alpha),
-        spatial=adc.FiniteVolume(limiter="minmod", riemann="rusanov", variables="conservative"),
+        spatial=pops.FiniteVolume(limiter="minmod", riemann="rusanov", variables="conservative"),
         time=time_policy,
     )
     rho0, u0, v0 = smooth_state(n, L)
@@ -170,15 +170,15 @@ def main():
 
     # E2 : add_block(time=Strang) -> rejet (le splitting passe par add_equation).
     def add_block_strang():
-        s = adc.AmrSystem(n=n, L=L, periodic=False)
+        s = pops.AmrSystem(n=n, L=L, periodic=False)
         s.add_block("e", iso_model(),
-                    time=adc.Strang(hyperbolic=adc.Explicit(),
-                                    source=adc.CondensedSchur(theta=0.5, alpha=alpha)))
-    raises(add_block_strang, "(E2) add_block(adc.Strang) rejete (passer par add_equation)")
+                    time=pops.Strang(hyperbolic=pops.Explicit(),
+                                    source=pops.CondensedSchur(theta=0.5, alpha=alpha)))
+    raises(add_block_strang, "(E2) add_block(pops.Strang) rejete (passer par add_equation)")
 
-    # E3 : theta hors (0, 1] et kind inconnu -> ValueError des adc.CondensedSchur (validation Python).
-    raises(lambda: adc.CondensedSchur(theta=1.5, alpha=alpha), "(E3a) CondensedSchur(theta=1.5) rejete")
-    raises(lambda: adc.CondensedSchur(kind="bidon", alpha=alpha), "(E3b) CondensedSchur(kind invalide) rejete")
+    # E3 : theta hors (0, 1] et kind inconnu -> ValueError des pops.CondensedSchur (validation Python).
+    raises(lambda: pops.CondensedSchur(theta=1.5, alpha=alpha), "(E3a) CondensedSchur(theta=1.5) rejete")
+    raises(lambda: pops.CondensedSchur(kind="bidon", alpha=alpha), "(E3b) CondensedSchur(kind invalide) rejete")
 
     print("test_amr_schur_via_system : tout est vert")
 

@@ -1,18 +1,18 @@
 """Spec 3: a library time scheme is a MACRO that builds operator-first IR, not a stepper.
 
-`adc.lib.time.*` and `adc.time.std.*` are MacroBricks: they construct a Program from
+`pops.lib.time.*` and `pops.time.std.*` are MacroBricks: they construct a Program from
 operator names using only the kernel primitives (P.call / linear_combine /
 solve_local_linear / commit). This example builds a predictor-corrector with the library
-macro and shows (a) `adc.lib.time` is a thin forwarder to `adc.time.std` (identical IR),
+macro and shows (a) `pops.lib.time` is a thin forwarder to `pops.time.std` (identical IR),
 and (b) every node the macro emits is a kernel primitive op -- there is no parallel
 runtime stepper. So a user can always rewrite the same scheme by hand against the kernel.
 
 Run: python3 examples/spec3/manual_vs_lib_predictor_corrector.py
 """
-from adc.math import sqrt, grad, div, laplacian, ddt
-from adc.physics import Model
-import adc.lib as lib
-import adc.time as adctime
+from pops.math import sqrt, grad, div, laplacian, ddt
+from pops.physics import Model
+import pops.lib as lib
+import pops.time as adctime
 
 
 def build_model():
@@ -62,15 +62,15 @@ def build(via_lib):
 def main():
     lib_prog, std_prog = build(True), build(False)
 
-    # (a) adc.lib.time is a thin forwarder to adc.time.std: identical IR.
-    assert _ir(lib_prog) == _ir(std_prog), "adc.lib.time must forward to adc.time.std"
+    # (a) pops.lib.time is a thin forwarder to pops.time.std: identical IR.
+    assert _ir(lib_prog) == _ir(std_prog), "pops.lib.time must forward to pops.time.std"
 
     # (b) the macro emits only kernel primitive ops -- no parallel stepper.
     emitted = {v.op for v in lib_prog._values}
     assert emitted <= KERNEL_OPS, "unexpected non-kernel op(s): %s" % (emitted - KERNEL_OPS)
 
     print("ops emitted by the macro:", sorted(emitted))
-    print("adc.lib.time IR == adc.time.std IR:", _ir(lib_prog) == _ir(std_prog))
+    print("pops.lib.time IR == pops.time.std IR:", _ir(lib_prog) == _ir(std_prog))
     print("\nOK: the library scheme is a macro over the operator-first kernel.")
 
 

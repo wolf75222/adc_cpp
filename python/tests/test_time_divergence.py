@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""adc.time centered divergence primitive + a div(grad) Helmholtz solve (epic ADC-399 / ADC-412).
+"""pops.time centered divergence primitive + a div(grad) Helmholtz solve (epic ADC-399 / ADC-412).
 
 ADC-412 adds the ``ctx.divergence`` primitive (the centered finite-volume divergence factored as
-``adc::apply_divergence``) and the ``P.divergence(out, fx, fy)`` IR op. A matrix-free Schur-like operator
+``pops::apply_divergence``) and the ``P.divergence(out, fx, fy)`` IR op. A matrix-free Schur-like operator
 ``A(phi) = phi - alpha*div(grad phi)`` (the div(flux) structure of the condensed-Schur operator) is
 built from ``P.gradient`` chained into ``P.divergence`` and solved with ``P.solve_linear`` -- exactly
 the matrix-free Krylov path acceptance 32 needs in place. The centered ``div(grad)`` is the WIDE-stencil
@@ -12,27 +12,27 @@ compiled solve is verified against an OFFLINE numpy CG on that SAME wide-stencil
 (A) Pure Python, always runs:
     - ``P.divergence`` records a 3-input scalar_field op, validates its operands, and serializes;
     - the div(grad) Helmholtz apply (gradient -> divergence) lowers to ``ctx.gradient`` + a
-      ``ctx.divergence`` + ``adc::bicgstab_solve``, with the gradient buffer allocated 2-component
+      ``ctx.divergence`` + ``pops::bicgstab_solve``, with the gradient buffer allocated 2-component
       (``ctx.alloc_scalar_field(2, 1)``);
     - a standalone divergence-of-a-known-field check: the offline centered FV divergence of
       f = (cos 2pi x, sin 2pi y) matches the analytic div f = -2pi sin 2pi x + 2pi cos 2pi y to the
       discretization error -- the reference the compiled ctx.divergence reproduces;
-    - ``adc.time.std.condensed_schur`` (now implemented, ADC-421) lowers at theta == 1 and raises for
+    - ``pops.time.std.condensed_schur`` (now implemented, ADC-421) lowers at theta == 1 and raises for
       the deferred theta != 1 extrapolation (the full end-to-end parity is test_time_condensed_schur.py).
 
 (B) End-to-end parity (skips unless the full toolchain is present): the div(grad) Helmholtz Program is
     compiled + installed + stepped, then compared to an OFFLINE numpy CG on the identical discrete
     periodic 5-point system. Asserts max|compiled - offline| <= 1e-6. Self-skips (exit 0) without numpy
-    / _adc / install_program / a compiler / a visible Kokkos -- never fakes the engine.
+    / _pops / install_program / a compiler / a visible Kokkos -- never fakes the engine.
 """
 import sys
 
 
 def _adc_time():
     try:
-        import adc.time as t
+        import pops.time as t
     except Exception as exc:  # adc not importable here -> skip, never fake
-        print("skip test_time_divergence (adc.time unavailable: %s)" % exc)
+        print("skip test_time_divergence (pops.time unavailable: %s)" % exc)
         sys.exit(0)
     return t
 
@@ -123,7 +123,7 @@ def test_scalar_field_ncomp_validates(t):
 
 def test_divgrad_codegen(t):
     src = _divgrad_program(t, method="bicgstab").emit_cpp_program()
-    for frag in ("ctx.gradient", "ctx.divergence", "adc::bicgstab_solve",
+    for frag in ("ctx.gradient", "ctx.divergence", "pops::bicgstab_solve",
                  "ctx.alloc_scalar_field(2, 1)"):  # the 2-component gradient buffer
         assert frag in src, "the div(grad) solve must contain %r\n%s" % (frag, src)
 
@@ -154,7 +154,7 @@ def test_condensed_schur_macro_lowers(t):
 
 def _analytic_divergence_check():
     """Standalone offline check: the centered FV divergence of a known smooth flux matches the analytic
-    divergence to the discretization error. The same centered stencil adc::apply_divergence (and the
+    divergence to the discretization error. The same centered stencil pops::apply_divergence (and the
     compiled ctx.divergence) computes. Skips silently without numpy."""
     try:
         import numpy as np
@@ -226,18 +226,18 @@ def _run_section_b(t):
     try:
         import numpy as np
 
-        import adc
-    except Exception as exc:  # noqa: BLE001  -- numpy / _adc unavailable here
+        import pops
+    except Exception as exc:  # noqa: BLE001  -- numpy / _pops unavailable here
         print("-- (B) skipped: adc/numpy unavailable: %s --" % exc)
         return None
 
     n = 16
-    sim = adc.System(n=n, L=1.0, periodic=True)
+    sim = pops.System(n=n, L=1.0, periodic=True)
     if not hasattr(sim, "install_program"):
-        print("-- (B) skipped: _adc lacks the install_program binding (rebuild _adc) --")
+        print("-- (B) skipped: _pops lacks the install_program binding (rebuild _pops) --")
         return None
 
-    from adc import dsl
+    from pops import dsl
 
     def passive_model(name):  # 1-variable block, no flux, no Poisson coupling
         m = dsl.Model(name)
@@ -251,7 +251,7 @@ def _run_section_b(t):
 
     tol = 1e-10
     try:
-        compiled = adc.compile_problem(
+        compiled = pops.compile_problem(
             model=passive_model("divgrad_prog"),
             time=_divgrad_program(t, name="divgrad_step", method="bicgstab", tol=tol, max_iter=200))
     except RuntimeError as exc:  # no compiler / no Kokkos visible / .so compile failed
@@ -266,8 +266,8 @@ def _run_section_b(t):
         print("-- (B) skipped: model compile could not build the .so: %s --" % str(exc)[:200])
         return None
     sim.add_equation("blk", compiled_model,
-                     spatial=adc.FiniteVolume(limiter="none", riemann="rusanov"),
-                     time=adc.Explicit(method="euler"))
+                     spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                     time=pops.Explicit(method="euler"))
 
     x = (np.arange(n) + 0.5) / n
     X, Y = np.meshgrid(x, x, indexing="ij")

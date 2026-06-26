@@ -10,21 +10,21 @@
 // Quand le raffinement EST configure (set_refinement(seuil fini)), le seed est alloue et le regrid de
 // build chope + distribue exactement comme avant : n_patches()>=1, chemin raffine INCHANGE (la parite
 // bit-a-bit du chemin raffine est verrouillee par test_amr_compiled_model / test_amr_riemann_native).
-#include <adc/physics/bricks/bricks.hpp>  // CompositeModel, GravityForce, GravityCoupling
-#include <adc/physics/fluids/euler.hpp>   // Euler (= CompressibleFlux)
-#include <adc/runtime/builders/compiled/amr_dsl_block.hpp>
-#include <adc/runtime/amr_system.hpp>
-#include <adc/runtime/config/model_spec.hpp>
+#include <pops/physics/bricks/bricks.hpp>  // CompositeModel, GravityForce, GravityCoupling
+#include <pops/physics/fluids/euler.hpp>   // Euler (= CompressibleFlux)
+#include <pops/runtime/builders/compiled/amr_dsl_block.hpp>
+#include <pops/runtime/amr_system.hpp>
+#include <pops/runtime/config/model_spec.hpp>
 
 #include <cmath>
 #include <cstdio>
 #include <vector>
 
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
 #include <Kokkos_Core.hpp>
 #endif
 
-using namespace adc;
+using namespace pops;
 
 static std::vector<double> bubble(int n) {  // bulle de densite lisse (pic 1.5 > 1.2), periodique
   std::vector<double> rho(static_cast<std::size_t>(n) * n);
@@ -39,7 +39,7 @@ static std::vector<double> bubble(int n) {  // bulle de densite lisse (pic 1.5 >
 using Model = CompositeModel<Euler, GravityForce, GravityCoupling>;
 
 int main(int argc, char** argv) {
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   Kokkos::ScopeGuard guard(argc, argv);
 #else
   (void)argc;

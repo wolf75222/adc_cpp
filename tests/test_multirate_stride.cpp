@@ -6,28 +6,28 @@
 // Ici : bloc rapide (stride 1) + bloc lent (stride 3), production constante. Apres 1 pas le
 // lent a deja fait son pas de 3*dt (!= rapide) ; apres 3 pas les deux sont synchronises.
 
-#include <adc/core/model/coupled_system.hpp>
-#include <adc/core/state/state.hpp>
-#include <adc/coupling/system/system_coupler.hpp>
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/layout/distribution_mapping.hpp>
-#include <adc/mesh/geometry/geometry.hpp>
-#include <adc/mesh/storage/multifab.hpp>
+#include <pops/core/model/coupled_system.hpp>
+#include <pops/core/state/state.hpp>
+#include <pops/coupling/system/system_coupler.hpp>
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/layout/distribution_mapping.hpp>
+#include <pops/mesh/geometry/geometry.hpp>
+#include <pops/mesh/storage/multifab.hpp>
 
 #include <cmath>
 #include <cstdio>
 
-using namespace adc;
+using namespace pops;
 
 struct Production {
   using State = StateVec<1>;
-  using Aux = adc::Aux;
+  using Aux = pops::Aux;
   static constexpr int n_vars = 1;
   Real rate = Real(1);
-  ADC_HD State flux(const State&, const Aux&, int) const { return State{}; }
-  ADC_HD Real max_wave_speed(const State&, const Aux&, int) const { return Real(0); }
-  ADC_HD State source(const State&, const Aux&) const { return State{rate}; }
-  ADC_HD Real elliptic_rhs(const State& u) const { return u[0]; }
+  POPS_HD State flux(const State&, const Aux&, int) const { return State{}; }
+  POPS_HD Real max_wave_speed(const State&, const Aux&, int) const { return Real(0); }
+  POPS_HD State source(const State&, const Aux&) const { return State{rate}; }
+  POPS_HD Real elliptic_rhs(const State& u) const { return u[0]; }
 };
 
 struct ZeroSystemRhs {

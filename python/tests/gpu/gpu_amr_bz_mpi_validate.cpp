@@ -3,7 +3,7 @@
 // multi-box mono-rang ET MPI np=2/4 (CI Kokkos Serial). On confirme ici le CHEMIN DEVICE distribue :
 // grossier 2x2 boites + niveau fin = 2 patchs disjoints, repartis sur n_ranks() GPU (un par rang),
 // B_z(x,y) NON CONSTANT pose PAR NIVEAU et PAR BOITE a la resolution du niveau, source S = B_z u lue
-// par boite sur device via load_aux<4> (for_each_cell ADC_HD). On valide par advance_amr (le moteur
+// par boite sur device via load_aux<4> (for_each_cell POPS_HD). On valide par advance_amr (le moteur
 // device que AmrSystemCoupler appelle ; la facade elle-meme bute sur le concept CoupledSystemLike
 // cote nvcc/EDG). B_z etant fonction PURE de la position, les invariants globaux (all_reduce) doivent
 // etre INVARIANTS au nombre de rangs : le script compare np=1 (oracle multi-box mono-rang) a np=2/4.
@@ -11,42 +11,42 @@
 // Sortie : reduits GLOBAUX mass/csum/csumsq/cmax (all_reduce sur les boites locales) du bloc B_z apres
 // un pas AMR, + un compteur de cellules ou B_z relu != bz(centre du niveau) (all_reduce, doit etre 0).
 
-#include <adc/core/model/physical_model.hpp>
-#include <adc/core/state/state.hpp>
-#include <adc/mesh/index/box2d.hpp>
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/layout/distribution_mapping.hpp>
-#include <adc/mesh/execution/for_each.hpp>  // device_fence
-#include <adc/mesh/geometry/geometry.hpp>
-#include <adc/mesh/storage/multifab.hpp>
-#include <adc/numerics/time/amr/reflux/amr_reflux_mf.hpp>  // AmrLevelMP, advance_amr
-#include <adc/parallel/comm.hpp>
+#include <pops/core/model/physical_model.hpp>
+#include <pops/core/state/state.hpp>
+#include <pops/mesh/index/box2d.hpp>
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/layout/distribution_mapping.hpp>
+#include <pops/mesh/execution/for_each.hpp>  // device_fence
+#include <pops/mesh/geometry/geometry.hpp>
+#include <pops/mesh/storage/multifab.hpp>
+#include <pops/numerics/time/amr/reflux/amr_reflux_mf.hpp>  // AmrLevelMP, advance_amr
+#include <pops/parallel/comm.hpp>
 
 #include <cmath>
 #include <cstdio>
 #include <vector>
 
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
 #include <Kokkos_Core.hpp>
 #endif
 
-using namespace adc;
+using namespace pops;
 static constexpr double kPi = 3.14159265358979323846;
 
 // Modele jouet pilote par B_z : flux nul, source S = B_z u. n_aux=4 -> lit a.B_z par niveau/boite.
 struct BzGrow {
   using State = StateVec<1>;
-  using Aux = adc::Aux;
+  using Aux = pops::Aux;
   static constexpr int n_vars = 1;
   static constexpr int n_aux = 4;
-  ADC_HD State flux(const State&, const Aux&, int) const { return State{Real(0)}; }
-  ADC_HD Real max_wave_speed(const State&, const Aux&, int) const { return Real(0); }
-  ADC_HD State source(const State& u, const Aux& a) const {
+  POPS_HD State flux(const State&, const Aux&, int) const { return State{Real(0)}; }
+  POPS_HD Real max_wave_speed(const State&, const Aux&, int) const { return Real(0); }
+  POPS_HD State source(const State& u, const Aux& a) const {
     State s{};
     s[0] = a.B_z * u[0];
     return s;
   }
-  ADC_HD Real elliptic_rhs(const State&) const { return Real(0); }
+  POPS_HD Real elliptic_rhs(const State&) const { return Real(0); }
 };
 static_assert(PhysicalModel<BzGrow> && aux_comps<BzGrow>() == 4);
 
@@ -70,7 +70,7 @@ static int fill_bz_level(MultiFab& A, const Geometry& gk, F bz) {
 
 int main(int argc, char** argv) {
   comm_init(&argc, &argv);
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   Kokkos::initialize(argc, argv);
 #endif
   int fails = 0;
@@ -133,7 +133,7 @@ int main(int argc, char** argv) {
     const double gsum = all_reduce_sum(lsum), gsumsq = all_reduce_sum(lsumsq);
     const double gmax = all_reduce_max(lmax), gmass = gsum * dxc * dyc;
 
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
     const char* space = Kokkos::DefaultExecutionSpace::name();
 #else
     const char* space = "Serial(host)";
@@ -156,7 +156,7 @@ int main(int argc, char** argv) {
                     space);
     }
   }
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   Kokkos::finalize();
 #endif
   comm_finalize();

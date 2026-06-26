@@ -48,7 +48,7 @@ import math
 
 import numpy as np
 
-import adc
+import pops
 
 # Parametres geometriques
 RMIN, RMAX = 0.30, 1.00
@@ -127,17 +127,17 @@ def test_polar_conservation_with_nonzero_radial_flux():
 
     Voir docstring du module pour la motivation et la strategie.
     """
-    sim = adc.System(mesh=adc.PolarMesh(r_min=RMIN, r_max=RMAX, nr=NR, ntheta=NTH))
+    sim = pops.System(mesh=pops.PolarMesh(r_min=RMIN, r_max=RMAX, nr=NR, ntheta=NTH))
     sim.add_block(
         "ne",
-        model=adc.Model(
-            state=adc.Scalar(),
-            transport=adc.ExB(B0=1.0),
-            source=adc.NoSource(),
-            elliptic=adc.ChargeDensity(charge=1.0),
+        model=pops.Model(
+            state=pops.Scalar(),
+            transport=pops.ExB(B0=1.0),
+            source=pops.NoSource(),
+            elliptic=pops.ChargeDensity(charge=1.0),
         ),
-        spatial=adc.Spatial(minmod=True),
-        time=adc.Explicit(),
+        spatial=pops.Spatial(minmod=True),
+        time=pops.Explicit(),
     )
     sim.set_poisson(rhs="charge_density", solver="polar", bc="dirichlet")
     sim.set_density("ne", _asymmetric_density(NR, NTH, RMIN, RMAX, A_ASYM, L_MODE))
@@ -200,7 +200,7 @@ def test_polar_conservation_with_nonzero_radial_flux():
 
 
 if __name__ == "__main__":
-    import adc as _adc_mod
+    import pops as _adc_mod
     import numpy as _np2
     import math as _math2
 

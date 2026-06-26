@@ -8,12 +8,12 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=64G
 #SBATCH --time=01:00:00
-#SBATCH --job-name=adc_perf_gpu
-#SBATCH --output=/home/rmdraux/adc_perf_20260608/logs/gpu_%j.out
-#SBATCH --error=/home/rmdraux/adc_perf_20260608/logs/gpu_%j.err
+#SBATCH --job-name=pops_perf_gpu
+#SBATCH --output=/home/rmdraux/pops_perf_20260608/logs/gpu_%j.out
+#SBATCH --error=/home/rmdraux/pops_perf_20260608/logs/gpu_%j.err
 
 set -u
-BASE="$HOME/adc_perf_20260608"
+BASE="$HOME/pops_perf_20260608"
 SRC="$BASE/adc_cpp"
 CASES="$BASE/adc_cases"
 RESULTS="$BASE/results"
@@ -29,7 +29,7 @@ spack load cmake@3.30.5 2>/dev/null || true
 export KOKKOS_DISABLE_WARNINGS=1
 
 echo "--- toolchain ---"
-which cmake c++ "$HOME/adc_gpu_p1/kinstall/bin/nvcc_wrapper" srun || true
+which cmake c++ "$HOME/pops_gpu_p1/kinstall/bin/nvcc_wrapper" srun || true
 cmake --version | head -1 || true
 nvidia-smi -L || true
 ompi_info --version 2>/dev/null | head -2 || true
@@ -46,12 +46,12 @@ git -C "$SRC" fetch origin --prune
 git -C "$SRC" checkout --detach origin/master
 git -C "$CASES" fetch origin --prune
 git -C "$CASES" checkout --detach origin/master
-ADC_CPP_COMMIT="$(git -C "$SRC" rev-parse --short HEAD)"
-ADC_CASES_COMMIT="$(git -C "$CASES" rev-parse --short HEAD)"
-echo "ADC_CPP_COMMIT=$ADC_CPP_COMMIT"
-echo "ADC_CASES_COMMIT=$ADC_CASES_COMMIT"
+POPS_CPP_COMMIT="$(git -C "$SRC" rev-parse --short HEAD)"
+POPS_CASES_COMMIT="$(git -C "$CASES" rev-parse --short HEAD)"
+echo "POPS_CPP_COMMIT=$POPS_CPP_COMMIT"
+echo "POPS_CASES_COMMIT=$POPS_CASES_COMMIT"
 
-KROOT="$HOME/adc_gpu_p1/kinstall"
+KROOT="$HOME/pops_gpu_p1/kinstall"
 NW="$KROOT/bin/nvcc_wrapper"
 if [ ! -x "$NW" ]; then
   echo "MISSING_NVCC_WRAPPER $NW"
@@ -65,14 +65,14 @@ WARMUP=2
 LIMITER=minmod
 SOLVER=geometric_mg
 
-PHASE_CSV="$RESULTS/perf_phases_gpu_${ADC_CPP_COMMIT}_${SLURM_JOBID}.csv"
-SCALING_CSV="$RESULTS/perf_scaling_gpu_${ADC_CPP_COMMIT}_${SLURM_JOBID}.csv"
+PHASE_CSV="$RESULTS/perf_phases_gpu_${POPS_CPP_COMMIT}_${SLURM_JOBID}.csv"
+SCALING_CSV="$RESULTS/perf_scaling_gpu_${POPS_CPP_COMMIT}_${SLURM_JOBID}.csv"
 printf "commit,case,backend,np,threads,n,steps,phase,total_s,per_step_ms,pct\n" > "$PHASE_CSV"
 printf "commit,repo,case,scaling,backend,machine,np,threads,gpus,n_global,n_local,steps,warmup,wall_s,per_step_ms,speedup,efficiency,notes\n" > "$SCALING_CSV"
 
 parse_profile_log () {
   local log="$1" case="$2" scaling="$3" backend="$4" np="$5" gpus="$6" n="$7" notes="$8"
-  python3 - "$log" "$PHASE_CSV" "$SCALING_CSV" "$ADC_CPP_COMMIT" "$case" "$scaling" "$backend" "$np" "$gpus" "$n" "$STEPS" "$WARMUP" "$notes" <<'PY'
+  python3 - "$log" "$PHASE_CSV" "$SCALING_CSV" "$POPS_CPP_COMMIT" "$case" "$scaling" "$backend" "$np" "$gpus" "$n" "$STEPS" "$WARMUP" "$notes" <<'PY'
 import csv, re, sys
 log, phase_csv, scaling_csv, commit, case, scaling, backend, np, gpus, n, steps, warmup, notes = sys.argv[1:]
 phase_re = re.compile(r"^(transport|poisson|halos|aux_derive|reduction|fence|alloc_tmp|TOTAL)\s+([-\d.eE+]+)\s+([-\d.eE+]+)\s+([-\d.eE+]+)%")
@@ -158,13 +158,13 @@ rm -rf "$AMR_BUILD"
 if cmake -S "$AMR_SRC" -B "$AMR_BUILD" -DCMAKE_CXX_COMPILER="$NW" -DKokkos_ROOT="$KROOT" \
     -DADC_INCLUDE="$SRC/include" -DADC_SRC="$SRC/python" -DCMAKE_BUILD_TYPE=Release > "$LOGS/amrmpi_cfg.log" 2>&1 && \
    cmake --build "$AMR_BUILD" -j 8 > "$LOGS/amrmpi_build.log" 2>&1; then
-  AMR_OUT="$LOGS/amrmpi_gpu_${ADC_CPP_COMMIT}_${SLURM_JOBID}.txt"
+  AMR_OUT="$LOGS/amrmpi_gpu_${POPS_CPP_COMMIT}_${SLURM_JOBID}.txt"
   : > "$AMR_OUT"
   for np in 1 2 4; do
     echo "--- amrmpi np=$np ---" | tee -a "$AMR_OUT"
     timeout 900 srun -n "$np" --gpus-per-task=1 "$AMR_BUILD/amrmpi_integrated" 128 2>&1 | tee -a "$AMR_OUT"
   done
-  python3 - "$AMR_OUT" "$SCALING_CSV" "$ADC_CPP_COMMIT" <<'PY'
+  python3 - "$AMR_OUT" "$SCALING_CSV" "$POPS_CPP_COMMIT" <<'PY'
 import csv, re, sys
 path, out, commit = sys.argv[1:]
 sig = {}

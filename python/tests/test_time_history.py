@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""adc.time multistep histories + Adams-Bashforth 2, end to end (epic ADC-399 / ADC-406a).
+"""pops.time multistep histories + Adams-Bashforth 2, end to end (epic ADC-399 / ADC-406a).
 
 A compiled `Program` can declare / read / write a SYSTEM-OWNED history field carried across macro-steps
 (a HistoryManager in System::Impl, NOT a closure capture, so a later checkpoint slice can serialize it).
@@ -8,7 +8,7 @@ This enables Adams-Bashforth 2: ``U^{n+1} = U + dt*(3/2 R_n - 1/2 R_{n-1})`` the
 
   - ``P.history(name, lag=1)`` -> a State-typed value (the value @p lag macro-steps back);
   - ``P.store_history(name, value)`` -> a side-effecting op (copy the value into the current slot);
-  - ``adc.time.std.adams_bashforth2(P, block)`` -> the AB2 IR (store-then-read, cold start = FE step 0).
+  - ``pops.time.std.adams_bashforth2(P, block)`` -> the AB2 IR (store-then-read, cold start = FE step 0).
 
 The codegen lowers ``history`` -> ``ctx.history(...)``, ``store_history`` -> ``ctx.store_history(...)``,
 and appends ``ctx.rotate_histories()`` at the END of the step body when any history is used.
@@ -25,7 +25,7 @@ mirrors this exactly (FE step 0, AB2 thereafter), so the comparison is to machin
     ZERO flux and a manufactured LINEAR source S(rho) = c*rho (so R = c*rho CHANGES every step), stepped
     N macro-steps; compare the final state to an OFFLINE reference running the IDENTICAL AB2 recurrence
     with the same FE cold start, cell by cell, to machine precision (spec test 37). Self-skips (exit 0)
-    without numpy / _adc / install_program / a compiler / a visible Kokkos -- never fakes the engine.
+    without numpy / _pops / install_program / a compiler / a visible Kokkos -- never fakes the engine.
 
 (C) Absent-history rejection (spec test 38): a Program that reads P.history("missing.R", lag=1) and is
     stepped WITHOUT ever storing it -> sim.step surfaces a RuntimeError containing
@@ -36,9 +36,9 @@ import sys
 
 def _adc_time():
     try:
-        import adc.time as t
+        import pops.time as t
     except Exception as exc:  # adc not importable here -> skip, never fake
-        print("skip test_time_history (adc.time unavailable: %s)" % exc)
+        print("skip test_time_history (pops.time unavailable: %s)" % exc)
         sys.exit(0)
     return t
 
@@ -95,7 +95,7 @@ def test_ab2_macro_lowers(t):
 
 def test_store_before_read_in_body(t):
     """The store is emitted BEFORE the lag-1 READ (the cold-start fill makes step 0 valid). The read is
-    the history line bound to a MultiFab& (``adc::MultiFab& ... = ctx.history(...)``); the bare
+    the history line bound to a MultiFab& (``pops::MultiFab& ... = ctx.history(...)``); the bare
     ``ctx.history(...)`` at the top is only the depth-locking registration."""
     P = t.Program("ab2")
     t.std.adams_bashforth2(P, "plasma")
@@ -182,23 +182,23 @@ def _run_section_b(t):
     try:
         import numpy as np
 
-        import adc
-    except Exception as exc:  # noqa: BLE001  -- numpy / _adc unavailable in this interpreter
+        import pops
+    except Exception as exc:  # noqa: BLE001  -- numpy / _pops unavailable in this interpreter
         print("-- (B) skipped: adc/numpy unavailable: %s --" % exc)
         return None
 
     n = 16
-    sim = adc.System(n=n, L=1.0, periodic=True)
+    sim = pops.System(n=n, L=1.0, periodic=True)
     if not hasattr(sim, "install_program"):
-        print("-- (B) skipped: _adc lacks the install_program binding (rebuild _adc) --")
+        print("-- (B) skipped: _pops lacks the install_program binding (rebuild _pops) --")
         return None
 
-    from adc import dsl
+    from pops import dsl
 
     P = t.Program("ab2_step")
     t.std.adams_bashforth2(P, "blk")
     try:
-        compiled = adc.compile_problem(model=_passive_source_model(dsl, "ab2_prog"), time=P)
+        compiled = pops.compile_problem(model=_passive_source_model(dsl, "ab2_prog"), time=P)
     except RuntimeError as exc:  # no compiler / no Kokkos visible / .so compile failed
         print("-- (B) skipped: compile_problem could not build the .so: %s --" % str(exc)[:200])
         return None
@@ -211,8 +211,8 @@ def _run_section_b(t):
         print("-- (B) skipped: model compile could not build the .so: %s --" % str(exc)[:200])
         return None
     sim.add_equation("blk", compiled_model,
-                     spatial=adc.FiniteVolume(limiter="none", riemann="rusanov"),
-                     time=adc.Explicit(method="euler"))
+                     spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                     time=pops.Explicit(method="euler"))
 
     x = (np.arange(n) + 0.5) / n
     X, Y = np.meshgrid(x, x, indexing="ij")
@@ -247,18 +247,18 @@ def _run_section_c(t):
     try:
         import numpy as np
 
-        import adc
+        import pops
     except Exception as exc:  # noqa: BLE001
         print("-- (C) skipped: adc/numpy unavailable: %s --" % exc)
         return None
 
     n = 8
-    sim = adc.System(n=n, L=1.0, periodic=True)
+    sim = pops.System(n=n, L=1.0, periodic=True)
     if not hasattr(sim, "install_program"):
-        print("-- (C) skipped: _adc lacks the install_program binding (rebuild _adc) --")
+        print("-- (C) skipped: _pops lacks the install_program binding (rebuild _pops) --")
         return None
 
-    from adc import dsl
+    from pops import dsl
 
     # A Program that READS missing.R but NEVER stores it -> the runtime read must fail loud.
     P = t.Program("miss_step")
@@ -268,7 +268,7 @@ def _run_section_c(t):
     P.commit("blk", P.linear_combine(U + P.dt * (R - Rp)))
 
     try:
-        compiled = adc.compile_problem(model=_passive_source_model(dsl, "miss_prog"), time=P)
+        compiled = pops.compile_problem(model=_passive_source_model(dsl, "miss_prog"), time=P)
     except RuntimeError as exc:
         print("-- (C) skipped: compile_problem could not build the .so: %s --" % str(exc)[:200])
         return None
@@ -278,8 +278,8 @@ def _run_section_c(t):
         print("-- (C) skipped: model compile could not build the .so: %s --" % str(exc)[:200])
         return None
     sim.add_equation("blk", compiled_model,
-                     spatial=adc.FiniteVolume(limiter="none", riemann="rusanov"),
-                     time=adc.Explicit(method="euler"))
+                     spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                     time=pops.Explicit(method="euler"))
     sim.set_state("blk", np.stack([np.ones((n, n))]))
     sim.install_program(compiled.so_path)
     try:

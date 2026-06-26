@@ -5,7 +5,7 @@ emit_cpp_brick used to emit ALL the model primitives in EVERY method (flux,
 max_wave_speed, wave_speeds, to_primitive...). On a moment system, to_primitive (identity
 copy) thus emitted the full closure and its dead sqrt; max_wave_speed needs only
 a handful of primitives but emitted them all. We check, on a moment model built
-via adc.moments (Gaussian closure, NO dependency on adc_cases):
+via pops.moments (Gaussian closure, NO dependency on adc_cases):
 
  (a) FILTERING: to_primitive no longer emits the dead closure (0 sqrt, 0 primitive) while the
      brick contains some elsewhere (live sqrt in flux);
@@ -27,8 +27,8 @@ import tempfile
 
 import numpy as np
 
-import adc.moments as M
-from adc import dsl
+import pops.moments as M
+from pops import dsl
 
 INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "include"))
 ORDER = 3          # order=3 -> 10 moments ; top order 4 (pair) -> sqrt (sx, sy) VIVANTS dans le flux
@@ -57,8 +57,8 @@ def _method_body(src, sig):
 
 def _prim_def_count(body):
     """Number of moment primitive definitions (C.., S.., u, v) in @p body."""
-    pref = ("const adc::Real u =", "const adc::Real v =", "const adc::Real C",
-            "const adc::Real S", "const adc::Real sx", "const adc::Real sy")
+    pref = ("const pops::Real u =", "const pops::Real v =", "const pops::Real C",
+            "const pops::Real S", "const pops::Real sx", "const pops::Real sy")
     return sum(1 for l in body if any(l.strip().startswith(p) for p in pref))
 
 
@@ -77,20 +77,20 @@ def realizable_states(nstates, seed):
 
 
 HARNESS = r"""
-#include <adc/physics/bricks/bricks.hpp>
-#include <adc/core/model/physical_model.hpp>
-#include <adc/core/state/variables.hpp>
+#include <pops/physics/bricks/bricks.hpp>
+#include <pops/core/model/physical_model.hpp>
+#include <pops/core/state/variables.hpp>
 __DEFAULT__
 __HOIST__
 #include <cstdio>
 int main(){
-  gdef::MomDef D; ghoi::MomHoi H; adc::Aux aux{};
+  gdef::MomDef D; ghoi::MomHoi H; pops::Aux aux{};
   const double S[][__NV__] = {
 __STATES__
   };
   const int ns = sizeof(S)/sizeof(S[0]);
   for(int k=0;k<ns;++k){
-    adc::StateVec<__NV__> u{}; for(int i=0;i<__NV__;++i) u[i]=S[k][i];
+    pops::StateVec<__NV__> u{}; for(int i=0;i<__NV__;++i) u[i]=S[k][i];
     for(int dir=0;dir<2;++dir){
       auto fd=D.flux(u,aux,dir); auto fh=H.flux(u,aux,dir);
       for(int i=0;i<__NV__;++i) printf("D %d %d %d %.17g\n", k, dir, i, (double)fd[i]);

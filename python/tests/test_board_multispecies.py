@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Spec 3 generic multi-species board facade (ADC-457, sections 12 + 16, criteria 25-30).
 
-``adc.physics.Model.species`` now authors N >= 2 species; the board facade LOWERS them to the
+``pops.physics.Model.species`` now authors N >= 2 species; the board facade LOWERS them to the
 existing operator-first multi-block IR (PR #287/#299/#300) rather than a parallel runtime:
 
-* each ``m.species(...)`` -> one ``adc.model.StateSpace`` (a named block instance);
+* each ``m.species(...)`` -> one ``pops.model.StateSpace`` (a named block instance);
 * ``m.coupled_rate(...)`` -> the existing ``coupled_rate`` operator kind: a ``RateBundle``
   signature over the input species, the SAME operator the hand-written operator-first model
   registers;
@@ -13,22 +13,22 @@ existing operator-first multi-block IR (PR #287/#299/#300) rather than a paralle
 
 The equivalence pinned here is structural AND at emit: a 3-fluid board model lowers to 3
 StateSpaces + a coupled_rate + a multi-block field operator, and a two-fluid board model emits the
-SAME C++ as the hand-written ``adc.model.Module`` reference (test 34.10). Arbitrary arity (3 + 4
+SAME C++ as the hand-written ``pops.model.Module`` reference (test 34.10). Arbitrary arity (3 + 4
 inputs) works; a wrong-species rate in an affine combine errors (test 34.11). This is the pure
 authoring / IR-equivalence slice; the compiled multi-block ``.so`` collision STEP runs on ROMEO
-(Kokkos-only AOT), NOT here. Real engine only; skips cleanly if adc.time is unavailable, never
+(Kokkos-only AOT), NOT here. Real engine only; skips cleanly if pops.time is unavailable, never
 faking.
 
 Runs BOTH as a script (``python3 test_board_multispecies.py``, the CI-style invocation) and under
-pytest (the test_* functions take no args and importorskip adc.time / adc.physics).
+pytest (the test_* functions take no args and importorskip pops.time / pops.physics).
 """
 import sys
 
 import pytest
 
-adctime = pytest.importorskip("adc.time")
-physics = pytest.importorskip("adc.physics")
-from adc import dsl, model  # noqa: E402 (after importorskip so a missing adc skips cleanly)
+adctime = pytest.importorskip("pops.time")
+physics = pytest.importorskip("pops.physics")
+from pops import dsl, model  # noqa: E402 (after importorskip so a missing adc skips cleanly)
 
 
 def _three_fluid_board():
@@ -152,9 +152,9 @@ def test_board_two_fluid_emits_identical_cpp_to_handwritten():
     hsrc = _two_fluid_program(hmod, he, hi).emit_cpp_program(model=None)
     assert bsrc == hsrc
     # one shared multi-state kernel binds both species, reads cons from each state (sanity)
-    assert bsrc.count("adc::for_each_cell") == 1
-    assert "const adc::Real ne = u0A(i, j, 0);" in bsrc
-    assert "const adc::Real ni = u1A(i, j, 0);" in bsrc
+    assert bsrc.count("pops::for_each_cell") == 1
+    assert "const pops::Real ne = u0A(i, j, 0);" in bsrc
+    assert "const pops::Real ni = u1A(i, j, 0);" in bsrc
 
 
 def test_arbitrary_arity_four_inputs():

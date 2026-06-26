@@ -1,7 +1,7 @@
 // Conformite des classes elliptiques EXISTANTES aux concepts communs formalises
 // dans elliptic_interface.hpp (audit D.1). Le test est ESSENTIELLEMENT statique : les
 // static_assert ci-dessous echouent A LA COMPILATION si une classe cesse de modeler son
-// concept. Le main() runtime existe parce que adc_add_test enregistre un binaire ctest ;
+// concept. Le main() runtime existe parce que pops_add_test enregistre un binaire ctest ;
 // il exerce en plus field_postprocess A TRAVERS le concept FieldPostProcessor (preuve que
 // la contrainte est appelable, pas seulement bien-formee) et revalide quelques bits.
 //
@@ -9,28 +9,28 @@
 // Les concepts sont de la metaprogrammation hote (pas de kernel) : zero incidence device,
 // la pile elliptique device-validee reste bit-identique.
 
-#include <adc/numerics/elliptic/interface/elliptic_interface.hpp>
+#include <pops/numerics/elliptic/interface/elliptic_interface.hpp>
 
-#include <adc/numerics/elliptic/interface/elliptic_problem.hpp>      // field_postprocess, FieldPostProcess
-#include <adc/numerics/elliptic/interface/elliptic_solver.hpp>       // EllipticSolver
-#include <adc/numerics/elliptic/mg/geometric_mg.hpp>          // GeometricMG
-#include <adc/numerics/elliptic/linear/krylov_solver.hpp>         // TensorKrylovSolver, KrylovResult
-#include <adc/numerics/elliptic/poisson/poisson_fft_solver.hpp>    // PoissonFFTSolver, DistributedFFTSolver
-#include <adc/numerics/elliptic/polar/polar_poisson_solver.hpp>  // PolarPoissonSolver, PolarEllipticSolver
+#include <pops/numerics/elliptic/interface/elliptic_problem.hpp>      // field_postprocess, FieldPostProcess
+#include <pops/numerics/elliptic/interface/elliptic_solver.hpp>       // EllipticSolver
+#include <pops/numerics/elliptic/mg/geometric_mg.hpp>          // GeometricMG
+#include <pops/numerics/elliptic/linear/krylov_solver.hpp>         // TensorKrylovSolver, KrylovResult
+#include <pops/numerics/elliptic/poisson/poisson_fft_solver.hpp>    // PoissonFFTSolver, DistributedFFTSolver
+#include <pops/numerics/elliptic/polar/polar_poisson_solver.hpp>  // PolarPoissonSolver, PolarEllipticSolver
 
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/layout/distribution_mapping.hpp>
-#include <adc/mesh/execution/for_each.hpp>
-#include <adc/mesh/geometry/geometry.hpp>
-#include <adc/mesh/storage/multifab.hpp>
-#include <adc/mesh/boundary/physical_bc.hpp>
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/layout/distribution_mapping.hpp>
+#include <pops/mesh/execution/for_each.hpp>
+#include <pops/mesh/geometry/geometry.hpp>
+#include <pops/mesh/storage/multifab.hpp>
+#include <pops/mesh/boundary/physical_bc.hpp>
 
 #include <cmath>
 #include <cstdio>
 #include <type_traits>
 #include <vector>
 
-using namespace adc;
+using namespace pops;
 static constexpr double kPi = 3.14159265358979323846;
 
 // =====================================================================================
@@ -125,7 +125,7 @@ int main() {
   {
     Array4 p = phi.fab(0).array();
     const Box2D v = phi.box(0);
-    for_each_cell(v, [=] ADC_HD(int i, int j) { p(i, j) = fr(i, j); });
+    for_each_cell(v, [=] POPS_HD(int i, int j) { p(i, j) = fr(i, j); });
     fill_ghosts(phi, dom, bc);
   }
   const Real cx = Real(1) / (2 * geom.dx());
@@ -158,7 +158,7 @@ int main() {
     GeometricMG mg(geom, ba, bc);
     Array4 f = mg.rhs().fab(0).array();
     const Box2D v = mg.rhs().box(0);
-    for_each_cell(v, [=] ADC_HD(int i, int j) { f(i, j) = fr(i, j); });
+    for_each_cell(v, [=] POPS_HD(int i, int j) { f(i, j) = fr(i, j); });
     mg.phi().set_val(0.0);
     const int cycles = mg.solve(Real(1e-8), 50);  // variante LinearSolver (tol, iters)
     chk(cycles >= 0 && cycles <= 50, "LinearSolver_GeometricMG_compte_rendu_borne");

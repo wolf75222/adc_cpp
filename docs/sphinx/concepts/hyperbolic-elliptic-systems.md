@@ -45,7 +45,7 @@ is built around.
 
 ## The aux channel: how the two halves talk
 
-The two parts meet through one shared object, `adc::Aux`. Each time step the elliptic
+The two parts meet through one shared object, `pops::Aux`. Each time step the elliptic
 solver writes the field into the aux, and the hyperbolic update reads it back. The aux is
 the only contract between them.
 
@@ -71,7 +71,7 @@ by the same field stage, so adding a coupling does not change the step skeleton.
 ## A model declares both halves
 
 A model in adc names the pointwise laws of both parts at once. The C++ contract,
-the `adc::PhysicalModel` concept, asks for four pure functions: `flux`, `source`,
+the `pops::PhysicalModel` concept, asks for four pure functions: `flux`, `source`,
 `max_wave_speed` (for the CFL and the Riemann solver), and `elliptic_rhs`. The first three
 describe the hyperbolic part; `elliptic_rhs` is the `f(U)` that feeds the Poisson solve.
 

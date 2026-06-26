@@ -8,12 +8,12 @@ reductions + the geometry hmin + the per-block max wave speed); it is NOT run in
 SMALLER than the native CFL wins; a LARGER bound loses (native CFL wins); and a Program WITHOUT a dt
 bound leaves the native CFL UNCHANGED.
 
-The generated .so exports a SECOND ABI pair alongside the macro step: ``adc_program_has_dt_bound()``
-(true iff a bound was set) and ``adc_program_dt_bound(ProgramContext*, cfl)`` (the lowered scalar).
+The generated .so exports a SECOND ABI pair alongside the macro step: ``pops_program_has_dt_bound()``
+(true iff a bound was set) and ``pops_program_dt_bound(ProgramContext*, cfl)`` (the lowered scalar).
 
 Section (A) (pure Python) pins the IR + codegen: the bound is recorded, the two ABI functions are
 emitted, and a Program WITHOUT a dt bound emits ``has_dt_bound() -> false``. Section (B) is end-to-end
-(needs _adc + a compiler + a visible Kokkos via ADC_KOKKOS_ROOT) and self-skips cleanly otherwise; it
+(needs _pops + a compiler + a visible Kokkos via POPS_KOKKOS_ROOT) and self-skips cleanly otherwise; it
 never fakes the engine.
 """
 import sys
@@ -27,10 +27,10 @@ def _skip(msg):
 try:
     import numpy as np
 
-    import adc
-    from adc import time as adctime
+    import pops
+    from pops import time as adctime
 except Exception as exc:  # noqa: BLE001
-    _skip("adc/numpy unavailable: %s" % exc)
+    _skip("pops/numpy unavailable: %s" % exc)
 
 fails = 0
 
@@ -61,10 +61,10 @@ def _fe(name="fe_dtbound"):
 P_no = _fe("fe_no_bound")
 chk(not P_no.has_dt_bound(), "a fresh Program has no dt bound")
 src_no = P_no.emit_cpp_program()
-chk("bool adc_program_has_dt_bound()" in src_no, "has_dt_bound ABI function emitted")
-chk("adc::Real adc_program_dt_bound(" in src_no, "dt_bound ABI function emitted")
+chk("bool pops_program_has_dt_bound()" in src_no, "has_dt_bound ABI function emitted")
+chk("pops::Real pops_program_dt_bound(" in src_no, "dt_bound ABI function emitted")
 chk("return false;" in src_no, "no-bound Program: has_dt_bound() returns false")
-chk("std::numeric_limits<adc::Real>::infinity()" in src_no, "no-bound dt_bound returns +inf sentinel")
+chk("std::numeric_limits<pops::Real>::infinity()" in src_no, "no-bound dt_bound returns +inf sentinel")
 
 # (A2) @P.dt_bound records a scalar sub-program (cfl * hmin / max_wave_speed); the codegen emits the
 # bound expression reading ctx.hmin() / ctx.max_wave_speed.
@@ -83,7 +83,7 @@ src_dec = P_dec.emit_cpp_program()
 chk("return true;" in src_dec, "Program with a bound: has_dt_bound() returns true")
 chk("ctx.hmin()" in src_dec, "dt_bound lowers P.hmin() -> ctx.hmin()")
 chk("ctx.max_wave_speed(0, " in src_dec, "dt_bound lowers P.max_wave_speed -> ctx.max_wave_speed(0, .)")
-chk("cfl" in src_dec.split("adc_program_dt_bound", 1)[1], "the cfl argument is used in the bound body")
+chk("cfl" in src_dec.split("pops_program_dt_bound", 1)[1], "the cfl argument is used in the bound body")
 
 # (A3) P.set_dt_bound(expr) (the non-decorator form) records the same way; a different bound -> a
 # different IR hash (the bound is part of the IR identity / cache key).
@@ -130,18 +130,18 @@ print("PASS test_time_dt_bound Section A")
 # ====================================================================================================
 print("== (B) step_cfl applies min(native CFL, program dt bound) ==")
 
-probe = adc.System(n=8, L=1.0, periodic=True)
+probe = pops.System(n=8, L=1.0, periodic=True)
 if not hasattr(probe, "install_program") or not hasattr(probe, "set_program_cadence"):
-    _skip("_adc lacks install_program (rebuild _adc) (A passed)")
+    _skip("_pops lacks install_program (rebuild _pops) (A passed)")
 
 
 def transport_model():
     # Pure transport (isothermal, NoSource); BackgroundDensity(n0=0) keeps solve_fields well-defined
     # but INERT (no Poisson feedback into the flux), so the compiled cadence is bit-exact vs native.
-    return adc.Model(state=adc.FluidState("isothermal", cs2=0.5),
-                     transport=adc.IsothermalFlux(),
-                     source=adc.NoSource(),
-                     elliptic=adc.BackgroundDensity(alpha=1.0, n0=0.0))
+    return pops.Model(state=pops.FluidState("isothermal", cs2=0.5),
+                     transport=pops.IsothermalFlux(),
+                     source=pops.NoSource(),
+                     elliptic=pops.BackgroundDensity(alpha=1.0, n0=0.0))
 
 
 N = 24
@@ -149,10 +149,10 @@ CFL = 0.4
 
 
 def make_sim():
-    sim = adc.System(n=N, L=1.0, periodic=True)
+    sim = pops.System(n=N, L=1.0, periodic=True)
     sim.add_block("ions", transport_model(),
-                  spatial=adc.FiniteVolume(limiter="none", riemann="rusanov"),
-                  time=adc.Explicit(method="euler"))
+                  spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                  time=pops.Explicit(method="euler"))
     sim.set_poisson("charge_density", "geometric_mg")
     x = (np.arange(N) + 0.5) / N
     X, Y = np.meshgrid(x, x, indexing="ij")
@@ -179,10 +179,10 @@ def fe_program(name, *, factor=None):
 
 
 try:
-    prog_none = adc.compile_problem(model=transport_model(), time=fe_program("fe_none"))
-    prog_tight = adc.compile_problem(model=transport_model(),
+    prog_none = pops.compile_problem(model=transport_model(), time=fe_program("fe_none"))
+    prog_tight = pops.compile_problem(model=transport_model(),
                                      time=fe_program("fe_tight", factor=0.5))
-    prog_loose = adc.compile_problem(model=transport_model(),
+    prog_loose = pops.compile_problem(model=transport_model(),
                                      time=fe_program("fe_loose", factor=2.0))
 except RuntimeError as exc:  # no compiler / no Kokkos visible / compile failed
     _skip("compile_problem could not build the .so: %s" % str(exc)[:160])

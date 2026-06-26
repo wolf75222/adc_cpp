@@ -8,32 +8,32 @@
 //   (B) le modele compose lit bien B_z dans assemble_rhs (grad nul -> flux nul -> R = B_z u) ;
 //   (C) un compose SANS brique a champ extra reste a n_aux == 3 (bit-identique).
 
-#include <adc/core/model/physical_model.hpp>
-#include <adc/core/state/state.hpp>
-#include <adc/core/foundation/types.hpp>
-#include <adc/physics/composition/composite.hpp>
-#include <adc/physics/bricks/hyperbolic.hpp>  // ExBVelocity (brique hyperbolique 1 var)
-#include <adc/physics/bricks/source.hpp>      // NoSource
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/layout/distribution_mapping.hpp>
-#include <adc/mesh/storage/fab2d.hpp>
-#include <adc/mesh/geometry/geometry.hpp>
-#include <adc/mesh/storage/multifab.hpp>
-#include <adc/mesh/boundary/physical_bc.hpp>
-#include <adc/numerics/spatial_operator.hpp>
-#include <adc/parallel/comm.hpp>
+#include <pops/core/model/physical_model.hpp>
+#include <pops/core/state/state.hpp>
+#include <pops/core/foundation/types.hpp>
+#include <pops/physics/composition/composite.hpp>
+#include <pops/physics/bricks/hyperbolic.hpp>  // ExBVelocity (brique hyperbolique 1 var)
+#include <pops/physics/bricks/source.hpp>      // NoSource
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/layout/distribution_mapping.hpp>
+#include <pops/mesh/storage/fab2d.hpp>
+#include <pops/mesh/geometry/geometry.hpp>
+#include <pops/mesh/storage/multifab.hpp>
+#include <pops/mesh/boundary/physical_bc.hpp>
+#include <pops/numerics/spatial_operator.hpp>
+#include <pops/parallel/comm.hpp>
 
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
 
-using namespace adc;
+using namespace pops;
 
 // Brique de SOURCE magnetisee : S = B_z u (composante 0). Declare n_aux=4 pour lire a.B_z.
 struct BzSource {
   static constexpr int n_aux = 4;
   template <class State>
-  ADC_HD State apply(const State& u, const Aux& a) const {
+  POPS_HD State apply(const State& u, const Aux& a) const {
     State s{};
     s[0] = a.B_z * u[0];
     return s;
@@ -43,7 +43,7 @@ struct BzSource {
 // Brique de SECOND MEMBRE elliptique nulle (pas de couplage Poisson).
 struct NoEll {
   template <class State>
-  ADC_HD Real rhs(const State&) const {
+  POPS_HD Real rhs(const State&) const {
     return Real(0);
   }
 };

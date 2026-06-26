@@ -2,12 +2,12 @@
 """m.roe_from_jacobian() (ADC-368): the GENERIC moment Roe. The DSL emits the
 roe_dissipation(UL, AL, UR, AR, dir) hook = |A| (UR - UL) with A = dF_dir/dU the flux Jacobian at
 the arithmetic-mean interface state Uavg = 1/2(UL + UR), |A| via the matrix-sign kernel
-adc::roe_abs_apply (dense_eig.hpp), spectral-radius (Rusanov) fallback on a complex/singular
+pops::roe_abs_apply (dense_eig.hpp), spectral-radius (Rusanov) fallback on a complex/singular
 spectrum. Roles-free: riemann='roe' becomes available for a moment hierarchy (HyQMOM) with no
 Density/Momentum roles and no primitive 'p' (unlike m.enable_roe).
 
   (A) wiring (no compiler): roe=True sets the capability (CompiledModel-side has_roe) and emits the
-      hook + adc::roe_abs_apply + the dense_eig.hpp include; roe=False is bit-identical (no hook);
+      hook + pops::roe_abs_apply + the dense_eig.hpp include; roe=False is bit-identical (no hook);
       the three Roe providers (enable_roe / roe_dissipation / roe_from_jacobian) are mutually
       exclusive; the facade re-exports roe_from_jacobian.
   (B) [compiler] compile AOT + System riemann='roe': 10 steps finite, mass (M00) conserved; a
@@ -22,9 +22,9 @@ import tempfile
 
 import numpy as np
 
-import adc
-from adc import dsl
-from adc.moments import build_moment_model, gaussian_closure
+import pops
+from pops import dsl
+from pops.moments import build_moment_model, gaussian_closure
 
 fails = 0
 INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "include"))
@@ -57,9 +57,9 @@ mr = build_moment_model("roe_src", 2, gaussian_closure(2), roe=True)
 src = mr._m.emit_cpp_brick()
 chk(mr._m._roe_jacobian is not None, "roe=True: _roe_jacobian set on the engine")
 chk("State roe_dissipation(" in src, "roe=True: roe_dissipation hook emitted")
-chk("adc::roe_abs_apply(" in src, "roe=True: hook calls adc::roe_abs_apply")
-chk("#include <adc/numerics/linalg/dense_eig.hpp>" in src, "roe=True: dense_eig.hpp included")
-chk("adc::real_eig_minmax(" in src, "roe=True: spectral-radius (Rusanov) fallback emitted")
+chk("pops::roe_abs_apply(" in src, "roe=True: hook calls pops::roe_abs_apply")
+chk("#include <pops/numerics/linalg/dense_eig.hpp>" in src, "roe=True: dense_eig.hpp included")
+chk("pops::real_eig_minmax(" in src, "roe=True: spectral-radius (Rusanov) fallback emitted")
 
 m0 = build_moment_model("noroe_src", 2, gaussian_closure(2), roe=False)
 src0 = m0._m.emit_cpp_brick()
@@ -85,7 +85,7 @@ if not cxx or not os.path.isdir(INCLUDE):
     sys.exit(1 if fails else 0)
 
 print("== (B) compile AOT + System riemann='roe' ==")
-tmp = tempfile.mkdtemp(prefix="adc_roe_jac_")
+tmp = tempfile.mkdtemp(prefix="pops_roe_jac_")
 try:
     n = 24
     compiled = build_moment_model("g2roe", 2, gaussian_closure(2), roe=True).compile(
@@ -96,10 +96,10 @@ try:
     base = np.array([1.0, 0.0, 1.0, 0.0, 0.0, 1.0])
     U0 = base[:, None, None] * gaussian(n)[None, :, :]
 
-    sim = adc.System(n=n, L=1.0, periodic=True)
+    sim = pops.System(n=n, L=1.0, periodic=True)
     sim.add_equation("mom", model=compiled,
-                     spatial=adc.FiniteVolume(limiter="none", riemann="roe"),
-                     time=adc.Explicit())
+                     spatial=pops.FiniteVolume(limiter="none", riemann="roe"),
+                     time=pops.Explicit())
     sim.set_state("mom", U0)
     for _ in range(10):
         sim.step(5e-4)
@@ -111,10 +111,10 @@ try:
     # a roe=False moment model must REJECT riemann='roe' (no capability)
     cm_no = build_moment_model("g2noroe", 2, gaussian_closure(2), roe=False).compile(
         os.path.join(tmp, "g2noroe.so"), INCLUDE, backend="aot")
-    s2 = adc.System(n=16, L=1.0, periodic=True)
+    s2 = pops.System(n=16, L=1.0, periodic=True)
     msg = err_msg(lambda: s2.add_equation(
-        "mom", model=cm_no, spatial=adc.FiniteVolume(limiter="none", riemann="roe"),
-        time=adc.Explicit()))
+        "mom", model=cm_no, spatial=pops.FiniteVolume(limiter="none", riemann="roe"),
+        time=pops.Explicit()))
     chk(msg is not None, f"roe=False: riemann='roe' rejete ({(msg or '')[:48]}...)")
 finally:
     shutil.rmtree(tmp, ignore_errors=True)

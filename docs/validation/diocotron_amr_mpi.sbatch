@@ -26,7 +26,7 @@
 #   2. SRC = docs/validation versionne (diocotron_amr_gpu.cpp, diocotron_gpu.cpp, CMakeLists.txt).
 #   3. brique DSL hyqmom15_brick.hpp + etat initial ic_128.raw : artefacts GENERES (bit-reproductibles,
 #      NON versionnes, les MEMES que le driver System) par make_brick_and_ic.py, deposes dans WORK :
-#        ADC_CASES=/chemin/adc_cases PYTHONPATH=/chemin/adc_cpp/python \
+#        POPS_CASES=/chemin/adc_cases PYTHONPATH=/chemin/adc_cpp/python \
 #          python docs/validation/make_brick_and_ic.py --ns 128 --out WORK
 #      (md5 ic_128.raw = da245ba8934546986508976a64156d2e, stable d'un run a l'autre.)
 #   4. sbatch docs/validation/diocotron_amr_mpi.sbatch
@@ -45,7 +45,7 @@ nvidia-smi --query-gpu=name --format=csv,noheader | head -4
 SRC="${ADCAMR_SRC:-$HOME/adc_cpp/docs/validation}"
 WORK="${ADCAMR_WORK:-$HOME/adcamr_work}"
 SCR="/scratch_p/$USER/adcamr"
-KGPU="$HOME/adc_gpu_p1/kinstall"
+KGPU="$HOME/pops_gpu_p1/kinstall"
 NVCC="$KGPU/bin/nvcc_wrapper"
 ADCINC="$HOME/adc_cpp/include"
 mkdir -p "$SCR" "$WORK"

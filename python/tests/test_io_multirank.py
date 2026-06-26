@@ -26,18 +26,18 @@ import tempfile
 
 import numpy as np
 
-import adc
+import pops
 
 
 def _build(n=16):
-    sim = adc.System(n=n, L=1.0, periodic=True)
+    sim = pops.System(n=n, L=1.0, periodic=True)
     sim.set_poisson(rhs="charge_density", solver="geometric_mg", bc="periodic")
     sim.add_block("ions",
-                  adc.Model(state=adc.FluidState("isothermal", cs2=0.5),
-                            transport=adc.IsothermalFlux(),
-                            source=adc.PotentialForce(charge=1.0),
-                            elliptic=adc.ChargeDensity(charge=1.0)),
-                  spatial=adc.FiniteVolume(limiter="minmod"), time=adc.Explicit())
+                  pops.Model(state=pops.FluidState("isothermal", cs2=0.5),
+                            transport=pops.IsothermalFlux(),
+                            source=pops.PotentialForce(charge=1.0),
+                            elliptic=pops.ChargeDensity(charge=1.0)),
+                  spatial=pops.FiniteVolume(limiter="minmod"), time=pops.Explicit())
     x = (np.arange(n) + 0.5) / n
     X, Y = np.meshgrid(x, x, indexing="xy")
     sim.set_density("ions", (1.0 + 0.4 * np.exp(-50.0 * ((X - 0.4) ** 2 + (Y - 0.5) ** 2))).ravel())
@@ -90,9 +90,9 @@ def test_io_checkpoint_restart_global():
 
 def test_mpi_helpers_exposed():
     """T4 : my_rank / n_ranks exposes au module (0 / 1 en serie)."""
-    from adc import _adc
-    assert _adc.my_rank() == 0
-    assert _adc.n_ranks() >= 1
+    from pops import _pops
+    assert _pops.my_rank() == 0
+    assert _pops.n_ranks() >= 1
 
 
 if __name__ == "__main__":

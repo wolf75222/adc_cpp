@@ -25,4 +25,4 @@ OMPI_MCA_rmaps_base_oversubscribe=true \
 **Validation: CI (`ci-full` job).** Job `mpi` (`ubuntu-latest / MPI`, OpenMPI). Full mode
 only. Checks invariance to the number of ranks: the observables (parity, AMR,
 Krylov, mass) are bit-identical at np=1/2/4. Status `ci-full` on the ~21 entries of the
-`ADC_HAS_MPI` block; the non-MPI tests run at np=1 in this build (MPI-linked, single-process).
+`POPS_HAS_MPI` block; the non-MPI tests run at np=1 in this build (MPI-linked, single-process).

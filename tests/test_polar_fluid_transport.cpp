@@ -29,26 +29,26 @@
 //
 // Host / Serial-safe (UNE box, n_ranks()==1 : non enregistre MPI, comme les autres tests polaires).
 
-#include <adc/core/state/state.hpp>
-#include <adc/mesh/index/box2d.hpp>
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/layout/distribution_mapping.hpp>
-#include <adc/mesh/storage/fab2d.hpp>
-#include <adc/mesh/execution/for_each.hpp>
-#include <adc/mesh/geometry/geometry.hpp>
-#include <adc/mesh/storage/multifab.hpp>
-#include <adc/mesh/boundary/physical_bc.hpp>
-#include <adc/numerics/fv/numerical_flux.hpp>
-#include <adc/numerics/fv/reconstruction.hpp>
-#include <adc/numerics/spatial/operators/polar_operator.hpp>
-#include <adc/numerics/time/integrators/time_steppers.hpp>
-#include <adc/physics/bricks/hyperbolic.hpp>
+#include <pops/core/state/state.hpp>
+#include <pops/mesh/index/box2d.hpp>
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/layout/distribution_mapping.hpp>
+#include <pops/mesh/storage/fab2d.hpp>
+#include <pops/mesh/execution/for_each.hpp>
+#include <pops/mesh/geometry/geometry.hpp>
+#include <pops/mesh/storage/multifab.hpp>
+#include <pops/mesh/boundary/physical_bc.hpp>
+#include <pops/numerics/fv/numerical_flux.hpp>
+#include <pops/numerics/fv/reconstruction.hpp>
+#include <pops/numerics/spatial/operators/polar_operator.hpp>
+#include <pops/numerics/time/integrators/time_steppers.hpp>
+#include <pops/physics/bricks/hyperbolic.hpp>
 
 #include <cmath>
 #include <cstdio>
 #include <vector>
 
-using namespace adc;
+using namespace pops;
 
 static constexpr double kPiL = 3.14159265358979323846;
 static constexpr double kRmin = 0.30;
@@ -212,7 +212,7 @@ static double mms_source(int c, double r, double th) {
 // code de production ne fait cela : la brique et le marshaling du source vivent dans ce fichier.
 struct MmsFluidPolar : IsothermalFluxPolar {
   static constexpr int n_aux = 5;  // base 0..2 + B_z(3) + T_e(4)
-  ADC_HD StateVec<3> source(const StateVec<3>&, const Aux& a) const {
+  POPS_HD StateVec<3> source(const StateVec<3>&, const Aux& a) const {
     StateVec<3> s{};
     s[0] = a.grad_y;  // S[0] (masse)    range dans le slot grad_y (libre : flux isotherme sans aux)
     s[1] = a.B_z;     // S[1] (radial)   range dans le canal extra B_z

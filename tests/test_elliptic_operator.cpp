@@ -5,28 +5,28 @@
 // elliptic/poisson_operator.hpp, l'EllipticOperator de l'archi) : les deux residus tombent a
 // l'arrondi. C'est l'OperatorSpec partage rendu verifiable, pas seulement documentaire.
 
-#include <adc/numerics/elliptic/mg/geometric_mg.hpp>
-#include <adc/numerics/elliptic/poisson/poisson_fft_solver.hpp>
-#include <adc/numerics/elliptic/poisson/poisson_operator.hpp>  // poisson_residual : l'operateur canonique
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/layout/distribution_mapping.hpp>
-#include <adc/mesh/execution/for_each.hpp>
-#include <adc/mesh/geometry/geometry.hpp>
-#include <adc/mesh/storage/mf_arith.hpp>
-#include <adc/mesh/storage/multifab.hpp>
-#include <adc/mesh/boundary/physical_bc.hpp>
+#include <pops/numerics/elliptic/mg/geometric_mg.hpp>
+#include <pops/numerics/elliptic/poisson/poisson_fft_solver.hpp>
+#include <pops/numerics/elliptic/poisson/poisson_operator.hpp>  // poisson_residual : l'operateur canonique
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/layout/distribution_mapping.hpp>
+#include <pops/mesh/execution/for_each.hpp>
+#include <pops/mesh/geometry/geometry.hpp>
+#include <pops/mesh/storage/mf_arith.hpp>
+#include <pops/mesh/storage/multifab.hpp>
+#include <pops/mesh/boundary/physical_bc.hpp>
 
-#include "test_harness.hpp"  // adc::test::Checker + kPi partages
+#include "test_harness.hpp"  // pops::test::Checker + kPi partages
 
 #include <cmath>
 #include <cstdio>
 #include <vector>
 
-using namespace adc;
-using adc::test::kPi;
+using namespace pops;
+using pops::test::kPi;
 
 int main() {
-  adc::test::Checker chk;  // style terse : n'imprime que les echecs (FAIL <libelle>)
+  pops::test::Checker chk;  // style terse : n'imprime que les echecs (FAIL <libelle>)
 
   const int N = 64;  // puissance de 2 (FFT)
   Box2D dom = Box2D::from_extents(N, N);
@@ -43,7 +43,7 @@ int main() {
   auto residual_under_shared_op = [&](auto& solver) {
     Array4 f = solver.rhs().fab(0).array();
     const Box2D v = solver.rhs().box(0);
-    for_each_cell(v, [=] ADC_HD(int i, int j) { f(i, j) = fr(i, j); });
+    for_each_cell(v, [=] POPS_HD(int i, int j) { f(i, j) = fr(i, j); });
     solver.phi().set_val(0.0);
     solver.solve();
     MultiFab res(ba, dm, 1, 0);
@@ -60,7 +60,7 @@ int main() {
   auto demean = [&](MultiFab& m) {
     const Real avg = sum(m) / static_cast<Real>(dom.num_cells());
     Array4 a = m.fab(0).array();
-    for_each_cell(dom, [=] ADC_HD(int i, int j) { a(i, j) -= avg; });
+    for_each_cell(dom, [=] POPS_HD(int i, int j) { a(i, j) -= avg; });
   };
   demean(mg.phi());
   demean(fft.phi());

@@ -1,7 +1,7 @@
 # clang-tidy — analyse statique du coeur adc_cpp.
 #
 # Informatif d'abord : WarningsAsErrors vide (rien ne bloque le run). HeaderFilterRegex limite les
-# diagnostics aux en-tetes du coeur (include/adc/...) -> on ne remonte pas le bruit de Kokkos, Eigen,
+# diagnostics aux en-tetes du coeur (include/pops/...) -> on ne remonte pas le bruit de Kokkos, Eigen,
 # pybind11, ni de la STL. Familles activees larges, checks notoirement bruyants desactives un a un.
 #
 # Lance par le job `tidy` de quality.yml : run-clang-tidy -p build-kokkos sur les TU de tests/.
@@ -38,5 +38,5 @@ Checks: >
   -misc-no-recursion,
   -bugprone-easily-swappable-parameters
 WarningsAsErrors: ''
-HeaderFilterRegex: 'include/adc/.*'
+HeaderFilterRegex: 'include/pops/.*'
 FormatStyle: file

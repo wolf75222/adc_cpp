@@ -37,29 +37,29 @@
 // Lance via ctest a np=1/2/4 (ntheta divisible par np). Independant du backend (header-only, propriete
 // algebrique). Le verrou Schur leve = ce solveur multi-rang ; le test cible directement le solveur.
 
-#include <adc/mesh/index/box2d.hpp>
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/layout/distribution_mapping.hpp>
-#include <adc/mesh/storage/fab2d.hpp>
-#include <adc/mesh/geometry/geometry.hpp>
-#include <adc/mesh/storage/multifab.hpp>
-#include <adc/mesh/boundary/physical_bc.hpp>
-#include <adc/numerics/elliptic/polar/polar_tensor_operator.hpp>
-#include <adc/parallel/comm.hpp>
+#include <pops/mesh/index/box2d.hpp>
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/layout/distribution_mapping.hpp>
+#include <pops/mesh/storage/fab2d.hpp>
+#include <pops/mesh/geometry/geometry.hpp>
+#include <pops/mesh/storage/multifab.hpp>
+#include <pops/mesh/boundary/physical_bc.hpp>
+#include <pops/numerics/elliptic/polar/polar_tensor_operator.hpp>
+#include <pops/parallel/comm.hpp>
 
 #include <cmath>
 #include <cstdio>
 #include <vector>
 
-#ifdef ADC_HAS_MPI
+#ifdef POPS_HAS_MPI
 #include <mpi.h>
 #endif
 
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
 #include <Kokkos_Core.hpp>
 #endif
 
-using namespace adc;
+using namespace pops;
 
 static constexpr double kPiL = 3.14159265358979323846;
 static constexpr double kRmin = 0.30;
@@ -244,10 +244,10 @@ static double err_l2_global(const MultiFab& phi, const PolarGeometry& g, Problem
 int main(int argc, char** argv) {
   comm_init(&argc, &argv);
   // Code de sortie : declare AVANT le scope accolade Kokkos (il est lu par le return APRES la
-  // fermeture du scope). Le declarer dedans ne compile pas des que ADC_HAS_KOKKOS est defini
+  // fermeture du scope). Le declarer dedans ne compile pas des que POPS_HAS_KOKKOS est defini
   // (cas MPI + Kokkos) -- defaut invisible tant que le job MPI compilait sans Kokkos.
   long fails = 0;
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   Kokkos::initialize(argc, argv);
   {
 #endif
@@ -305,7 +305,7 @@ int main(int argc, char** argv) {
       // iterations IDENTIQUES sur TOUS les rangs du MEME decoupage (critere d'arret base sur des scalaires
       // GLOBAUX all_reduits -> il se declenche a la meme iteration partout). spread == 0.
       long it_min = krd.iters, it_max = krd.iters;
-#ifdef ADC_HAS_MPI
+#ifdef POPS_HAS_MPI
       if (np > 1) {
         long lo = krd.iters, hi = krd.iters;
         MPI_Allreduce(&lo, &it_min, 1, MPI_LONG, MPI_MIN, MPI_COMM_WORLD);
@@ -315,7 +315,7 @@ int main(int argc, char** argv) {
       chk(it_min == it_max, "dist_same_iters_all_ranks");
     }
 
-#ifdef ADC_HAS_MPI
+#ifdef POPS_HAS_MPI
     if (np > 1) {
       long g = 0;
       MPI_Allreduce(&fails, &g, 1, MPI_LONG, MPI_SUM, MPI_COMM_WORLD);
@@ -328,7 +328,7 @@ int main(int argc, char** argv) {
       else
         std::printf("FAIL test_mpi_polar_schur (np=%d) : %ld echecs\n", np, fails);
     }
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   }
   Kokkos::finalize();
 #endif

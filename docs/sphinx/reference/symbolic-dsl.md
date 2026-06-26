@@ -1,20 +1,20 @@
-# Reference: the symbolic DSL (adc.dsl)
+# Reference: the symbolic DSL (pops.dsl)
 
-The `adc.dsl` DSL lets you write a model's physics as a tree of symbolic
+The `pops.dsl` DSL lets you write a model's physics as a tree of symbolic
 expressions (the Python operators `+ - * / ** -` and `dsl.sqrt` build the tree, not a
 function called per cell), which the DSL translates into compilable C++ then compiles into a `.so`
-attachable to an `adc.System` / `adc.AmrSystem`. Two entry points: `adc.dsl.Model(name)`,
+attachable to an `pops.System` / `pops.AmrSystem`. Two entry points: `pops.dsl.Model(name)`,
 the recommended stable facade (pure sugar, composition of a private `HyperbolicModel` `_m`), and
-`adc.dsl.HyperbolicModel(name)`, the lower-level backend object (`set_*` naming, always
+`pops.dsl.HyperbolicModel(name)`, the lower-level backend object (`set_*` naming, always
 usable directly). Both expose `compile()`. This page is the canonical registry of the
-DSL. Source: [python/adc/dsl.py](https://github.com/wolf75222/adc_cpp/blob/master/python/adc/dsl.py) ;
+DSL. Source: [python/pops/dsl.py](https://github.com/wolf75222/adc_cpp/blob/master/python/pops/dsl.py) ;
 design: [DSL_MODEL_DESIGN.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/DSL_MODEL_DESIGN.md).
 
 ## Declaring a model
 
-All the methods below are on the `adc.dsl.Model` facade. They delegate to
+All the methods below are on the `pops.dsl.Model` facade. They delegate to
 `HyperbolicModel` (implicit right column). `flux`, `eigenvalues`, `source`, `elliptic_rhs`
-map one to one to the functions of the `adc::PhysicalModel` concept read by the core.
+map one to one to the functions of the `pops::PhysicalModel` concept read by the core.
 
 | method | what it declares | example |
 |---|---|---|
@@ -88,7 +88,7 @@ prho, pu, pv, pp = m.primitive_vars(rho=rho, u=u, v=v, p=p)   # defines AND orde
 
 ### aux
 
-Declares an auxiliary field read at runtime (`adc::Aux` channel) ; returns a `Var` read in C++ as
+Declares an auxiliary field read at runtime (`pops::Aux` channel) ; returns a `Var` read in C++ as
 `a.<name>`. The name must be a key of the fixed table (an unknown name raises a `ValueError`) :
 
 | name | index | role |
@@ -111,7 +111,7 @@ gx, gy = m.aux("grad_x"), m.aux("grad_y")   # field E = -grad phi
 ### aux vs aux_field
 
 `aux(name)` and `aux_field(name)` both return a `Var` read at runtime, but they target different
-parts of the `adc::Aux` channel:
+parts of the `pops::Aux` channel:
 
 - `aux(name)` reads a CANONICAL component of the fixed table above (`phi` / `grad_x` / `grad_y` /
   `B_z` / `T_e`, indices 0..4), DERIVED by the solver (the potential and its gradient come from the
@@ -129,8 +129,8 @@ dedicated paths (`set_magnetic_field` / `set_electron_temperature_from`) and are
 `set_aux_field`.
 
 By default a named field inherits the SHARED aux ghost behavior (periodic preserved, otherwise
-zero-gradient). Pass `halo=adc.AuxHalo(...)` (ADC-369) to give that one field its own non-periodic
-boundary policy instead: `adc.AuxHalo("foextrap")` (zero-gradient) or `adc.AuxHalo("dirichlet",
+zero-gradient). Pass `halo=pops.AuxHalo(...)` (ADC-369) to give that one field its own non-periodic
+boundary policy instead: `pops.AuxHalo("foextrap")` (zero-gradient) or `pops.AuxHalo("dirichlet",
 value=v)` (fixed boundary value). The policy applies only to the non-periodic faces (periodic faces,
 and the polar `theta` direction, keep their wrap), works on `System` (Cartesian + polar) and the AMR
 coarse level, and is bit-identical to the shared behavior when omitted. The same `halo=` is accepted
@@ -141,7 +141,7 @@ mu = m.aux_field("mobility")               # named field, component 5
 m.source([0.0, -mu * mx, -mu * my, 0.0])
 # ... after add_equation("ions", compiled):
 s.set_aux_field("ions", "mobility", mob_2d)                       # static, per block
-s.set_aux_field("ions", "mobility", mob_2d, halo=adc.AuxHalo("foextrap"))  # per-field zero-gradient BC
+s.set_aux_field("ions", "mobility", mob_2d, halo=pops.AuxHalo("foextrap"))  # per-field zero-gradient BC
 ```
 
 ### flux
@@ -149,7 +149,7 @@ s.set_aux_field("ions", "mobility", mob_2d, halo=adc.AuxHalo("foextrap"))  # per
 Declares the physical flux `F(U)`. `x` and `y` are lists of `Expr`, one per conservative
 component. Not to be confused with the numpy evaluator `m.eval_flux(U, aux, dir)` (debug / host
 proto, which returns a stacked numpy array) nor with the numerical flux `riemann=` of
-`adc.FiniteVolume` (Rusanov / HLLC / Roe).
+`pops.FiniteVolume` (Rusanov / HLLC / Roe).
 
 ```python
 m.flux(x=[rhou, rhou*u + p, rhou*v, rho*H*u],
@@ -179,7 +179,7 @@ set of `riemann=` fluxes a model accepts at `add_equation`:
   primitive `p`, so `riemann="hllc"` / `"roe"` work beyond the four-variable Euler system.
 - `m.roe_from_jacobian()` is the GENERIC moment Roe emitter: it builds the `roe_dissipation` hook as
   `|A| (UR - UL)` with `A = dF/dU` the autodiff flux Jacobian at the mean interface state, applied via
-  the matrix-sign kernel `adc::roe_abs_apply` (spectral-radius Rusanov fallback on a complex or
+  the matrix-sign kernel `pops::roe_abs_apply` (spectral-radius Rusanov fallback on a complex or
   singular spectrum). Unlike `enable_roe`, it needs NEITHER fluid roles NOR a primitive `p`, so it
   makes `riemann="roe"` available for a full moment hierarchy. It is one of THREE mutually exclusive
   providers of `roe_dissipation` (with `enable_roe` and the hand-written `roe_dissipation(x, y)`):
@@ -200,8 +200,8 @@ m.conservative_from([rho, rho*u, rho*v, p/(g-1.0) + 0.5*rho*(u*u + v*v)])
 ### source
 
 Optional source term `S(U, aux)`, one `Expr` per component (scalars are promoted to
-`Const`). Reads the external state through the `adc::Aux` channel (e.g. `grad_x` / `grad_y` for a
-potential force). Without `source`, the brick is `adc::NoSource`.
+`Const`). Reads the external state through the `pops::Aux` channel (e.g. `grad_x` / `grad_y` for a
+potential force). Without `source`, the brick is `pops::NoSource`.
 
 ```python
 m.source([0.0, -rho*gx, -rho*gy, -(rhou*gx + rhov*gy)])
@@ -224,7 +224,7 @@ m.source_term("electric", [0.0, -rho*gx, -rho*gy])   # opt-in; requested via rhs
 Because named terms are never summed implicitly, a model that declares only named sources (no
 `m.source` default) cannot answer the legacy total-source query: an old stepper asking for the total
 source is rejected fail-loud (`ValueError: model has multiple named sources; use
-adc.compile_problem(...) or define m.source(...) explicitly`). Use a compiled time `Program` (which
+pops.compile_problem(...) or define m.source(...) explicitly`). Use a compiled time `Program` (which
 names the sources it wants) for such a model.
 
 ### Local linear sources (linear_source)
@@ -279,16 +279,16 @@ m.projection([rho, (rhou + abs_(rhou)) / 2, ...])   # ex. plancher de positivite
 - **Contract**: `P` must be idempotent (a true projection) and pointwise (no neighbor). Write the
   clamps BRANCH-FREE in max/min via `dsl.abs_` / `dsl.sign` (differentiable through `dsl.diff`), e.g.
   positivity `(q + abs_(q)) / 2`.
-- **Where it runs**: backends `aot` and `production`, on BOTH `adc.System` and `adc.AmrSystem` -- on
+- **Where it runs**: backends `aot` and `production`, on BOTH `pops.System` and `pops.AmrSystem` -- on
   AMR (ADC-312) the projection is applied per level after the reflux and cascade, so the conservative
   correction is preserved. Only the `prototype` (JIT) backend rejects it. A model without a projection
   is bit-identical to the historical trajectory (opt-in via the trait).
 
 ### Eigenvalue spectrum predicates
 
-`adc.dsl` exposes scalar `Expr` nodes built from the spectrum of a SMALL dense matrix assembled from
+`pops.dsl` exposes scalar `Expr` nodes built from the spectrum of a SMALL dense matrix assembled from
 expressions (a Jacobian sub-block, a companion matrix...). The matrix is `rows`, a list of `k` rows
-of `k` `Expr` (row-major, `k <= 16`), diagonalized device-clean by `adc::real_eig_minmax`
+of `k` `Expr` (row-major, `k <= 16`), diagonalized device-clean by `pops::real_eig_minmax`
 (`dense_eig.hpp`). They are designed for the branch-free `m.projection`: a test like "if the spectrum
 is complex, correct" is written as a max/min/sign mask on these scalars, with no dynamic branch.
 
@@ -300,7 +300,7 @@ is complex, correct" is written as a max/min/sign mask on these scalars, with no
 | `eig_all_real(rows, im_tol=1e-5)` | `1.0` iff the block CONVERGED and its spectrum is real, else `0.0` |
 | `EigWitness(rows, field, im_tol=...)` | the node behind the four helpers (`field` selects `max_im` / `lmin` / `lmax` / `all_real`) |
 
-`eig_all_real` (ADC-362) maps to `adc::EigBounds::all_real`: it returns `1.0` only when the small
+`eig_all_real` (ADC-362) maps to `pops::EigBounds::all_real`: it returns `1.0` only when the small
 dense block converged AND its spectrum is real (the largest imaginary part is within `im_tol` times a
 relative scale `max(abs(lmin), abs(lmax), 1)`), and `0.0` otherwise. Crucially it is
 CONVERGED-GATED, so a Gershgorin fallback (a non-converged block) yields `0.0` (not real). Prefer it
@@ -324,7 +324,7 @@ in `m.params` (introspection / reproducibility). Two modes :
 - `kind="const"` (default) : the value is inlined as a literal at codegen (literal in the `.so`), while
   keeping its identity for introspection.
 - `kind="runtime"` : the value emits `params.get(<index>)` (read of an
-  `adc::RuntimeParams` member), modifiable at runtime via `System.set_block_params(name, values)` without
+  `pops::RuntimeParams` member), modifiable at runtime via `System.set_block_params(name, values)` without
   recompiling. Supported by the `aot` backend only ; on `prototype` / `production` a runtime param
   is frozen to its declaration value.
 
@@ -336,7 +336,7 @@ g   = m.param("gamma", 1.4)                   # const : inline + set_gamma
 cs2 = m.param("cs2", 1.0, kind="runtime")     # runtime: params.get(0), overwritable (aot)
 ```
 
-`adc.dsl.RuntimeParam(name, value)` is sugar equivalent to `Param(name, value, kind="runtime")`.
+`pops.dsl.RuntimeParam(name, value)` is sugar equivalent to `Param(name, value, kind="runtime")`.
 
 ```{note}
 On `HyperbolicModel`, these declarators carry the `set_` prefix (`set_flux`, `set_eigenvalues`,
@@ -396,15 +396,15 @@ require_metadata, target`) and returns the `so_path` (string).
 
 Argument semantics :
 
-- `so_path=None` : out-of-source cache (`adc_cache_dir()` : `$ADC_CACHE_DIR`, otherwise
+- `so_path=None` : out-of-source cache (`pops_cache_dir()` : `$POPS_CACHE_DIR`, otherwise
   `$XDG_CACHE_HOME/adc/dsl`, otherwise `~/.cache/adc/dsl`). The file name is keyed on `model_hash`
   + `abi_key` (+ backend / target / name). Cache hit (the `.so` already exists for this key) -> no
   recompilation. Passing `so_path=` forces that path and always recompiles.
-- `include=None` : auto-detected by `adc_include()` (`$ADC_INCLUDE`, otherwise the installed `adc`
+- `include=None` : auto-detected by `pops_include()` (`$POPS_INCLUDE`, otherwise the installed `adc`
   package, otherwise the sibling repo). Validity criterion : `adc/mesh/storage/multifab.hpp` exists ; otherwise `RuntimeError`.
 - `cxx=None` : autodetect `c++` / `g++` / `clang++` (via `shutil.which`).
 - `std=None` : default per backend. For `production` (native), the loader standard via
-  `loader_cxx_std()` (= `_adc.__cxx_std__` : c++20 under Kokkos because CUDA 12.x has no `-std=c++23`,
+  `loader_cxx_std()` (= `_pops.__cxx_std__` : c++20 under Kokkos because CUDA 12.x has no `-std=c++23`,
   c++23 otherwise). For `prototype` / `aot`, `"c++20"`.
 - `require_metadata=False` : if `True`, requires useful physical roles and an explicit `gamma`,
   failing which the `.so` would fall back on the `System` defaults (`custom` roles / gamma 1.4). This
@@ -420,7 +420,7 @@ Argument semantics :
 | `production` | native (`compile_native`) | `add_native_block` | `.so` loader that inlines `add_compiled_model<ProdModel>` on the `grid_context()` -> zero-copy, same path as `add_block`, named functors | yes | yes | via `AmrSystem` | reports `False` (non-Kokkos host) | recommended in MPI / AMR |
 
 The code default is `backend="auto"` : it auto-selects `production` under toolchain parity with
-the installed `_adc` (loadable module + known baked compiler + matching header signature),
+the installed `_pops` (loadable module + known baked compiler + matching header signature),
 otherwise falls back to `aot`. The explicit values `prototype | aot | production` are still
 available and short-circuit this policy. The capabilities are materialized in `_BACKEND_CAPS` :
 `production` declares `{cpu, mpi, amr} = True`. `gpu` is reported `False` out of caution : the native
@@ -432,29 +432,29 @@ at runtime, and not a `device=` argument frozen at compile time.
 ### Hybrid models (native + DSL)
 
 You can mix native bricks and partial DSL bricks in a single model via
-`adc.CompositeModel(transport, source, elliptic)`, which returns a `dsl.HybridModel` ; its
+`pops.CompositeModel(transport, source, elliptic)`, which returns a `dsl.HybridModel` ; its
 `.compile(backend="aot")` returns a `CompiledModel` attachable via `add_equation`. At least one slot must
-be a DSL brick (otherwise use `adc.Model(...)`). Brick catalog and example :
+be a DSL brick (otherwise use `pops.Model(...)`). Brick catalog and example :
 [brick reference](native-bricks.md).
 
 ### ABI key (production)
 
-The `production` loader calls off-line methods of the already-loaded `_adc` module
+The `production` loader calls off-line methods of the already-loaded `_pops` module
 (`install_block` / `grid_context` / `ensure_aux_width` ; `set_compiled_block` for AMR), so it
 is compiled with `-undefined dynamic_lookup` on macOS and bakes `-DADC_HEADER_SIG=<signature>`
 identical to the module's build. Loader and module must share the same ABI (headers + compiler
-+ C++ standard). `add_native_block` compares `adc_native_abi_key()` to `module.abi_key()` and rejects with
++ C++ standard). `add_native_block` compares `pops_native_abi_key()` to `module.abi_key()` and rejects with
 "ABI incompatible" if they diverge. A different `std` changes `__cplusplus` so the ABI key : that is
 why `std=None` derives the standard from the loader instead of freezing c++23. The `prototype` / `aot`
 backends only target `System` and do not cross-attach.
 
 ### target='system' vs 'amr_system'
 
-- `target="system"` (default) : `adc::System` facade. The native loader emits the symbol
-  `adc_install_native(System&, ..., evolve, stride)`. All backends are permitted.
-- `target="amr_system"` : `adc::AmrSystem` facade. Valid only with `backend="production"` (the
+- `target="system"` (default) : `pops::System` facade. The native loader emits the symbol
+  `pops_install_native(System&, ..., evolve, stride)`. All backends are permitted.
+- `target="amr_system"` : `pops::AmrSystem` facade. Valid only with `backend="production"` (the
   others raise a `ValueError`, there is no AMR `.so` path outside native). The loader includes
-  `amr_dsl_block.hpp` and emits a distinct symbol `adc_install_native_amr(AmrSystem&, ...)` (without
+  `amr_dsl_block.hpp` and emits a distinct symbol `pops_install_native_amr(AmrSystem&, ...)` (without
   `evolve` argument) -> `add_compiled_model(AmrSystem&)` (conservative reflux, regrid). You attach via
   `AmrSystem.add_native_block`. A System loader does not attach on AmrSystem and vice versa.
 
@@ -470,7 +470,7 @@ already holds it. You attach via `System.add_equation(name, compiled, ...)`, whi
 
 ## Inter-species coupled sources (CoupledSource)
 
-`adc.dsl.CoupledSource` describes an arbitrary inter-species exchange in formulas (beyond the named
+`pops.dsl.CoupledSource` describes an arbitrary inter-species exchange in formulas (beyond the named
 Ionization / Collision / ThermalExchange couplings). It compiles into flat bytecode (stack machine, no
 `.so`, no per-cell Python callback) interpreted in a device `for_each_cell`. Applied in
 explicit splitting, after the transport.
@@ -488,7 +488,7 @@ explicit splitting, after the transport.
 - `src.compile(backend="production", verify_conservation=False)` -> `CompiledCoupledSource`. The
   backend documents the intent ; the numerics is identical (bytecode interpreted on the C++ side).
 
-Opcodes (mirror of `adc::CsOp`) : `PUSHREG`(0), `ADD`(1), `SUB`(2), `MUL`(3), `DIV`(4), `NEG`(5),
+Opcodes (mirror of `pops::CsOp`) : `PUSHREG`(0), `ADD`(1), `SUB`(2), `MUL`(3), `DIV`(4), `NEG`(5),
 `POW`(6), `SQRT`(7). Only `+ - * / ** -unary sqrt` plus field and constant are supported (any
 other node raises a `TypeError`). Frozen capacity limits, diagnosed on the Python side before the
 C++ boundary : 32 registers (inputs + constants), 16 source terms, 256 opcodes per term.
@@ -499,7 +499,7 @@ C++ boundary : 32 registers (inputs + constants), 16 source terms, 256 opcodes p
 (-> `System.add_coupled_source`).
 
 ```python
-from adc import dsl
+from pops import dsl
 
 src = dsl.CoupledSource("ionization")
 ne = src.block("electrons").role("density")
@@ -545,8 +545,8 @@ requires adc headers and a C++ compiler ; without them, `compile` raises.
 
 ```python
 import numpy as np
-import adc
-from adc import dsl
+import pops
+from pops import dsl
 
 GAMMA = 1.4
 
@@ -577,9 +577,9 @@ m = build_euler_poisson()
 compiled = m.compile(backend="production")           # include / so_path auto, cache
 
 n = 32
-s = adc.System(n=n, L=1.0, periodic=True)
+s = pops.System(n=n, L=1.0, periodic=True)
 s.add_equation("gas", compiled,
-               spatial=adc.FiniteVolume(limiter="minmod", riemann="hllc",
+               spatial=pops.FiniteVolume(limiter="minmod", riemann="hllc",
                                         variables="primitive"))
 s.set_poisson(rhs="charge_density", solver="geometric_mg")
 
@@ -594,15 +594,15 @@ nsteps = s.run(t_end=0.02, cfl=0.4)
 final = np.array(s.get_state("gas")).reshape(4, n, n)
 ```
 
-Note on `adc.FiniteVolume(limiter=, riemann=, variables=)` : `riemann` is the numerical flux
+Note on `pops.FiniteVolume(limiter=, riemann=, variables=)` : `riemann` is the numerical flux
 (`rusanov` / `hll` / `hllc` / `roe`), distinct from the physical flux `m.flux` ; `limiter` among
 `none` / `minmod` / `vanleer` / `weno5` ; `variables` among `conservative` / `primitive`. HLLC / Roe
 require a primitive named `p`.
 
 ## Pitfalls
 
-1. **Two `Model`**. `adc.Model(state, transport, source, elliptic)` (in `__init__.py`) composes
-   pre-compiled native bricks (`ModelSpec`) ; `adc.dsl.Model(name)` writes symbolic
+1. **Two `Model`**. `pops.Model(state, transport, source, elliptic)` (in `__init__.py`) composes
+   pre-compiled native bricks (`ModelSpec`) ; `pops.dsl.Model(name)` writes symbolic
    formulas. Different signatures and files.
 2. **`flux` vs `eval_flux`**. `m.flux(x=, y=)` declares ; `m.eval_flux(U, aux, dir)` evaluates (numpy).
    Distinct methods. On `HyperbolicModel`, the collision is resolved the other way :
@@ -613,7 +613,7 @@ require a primitive named `p`.
    supply `cons = f(prim)` explicitly for the complete codegen of the brick.
 5. **Fixed aux names**. Only `phi` / `grad_x` / `grad_y` / `B_z` / `T_e`. An unknown name raises.
    `B_z` / `T_e` widen `n_aux` (4 / 5).
-6. **ABI match (production)**. Loader and `_adc` module must share headers + compiler
+6. **ABI match (production)**. Loader and `_pops` module must share headers + compiler
    + C++ standard ; a discrepancy -> `add_native_block` raises "ABI incompatible". Do not force `std` for
    `production` : leave `std=None` to derive the standard from the loader (c++20 under Kokkos, c++23 otherwise).
 7. **Runtime params on `aot` only**. `kind="runtime"` is frozen to the declaration value on

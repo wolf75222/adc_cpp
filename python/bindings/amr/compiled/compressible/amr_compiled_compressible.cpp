@@ -2,9 +2,9 @@
 // flux subdivision: this TU is now the thin riemann dispatcher, routing to the per-flux
 // build_amr_compiled_compressible_<flux> seam TUs (each compiles ONE flux's build_amr_compiled leaves in
 // parallel). See amr_block_seam.hpp.
-#include <adc/runtime/builders/block/amr_block_seam.hpp>
+#include <pops/runtime/builders/block/amr_block_seam.hpp>
 
-namespace adc::detail {
+namespace pops::detail {
 
 AmrCompiledHooks build_amr_compiled_compressible(const ModelSpec& spec, const std::string& limiter,
                                                  const std::string& riemann,
@@ -24,4 +24,4 @@ AmrCompiledHooks build_amr_compiled_compressible(const ModelSpec& spec, const st
   throw_registry_dispatch_mismatch("add_compiled_model(AmrSystem)", "flux", riemann);
 }
 
-}  // namespace adc::detail
+}  // namespace pops::detail

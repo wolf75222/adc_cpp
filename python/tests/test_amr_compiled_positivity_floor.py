@@ -2,7 +2,7 @@
 """AmrSystem positivity_floor on the COMPILED .so path (Zhang-Shu, ADC-322).
 
 ADC-259 wired positivity_floor onto the NATIVE AMR transport (AmrSystem.add_block) but REJECTED it on
-the compiled .so path, because the flat ABI loader (adc_install_native_amr) carried no floor slot.
+the compiled .so path, because the flat ABI loader (pops_install_native_amr) carried no floor slot.
 ADC-322 regenerates the loader so the floor rides the .so too: the trailing pos_floor is marshaled
 through add_compiled_model -> set_compiled_block into the SAME compute_face_fluxes leaf the native path
 uses (mono via AmrBuildParams::pos_floor, multi via the AmrCompiledBlockBuilder slot).
@@ -28,7 +28,7 @@ facade AmrSystem.add_equation. It checks, on the compiled .so path:
 The guarantee is face / C/F-ghost-mean Density positivity only (order-1 fallback), parity with the
 native path (tests/test_amr_positivity_floor.cpp, python/tests/test_amr_positivity_floor.py).
 
-Needs a C++ compiler + the adc headers + ADC_KOKKOS_ROOT (the production loader is Kokkos-only):
+Needs a C++ compiler + the adc headers + POPS_KOKKOS_ROOT (the production loader is Kokkos-only):
 auto-skips (exit 0) without a compiler, like test_dsl_production_amr. Validated under CI (ci-kokkos*).
 """
 import os
@@ -38,8 +38,8 @@ import tempfile
 
 import numpy as np
 
-import adc
-from adc import dsl
+import pops
+from pops import dsl
 
 CS2 = 0.25       # isothermal sound speed^2 (p = cs2 rho): flooring rho floors the pressure
 N = 48
@@ -100,11 +100,11 @@ def smooth_state():
 def compiled_single(cm, pf, state):
     """Single compiled block (add_equation -> add_native_block) with positivity_floor=pf, seeded with
     the full conservative state, stepped 38 times. Returns the coarse density (flat array)."""
-    s = adc.AmrSystem(n=N, L=1.0, periodic=True)
+    s = pops.AmrSystem(n=N, L=1.0, periodic=True)
     s.set_refinement(1e30)
     s.add_equation("gas", cm,
-                   spatial=adc.Spatial(limiter="weno5", flux="rusanov", positivity_floor=pf),
-                   time=adc.Explicit())
+                   spatial=pops.Spatial(limiter="weno5", flux="rusanov", positivity_floor=pf),
+                   time=pops.Explicit())
     s.set_conservative_state("gas", state)
     for _ in range(38):
         s.step(DT)
@@ -155,11 +155,11 @@ def main():
         print("== (3) multi-block compiled: positivity_floor threaded through AmrCompiledBlockBuilder ==")
         band = np.full((N, N), 1e-6)
         band[:, N // 3:2 * N // 3] = 1.0
-        sm = adc.AmrSystem(n=N, L=1.0, periodic=True)
+        sm = pops.AmrSystem(n=N, L=1.0, periodic=True)
         sm.set_refinement(1e30)
-        sm.add_equation("a", cm, spatial=adc.Spatial(limiter="weno5", flux="rusanov",
+        sm.add_equation("a", cm, spatial=pops.Spatial(limiter="weno5", flux="rusanov",
                                                      positivity_floor=1e-8))
-        sm.add_equation("b", cm, spatial=adc.Spatial(limiter="weno5", flux="rusanov",
+        sm.add_equation("b", cm, spatial=pops.Spatial(limiter="weno5", flux="rusanov",
                                                      positivity_floor=1e-8))
         sm.set_density("a", band.ravel().copy())
         sm.set_density("b", band.ravel().copy())

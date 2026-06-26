@@ -8,25 +8,25 @@
 // et APRES patch (avec -DHARNESS_ABS) : la ligne "BASE ..." doit etre identique caractere pour
 // caractere. Compilation type (Kokkos OpenMP/Serial conda) :
 //   c++ -std=c++20 -O2 -DADC_HAS_KOKKOS [-DHARNESS_ABS] -Xpreprocessor -fopenmp \
-//       -I <libomp>/include -I <worktree>/include -I $ADC_KOKKOS_ROOT/include \
-//       mg_cold_tolerance.cpp -L $ADC_KOKKOS_ROOT/lib -lkokkoscore -lkokkossimd -ldl \
+//       -I <libomp>/include -I <worktree>/include -I $POPS_KOKKOS_ROOT/include \
+//       mg_cold_tolerance.cpp -L $POPS_KOKKOS_ROOT/lib -lkokkoscore -lkokkossimd -ldl \
 //       -L <libomp>/lib -lomp -o mg_cold_tolerance
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/execution/for_each.hpp>
-#include <adc/mesh/geometry/geometry.hpp>
-#include <adc/mesh/storage/multifab.hpp>
-#include <adc/mesh/boundary/physical_bc.hpp>
-#include <adc/numerics/elliptic/mg/geometric_mg.hpp>
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/execution/for_each.hpp>
+#include <pops/mesh/geometry/geometry.hpp>
+#include <pops/mesh/storage/multifab.hpp>
+#include <pops/mesh/boundary/physical_bc.hpp>
+#include <pops/numerics/elliptic/mg/geometric_mg.hpp>
 
 #include <cmath>
 #include <cstdio>
 #include <vector>
 
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
 #include <Kokkos_Core.hpp>
 #endif
 
-using namespace adc;
+using namespace pops;
 
 namespace {
 void fill_rhs(GeometricMG& mg,
@@ -52,7 +52,7 @@ double sum_phi(GeometricMG& mg) {
 }  // namespace
 
 int main(int argc, char** argv) {
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   Kokkos::initialize(argc, argv);
 #else
   (void)argc;
@@ -141,7 +141,7 @@ int main(int argc, char** argv) {
     }
 #endif
   }
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   Kokkos::finalize();
 #endif
   if (rc == 0)

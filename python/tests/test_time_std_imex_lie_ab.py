@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""adc.time.std.imex_local / lie / adams_bashforth(order) -- ADC-423 beyond-MVP macros.
+"""pops.time.std.imex_local / lie / adams_bashforth(order) -- ADC-423 beyond-MVP macros.
 
 All three LOWER to the existing Program IR (no new C++ stepper):
 
@@ -13,7 +13,7 @@ All three LOWER to the existing Program IR (no new C++ stepper):
     bdf lower to the per-cell solve kernel with a model; AB3 lowers with two history reads + rotate;
     the guards (imex theta range, AB order) fire.
 
-(B) Offline parity (skips cleanly without numpy / _adc / install_program / a compiler / a visible
+(B) Offline parity (skips cleanly without numpy / _pops / install_program / a compiler / a visible
     Kokkos): the compiled program is stepped and compared to an INDEPENDENT offline numpy reference of
     the identical recurrence, to machine precision. Self-skips, never fakes the engine.
 """
@@ -22,9 +22,9 @@ import sys
 
 def _adc_time():
     try:
-        import adc.time as t
+        import pops.time as t
     except Exception as exc:  # adc not importable here -> skip, never fake
-        print("skip test_time_std_imex_lie_ab (adc.time unavailable: %s)" % exc)
+        print("skip test_time_std_imex_lie_ab (pops.time unavailable: %s)" % exc)
         sys.exit(0)
     return t
 
@@ -92,12 +92,12 @@ def test_imex_local_builds_and_lowers(t):
     out = t.std.imex_local(P, "plasma", linear_source="lorentz")
     assert P.validate() is True and P.commits()["plasma"] is out
     try:
-        from adc import dsl
+        from pops import dsl
     except Exception as exc:  # noqa: BLE001
-        print("  (imex codegen skipped: adc.dsl unavailable: %s)" % exc)
+        print("  (imex codegen skipped: pops.dsl unavailable: %s)" % exc)
         return
     src = P.emit_cpp_program(model=_lorentz_model(dsl, "imex_m"))
-    assert "adc::detail::mat_inverse<3>(" in src, "imex implicit term is a per-cell dense solve"
+    assert "pops::detail::mat_inverse<3>(" in src, "imex implicit term is a per-cell dense solve"
     assert "rhs_into" in src, "imex explicit term assembles an RHS"
 
 
@@ -204,26 +204,26 @@ def _run_ab3(t):
     try:
         import numpy as np
 
-        import adc
-        from adc import dsl
+        import pops
+        from pops import dsl
     except Exception as exc:  # noqa: BLE001
         print("-- (B AB3) skipped: adc/numpy unavailable: %s --" % exc)
         return
-    sim = adc.System(n=16, L=1.0, periodic=True)
+    sim = pops.System(n=16, L=1.0, periodic=True)
     if not hasattr(sim, "install_program"):
-        print("-- (B AB3) skipped: _adc lacks install_program (rebuild _adc) --")
+        print("-- (B AB3) skipped: _pops lacks install_program (rebuild _pops) --")
         return
     P = t.Program("ab3_step")
     t.std.adams_bashforth(P, "blk", 3)
     try:
-        compiled = adc.compile_problem(model=_passive_source_model(dsl, "ab3_prog"), time=P)
+        compiled = pops.compile_problem(model=_passive_source_model(dsl, "ab3_prog"), time=P)
         cm = _passive_source_model(dsl, "ab3_block").compile(backend="production")
     except RuntimeError as exc:
         print("-- (B AB3) skipped: compile could not build the .so: %s --" % str(exc)[:160])
         return
     n = 16
-    sim.add_equation("blk", cm, spatial=adc.FiniteVolume(limiter="none", riemann="rusanov"),
-                     time=adc.Explicit(method="euler"))
+    sim.add_equation("blk", cm, spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                     time=pops.Explicit(method="euler"))
     x = (np.arange(n) + 0.5) / n
     X, Y = np.meshgrid(x, x, indexing="ij")
     rho0 = 1.0 + 0.3 * np.sin(2 * np.pi * X) * np.cos(2 * np.pi * Y)
@@ -246,26 +246,26 @@ def _run_imex(t):
     try:
         import numpy as np
 
-        import adc
-        from adc import dsl
+        import pops
+        from pops import dsl
     except Exception as exc:  # noqa: BLE001
         print("-- (B imex) skipped: adc/numpy unavailable: %s --" % exc)
         return
-    sim = adc.System(n=16, L=1.0, periodic=True)
+    sim = pops.System(n=16, L=1.0, periodic=True)
     if not hasattr(sim, "install_program"):
-        print("-- (B imex) skipped: _adc lacks install_program (rebuild _adc) --")
+        print("-- (B imex) skipped: _pops lacks install_program (rebuild _pops) --")
         return
     P = t.Program("imex_step")
     t.std.imex_local(P, "plasma", linear_source="lorentz", flux=True, sources=["default"], theta=1.0)
     try:
-        compiled = adc.compile_problem(model=_lorentz_model(dsl, "imex_prog"), time=P)
+        compiled = pops.compile_problem(model=_lorentz_model(dsl, "imex_prog"), time=P)
         cm = _lorentz_model(dsl, "imex_block").compile(backend="production")
     except RuntimeError as exc:
         print("-- (B imex) skipped: compile could not build the .so: %s --" % str(exc)[:160])
         return
     n = 16
-    sim.add_equation("plasma", cm, spatial=adc.FiniteVolume(limiter="none", riemann="rusanov"),
-                     time=adc.Explicit(method="euler"))
+    sim.add_equation("plasma", cm, spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                     time=pops.Explicit(method="euler"))
     bz = 3.0
     sim.set_magnetic_field(bz * np.ones(n * n))
     x = (np.arange(n) + 0.5) / n
@@ -297,14 +297,14 @@ def _run_lie(t):
     try:
         import numpy as np
 
-        import adc
-        from adc import dsl
+        import pops
+        from pops import dsl
     except Exception as exc:  # noqa: BLE001
         print("-- (B lie) skipped: adc/numpy unavailable: %s --" % exc)
         return
-    sim = adc.System(n=16, L=1.0, periodic=True)
+    sim = pops.System(n=16, L=1.0, periodic=True)
     if not hasattr(sim, "install_program"):
-        print("-- (B lie) skipped: _adc lacks install_program (rebuild _adc) --")
+        print("-- (B lie) skipped: _pops lacks install_program (rebuild _pops) --")
         return
 
     # Lie H(dt); S(dt) where H is flux-only transport (here zero flux -> no-op) and S the default
@@ -321,14 +321,14 @@ def _run_lie(t):
     P = t.Program("lie_step")
     t.std.lie(P, "blk", half_flow, source)
     try:
-        compiled = adc.compile_problem(model=_reaction_term_model(dsl, "lie_prog"), time=P)
+        compiled = pops.compile_problem(model=_reaction_term_model(dsl, "lie_prog"), time=P)
         cm = _reaction_term_model(dsl, "lie_block").compile(backend="production")
     except RuntimeError as exc:
         print("-- (B lie) skipped: compile could not build the .so: %s --" % str(exc)[:160])
         return
     n = 16
-    sim.add_equation("blk", cm, spatial=adc.FiniteVolume(limiter="none", riemann="rusanov"),
-                     time=adc.Explicit(method="euler"))
+    sim.add_equation("blk", cm, spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                     time=pops.Explicit(method="euler"))
     x = (np.arange(n) + 0.5) / n
     X, Y = np.meshgrid(x, x, indexing="ij")
     rho0 = 1.0 + 0.3 * np.sin(2 * np.pi * X) * np.cos(2 * np.pi * Y)

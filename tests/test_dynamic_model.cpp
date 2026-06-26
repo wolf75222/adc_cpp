@@ -1,25 +1,25 @@
-// Test de l'interface de modele TYPE-ERASED (adc::IModel / ModelAdapter) : un modele statique
+// Test de l'interface de modele TYPE-ERASED (pops::IModel / ModelAdapter) : un modele statique
 // (Euler) enrobe dans IModel<4> et dispatche par vtable doit donner exactement le meme flux et la
 // meme vitesse d'onde que l'appel direct. C'est le mecanisme qui permet d'utiliser, a l'execution,
 // une brique generee/JIT dont le type n'est pas connu a la compilation (cf. dynamic_model.hpp).
-#include <adc/physics/fluids/euler.hpp>
-#include <adc/runtime/dynamic/dynamic_model.hpp>
+#include <pops/physics/fluids/euler.hpp>
+#include <pops/runtime/dynamic/dynamic_model.hpp>
 
 #include <cmath>
 #include <cstdio>
 
-using State = adc::StateVec<4>;
+using State = pops::StateVec<4>;
 
-static_assert(std::is_base_of_v<adc::IModel<4>, adc::ModelAdapter<adc::Euler>>,
+static_assert(std::is_base_of_v<pops::IModel<4>, pops::ModelAdapter<pops::Euler>>,
               "ModelAdapter<Euler> doit deriver de IModel<4>");
 
 int main() {
-  adc::Euler ref;
+  pops::Euler ref;
   ref.gamma = 1.4;
-  auto dyn = adc::make_dynamic(ref);  // std::unique_ptr<adc::IModel<4>>
-  const adc::IModel<4>& m = *dyn;
+  auto dyn = pops::make_dynamic(ref);  // std::unique_ptr<pops::IModel<4>>
+  const pops::IModel<4>& m = *dyn;
 
-  adc::Aux a{};
+  pops::Aux a{};
   const double S[][4] = {
       {1.0, 0.2, -0.1, 2.5}, {2.0, 0.5, 0.3, 6.0}, {0.5, -0.2, 0.1, 1.8}, {1.5, 0.0, 0.0, 3.0}};
   double maxdiff = 0.0;

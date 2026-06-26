@@ -19,7 +19,7 @@
 - 3-variable model (rho, rho_u, rho_v), isothermal pressure p = theta*rho (model.py:90-122),
 - Lorentz force m x Omega = (omega*my, -omega*mx),
 - Gauss -alpha*rho (elliptic_rhs),
-- solved by `adc.Split(hyperbolic=Explicit(ssprk3), source=adc.CondensedSchur(theta=0.5, alpha))`,
+- solved by `pops.Split(hyperbolic=Explicit(ssprk3), source=pops.CondensedSchur(theta=0.5, alpha))`,
   that is, the Schur stack #118-128 (CondensedSchurSourceStepper, LorentzEliminator,
   TensorEllipticOperator/GeometricMG, BiCGStab) wired in via system_stepper.hpp:86-90.
 

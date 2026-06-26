@@ -21,7 +21,7 @@ It also pins that the always()/default lowering is byte-identical to the unsched
 file-level difference is the IR hash, which legitimately tracks the schedule attr), and that the two
 genuinely-unlowerable cases (on_end(), a when() over a Python callable) still fail loud naming
 ADC-458. The cache RUNTIME cadence in a stepping .so is exercised on ROMEO; the CacheManager is
-unit-tested by tests/test_cache_manager.cpp. Pure Python: only adc.time / adc.model / adc.dsl.
+unit-tested by tests/test_cache_manager.cpp. Pure Python: only pops.time / pops.model / pops.dsl.
 """
 import sys
 
@@ -32,9 +32,9 @@ def _skip(msg):
 
 
 try:
-    from adc import dsl, model
-    from adc import time as adctime
-except Exception as exc:  # noqa: BLE001  -- _adc unavailable in this interpreter
+    from pops import dsl, model
+    from pops import time as adctime
+except Exception as exc:  # noqa: BLE001  -- _pops unavailable in this interpreter
     _skip("adc unavailable: %s" % exc)
 
 
@@ -58,11 +58,11 @@ def _field_program(schedule):
 
 
 def _transport_model():
-    import adc
+    import pops
 
-    return adc.Model(state=adc.FluidState("isothermal", cs2=0.5),
-                     transport=adc.IsothermalFlux(), source=adc.NoSource(),
-                     elliptic=adc.BackgroundDensity(alpha=1.0, n0=0.0))
+    return pops.Model(state=pops.FluidState("isothermal", cs2=0.5),
+                     transport=pops.IsothermalFlux(), source=pops.NoSource(),
+                     elliptic=pops.BackgroundDensity(alpha=1.0, n0=0.0))
 
 
 def _scratch_program(schedule):
@@ -128,7 +128,7 @@ def test_when_reuses_program_predicate_token():
     P.commit("ions", P.linear_combine("U1", U + dt * R2))
     P._check_schedules_lowerable()  # a Program Bool when() lowers
     cpp = P.emit_cpp_program(model=_transport_model())
-    assert "< static_cast<adc::Real>(1e-06)" in cpp  # the predicate is the due test
+    assert "< static_cast<pops::Real>(1e-06)" in cpp  # the predicate is the due test
     assert "ctx.cache_should_update" not in cpp       # when() is a predicate, not a period
 
 
@@ -146,7 +146,7 @@ def test_when_over_python_callable_refuses():
 def test_subcycle_emits_a_subloop():
     cpp = _emit_field(adctime.subcycle(4))
     assert "for (int _sub" in cpp
-    assert "dt / static_cast<adc::Real>(4)" in cpp  # default sub-dt = macro_dt / count
+    assert "dt / static_cast<pops::Real>(4)" in cpp  # default sub-dt = macro_dt / count
     assert "< 4;" in cpp
 
 
@@ -178,7 +178,7 @@ def test_field_hold_stores_and_restores_aux():
 def test_field_zero_emits_aux_set_val_else():
     cpp = _emit_field(adctime.every(4).zero())
     assert "} else {" in cpp
-    assert "ctx.aux().set_val(static_cast<adc::Real>(0));" in cpp
+    assert "ctx.aux().set_val(static_cast<pops::Real>(0));" in cpp
 
 
 def test_field_accumulate_dt_reads_effective_dt():
@@ -216,14 +216,14 @@ def test_scratch_hold_caches_named_scratch():
     assert "ctx.cache_store_scratch(" in cpp
     assert "ctx.cache_restore_scratch(" in cpp
     # the output scratch is DECLARED before the guard (so both branches see it)
-    decl_idx = cpp.index("adc::MultiFab r")
+    decl_idx = cpp.index("pops::MultiFab r")
     guard_idx = cpp.index("if (ctx.cache_should_update(")
     assert decl_idx < guard_idx
 
 
 def test_scratch_zero_sets_the_scratch_to_zero():
     cpp = _emit_scratch(adctime.every(4).zero())
-    assert ".set_val(static_cast<adc::Real>(0));" in cpp
+    assert ".set_val(static_cast<pops::Real>(0));" in cpp
     assert "ctx.aux().set_val" not in cpp  # a scratch node zeroes its OWN buffer, not the aux
 
 
@@ -238,7 +238,7 @@ def test_scratch_accumulate_dt_uses_scratch_cache():
 def test_scratch_decl_hoisted_for_skip():
     # the scratch decl must be OUTSIDE the guard so the (stale) buffer stays in scope for downstream
     cpp = _emit_scratch(adctime.every(5).skip())
-    decl_idx = cpp.index("adc::MultiFab r")
+    decl_idx = cpp.index("pops::MultiFab r")
     guard_idx = cpp.index("if (ctx.cache_should_update(")
     assert decl_idx < guard_idx
 

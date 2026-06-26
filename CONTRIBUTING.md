@@ -8,13 +8,13 @@ technical detail lives in the [README](README.md) and in
 ## Build and tests (CMake presets)
 
 The build is driven by the presets in `CMakePresets.json`, not by ad-hoc `-D` flags. The
-`adc` conda env (Python 3.12) must be active for the `python`, `parallel` and `mpi` presets.
+`pops` conda env (Python 3.12) must be active for the `python`, `parallel` and `mpi` presets.
 
 ```bash
-bash scripts/setup_env.sh && conda activate adc   # env + pinned toolchain
+bash scripts/setup_env.sh && conda activate pops   # env + pinned toolchain
 
 cmake --preset serial   && cmake --build --preset serial   && ctest --preset serial
-cmake --preset python   && cmake --build --preset python    # _adc module (bindings)
+cmake --preset python   && cmake --build --preset python    # _pops module (bindings)
 cmake --preset mpi      && cmake --build --preset mpi      && ctest --preset mpi
 cmake --preset parallel && cmake --build --preset parallel && ctest --preset parallel
 ```
@@ -42,7 +42,7 @@ The conventions are written down; follow the project's decision first, then the 
   clang-format 19 locally (`pipx install clang-format==19.1.7`) to match it; output drifts between
   major versions.
 - **Python style**: the [Google Python Style Guide](https://google.github.io/styleguide/pyguide.html)
-  for `python/adc/**`, the bindings, the DSL and the tests; `ruff` (see `quality.yml`) enforces the
+  for `python/pops/**`, the bindings, the DSL and the tests; `ruff` (see `quality.yml`) enforces the
   mechanical part.
 - **Documentation style**: the Google documentation guide is vendored verbatim under
   [docs/docguide/](docs/docguide/) (philosophy, best practices, Markdown style, README files) and is

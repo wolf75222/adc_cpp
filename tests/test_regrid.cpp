@@ -2,18 +2,18 @@
 // sont interpolees depuis le grossier, le buffer dilate la region, un re-regrid
 // preserve l'ancien fin, et un tagging vide supprime le niveau fin.
 
-#include <adc/amr/hierarchy/amr_hierarchy.hpp>
-#include <adc/amr/tagging/cluster.hpp>
-#include <adc/amr/regridding/regrid.hpp>
-#include <adc/mesh/index/box2d.hpp>
-#include <adc/mesh/storage/fab2d.hpp>
-#include <adc/mesh/execution/for_each.hpp>
-#include <adc/mesh/storage/multifab.hpp>
+#include <pops/amr/hierarchy/amr_hierarchy.hpp>
+#include <pops/amr/tagging/cluster.hpp>
+#include <pops/amr/regridding/regrid.hpp>
+#include <pops/mesh/index/box2d.hpp>
+#include <pops/mesh/storage/fab2d.hpp>
+#include <pops/mesh/execution/for_each.hpp>
+#include <pops/mesh/storage/multifab.hpp>
 
 #include <cmath>
 #include <cstdio>
 
-using namespace adc;
+using namespace pops;
 
 // feature centrale : 1 dans [6..9]^2, 0 ailleurs
 static double feature(int i, int j) {

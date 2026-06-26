@@ -24,10 +24,10 @@
 // beyond the standard System build. The compiled .so running this coupled solve in a step loop is
 // validated on ROMEO (Kokkos-only AOT).
 
-#include <adc/runtime/config/model_spec.hpp>
-#include <adc/runtime/system.hpp>
-#include <adc/mesh/storage/multifab.hpp>
-#include <adc/mesh/storage/fab2d.hpp>
+#include <pops/runtime/config/model_spec.hpp>
+#include <pops/runtime/system.hpp>
+#include <pops/mesh/storage/multifab.hpp>
+#include <pops/mesh/storage/fab2d.hpp>
 
 #include "test_harness.hpp"
 
@@ -35,11 +35,11 @@
 #include <cstdio>
 #include <vector>
 
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
 #include <Kokkos_Core.hpp>
 #endif
 
-using namespace adc;
+using namespace pops;
 
 namespace {
 
@@ -84,7 +84,7 @@ double max_abs_diff(const std::vector<double>& a, const std::vector<double>& b) 
 }  // namespace
 
 int main(int argc, char** argv) {
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   Kokkos::ScopeGuard guard(argc, argv);
 #else
   (void)argc;

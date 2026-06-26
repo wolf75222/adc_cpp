@@ -10,13 +10,13 @@
 //     de GeometricMG (l'ancienne lambda 'cut' + 2/(axm*(axm+axp)) ...). C'est la garantie "no behavior
 //     change" du refactor : l'elliptique lit des coef byte-identiques avant/apres.
 
-#include <adc/numerics/elliptic/eb/cut_fraction.hpp>
+#include <pops/numerics/elliptic/eb/cut_fraction.hpp>
 
 #include <cmath>
 #include <cstdio>
 #include <functional>
 
-using namespace adc;
+using namespace pops;
 
 // level-set canonique du disque (meme convention que DiscDomain::level_set et le mur de Poisson).
 struct DiscLS {

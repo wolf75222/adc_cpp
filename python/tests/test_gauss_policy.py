@@ -22,7 +22,7 @@ import sys
 
 import numpy as np
 
-import adc
+import pops
 from test_strang_split import INCLUDE, build_sim, isothermal_magnetized, strang
 
 fails = 0
@@ -45,7 +45,7 @@ def raises(fn):
 
 # --- (a) API (sans compilateur) --------------------------------------------------------------------
 print("== (a) set_gauss_policy : restart/evolve acceptes, inconnu rejete ==")
-s = adc.System(n=16)
+s = pops.System(n=16)
 s.set_gauss_policy("restart")
 s.set_gauss_policy("evolve")
 chk(True, "(a) set_gauss_policy('restart'/'evolve') acceptes")

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Construit scaling_step pour UN backend, puis joue un BALAYAGE (threads / rangs / tailles) et APPEND
-# les lignes JSONL (schema adc_perf_v1) dans $OUT. MEMES recettes cmake que run_bench.sh ; SHA/branche
+# les lignes JSONL (schema pops_perf_v1) dans $OUT. MEMES recettes cmake que run_bench.sh ; SHA/branche
 # injectes a la configuration. Le balayage depend du mode (cf. plan : strong/weak CPU/GPU/MPI).
 #
 # Usage :

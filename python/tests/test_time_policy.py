@@ -2,19 +2,19 @@
 """Test du nommage des politiques temporelles : SourceImplicit, IMEX, deprecation de Implicit.
 
 Verifie :
-  1. adc.SourceImplicit produit les memes numeriques (bit-identiques) que adc.IMEX et
-     que l'ancien adc.Implicit -- les trois empruntes le meme chemin C++ (kind="imex",
+  1. pops.SourceImplicit produit les memes numeriques (bit-identiques) que pops.IMEX et
+     que l'ancien pops.Implicit -- les trois empruntes le meme chemin C++ (kind="imex",
      ImplicitSourceStepper / backward_euler_source).
-  2. adc.Implicit leve bien un DeprecationWarning (avec le message attendu) et reste
+  2. pops.Implicit leve bien un DeprecationWarning (avec le message attendu) et reste
      fonctionnel (pas de regression comportementale).
-  3. adc.Explicit / adc.IMEX sont INCHANGES (bit-identiques par rapport aux tests existants).
-  4. adc.SourceImplicit est exportee dans adc.__all__.
+  3. pops.Explicit / pops.IMEX sont INCHANGES (bit-identiques par rapport aux tests existants).
+  4. pops.SourceImplicit est exportee dans pops.__all__.
 """
 
 import sys
 import warnings
 import numpy as np
-import adc
+import pops
 
 fails = 0
 
@@ -32,27 +32,27 @@ def meshx(n):
 
 
 def diocotron_model(B0=1.0, alpha=1.0, n0=0.0):
-    return adc.Model(state=adc.Scalar(), transport=adc.ExB(B0=B0),
-                     source=adc.NoSource(),
-                     elliptic=adc.BackgroundDensity(alpha=alpha, n0=n0))
+    return pops.Model(state=pops.Scalar(), transport=pops.ExB(B0=B0),
+                     source=pops.NoSource(),
+                     elliptic=pops.BackgroundDensity(alpha=alpha, n0=n0))
 
 
 def electron_model():
-    return adc.Model(state=adc.FluidState("compressible", gamma=1.4),
-                     transport=adc.CompressibleFlux(),
-                     source=adc.PotentialForce(charge=-1.0),
-                     elliptic=adc.ChargeDensity(charge=-1.0))
+    return pops.Model(state=pops.FluidState("compressible", gamma=1.4),
+                     transport=pops.CompressibleFlux(),
+                     source=pops.PotentialForce(charge=-1.0),
+                     elliptic=pops.ChargeDensity(charge=-1.0))
 
 
 # ---- 1. SourceImplicit est dans __all__ et a kind="imex" -----------------------
 print("== 1. SourceImplicit : presence dans __all__, kind, attributs ==")
-chk("SourceImplicit" in adc.__all__, "SourceImplicit est dans adc.__all__")
-si = adc.SourceImplicit(substeps=3, stride=2)
+chk("SourceImplicit" in pops.__all__, "SourceImplicit est dans pops.__all__")
+si = pops.SourceImplicit(substeps=3, stride=2)
 chk(si.kind == "imex", "SourceImplicit.kind == 'imex' (meme chemin C++ que IMEX)")
 chk(si.substeps == 3, "SourceImplicit.substeps correctement stocke")
 chk(si.stride == 2, "SourceImplicit.stride correctement stocke")
 
-imex_ref = adc.IMEX(substeps=3, stride=2)
+imex_ref = pops.IMEX(substeps=3, stride=2)
 chk(si.kind == imex_ref.kind, "SourceImplicit.kind == IMEX.kind")
 chk(si.substeps == imex_ref.substeps, "SourceImplicit.substeps == IMEX.substeps")
 chk(si.stride == imex_ref.stride, "SourceImplicit.stride == IMEX.stride")
@@ -60,13 +60,13 @@ chk(si.stride == imex_ref.stride, "SourceImplicit.stride == IMEX.stride")
 # ---- 2. SourceImplicit : validation des entrees --------------------------------
 print("== 2. SourceImplicit : validation des entrees ==")
 try:
-    adc.SourceImplicit(substeps=0)
+    pops.SourceImplicit(substeps=0)
     chk(False, "SourceImplicit(substeps=0) doit lever ValueError")
 except ValueError:
     chk(True, "SourceImplicit(substeps=0) leve ValueError")
 
 try:
-    adc.SourceImplicit(stride=0)
+    pops.SourceImplicit(stride=0)
     chk(False, "SourceImplicit(stride=0) doit lever ValueError")
 except ValueError:
     chk(True, "SourceImplicit(stride=0) leve ValueError")
@@ -83,22 +83,22 @@ xs = meshx(n)
 rho0 = 1.0 + 0.04 * np.cos(2 * np.pi * xs)[None, :] * np.ones((n, 1))
 
 policies = {
-    "SourceImplicit": adc.SourceImplicit(substeps=2),
-    "IMEX": adc.IMEX(substeps=2),
+    "SourceImplicit": pops.SourceImplicit(substeps=2),
+    "IMEX": pops.IMEX(substeps=2),
 }
 
 # Implicit : on le capturera en supprimant le warning (retrocompatibilite)
 with warnings.catch_warnings():
     warnings.simplefilter("ignore", DeprecationWarning)
-    policies["Implicit(dt_ratio=2)"] = adc.Implicit(dt_ratio=2)
+    policies["Implicit(dt_ratio=2)"] = pops.Implicit(dt_ratio=2)
 
 # Electron model (Euler compressible IMEX) pour exercer le chemin backward_euler_source
 # (la source PotentialForce est raide ; le chemin imex est plus significatif qu'ExB/NoSource).
 results = {}
 for label, policy in policies.items():
-    s = adc.System(n=n, periodic=False)
+    s = pops.System(n=n, periodic=False)
     s.add_block("ne", electron_model(),
-                spatial=adc.Spatial(minmod=True), time=policy)
+                spatial=pops.Spatial(minmod=True), time=policy)
     s.set_poisson(bc="dirichlet")
     rho_e = 1.0 + 0.04 * np.cos(2 * np.pi * xs)[None, :] * np.ones((n, n))
     s.set_density("ne", rho_e)
@@ -111,15 +111,15 @@ for label, arr in results.items():
     chk(diff == 0.0,
         "%s vs IMEX : bit-identiques (diff=%g)" % (label, diff))
 
-# ---- 4. adc.Implicit leve un DeprecationWarning --------------------------------
-print("== 4. adc.Implicit emet un DeprecationWarning ==")
+# ---- 4. pops.Implicit leve un DeprecationWarning --------------------------------
+print("== 4. pops.Implicit emet un DeprecationWarning ==")
 
 with warnings.catch_warnings(record=True) as w:
     warnings.simplefilter("always")
-    result = adc.Implicit()
+    result = pops.Implicit()
     dep_warnings = [x for x in w if issubclass(x.category, DeprecationWarning)]
     chk(len(dep_warnings) >= 1,
-        "adc.Implicit() leve au moins un DeprecationWarning")
+        "pops.Implicit() leve au moins un DeprecationWarning")
     if dep_warnings:
         msg = str(dep_warnings[0].message)
         chk("SourceImplicit" in msg or "IMEX" in msg,
@@ -129,38 +129,38 @@ with warnings.catch_warnings(record=True) as w:
 
 # Retrocompatibilite : Implicit() retourne un objet fonctionnel (kind="imex")
 chk(result.kind == "imex",
-    "adc.Implicit() retourne un objet fonctionnel (kind='imex') apres le warning")
+    "pops.Implicit() retourne un objet fonctionnel (kind='imex') apres le warning")
 
 # Arguments historiques : dt_ratio, substeps, stride
 with warnings.catch_warnings():
     warnings.simplefilter("ignore", DeprecationWarning)
-    chk(adc.Implicit(dt_ratio=4).substeps == 4,
-        "adc.Implicit(dt_ratio=4) -> substeps=4 (retrocompatibilite)")
-    chk(adc.Implicit(substeps=3).substeps == 3,
-        "adc.Implicit(substeps=3) -> substeps=3 (retrocompatibilite)")
-    chk(adc.Implicit(stride=2).stride == 2,
-        "adc.Implicit(stride=2) -> stride=2 (retrocompatibilite)")
+    chk(pops.Implicit(dt_ratio=4).substeps == 4,
+        "pops.Implicit(dt_ratio=4) -> substeps=4 (retrocompatibilite)")
+    chk(pops.Implicit(substeps=3).substeps == 3,
+        "pops.Implicit(substeps=3) -> substeps=3 (retrocompatibilite)")
+    chk(pops.Implicit(stride=2).stride == 2,
+        "pops.Implicit(stride=2) -> stride=2 (retrocompatibilite)")
 
-# ---- 5. adc.Explicit et adc.IMEX : comportement INCHANGE -----------------------
+# ---- 5. pops.Explicit et pops.IMEX : comportement INCHANGE -----------------------
 # On verifie juste que les attributs et le kind sont les bons (les tests numeriques
 # sont couverts par test_bindings et test_stride ; on ne les reproduit pas ici).
-print("== 5. adc.Explicit et adc.IMEX inchanges ==")
-ex = adc.Explicit()
+print("== 5. pops.Explicit et pops.IMEX inchanges ==")
+ex = pops.Explicit()
 chk(ex.kind == "explicit", "Explicit().kind == 'explicit' (inchange)")
 chk(ex.substeps == 1, "Explicit().substeps == 1 (defaut inchange)")
-ex3 = adc.Explicit(method="ssprk3")
+ex3 = pops.Explicit(method="ssprk3")
 chk(ex3.kind == "ssprk3", "Explicit(ssprk3).kind == 'ssprk3' (inchange)")
 
-imex = adc.IMEX()
+imex = pops.IMEX()
 chk(imex.kind == "imex", "IMEX().kind == 'imex' (inchange)")
 chk(imex.substeps == 1, "IMEX().substeps == 1 (defaut inchange)")
 
-# adc.Implicit PAS dans un bloc adc.IMEX / adc.Explicit : on s'assure que les deux
+# pops.Implicit PAS dans un bloc pops.IMEX / pops.Explicit : on s'assure que les deux
 # n'emettent PAS de DeprecationWarning.
 with warnings.catch_warnings(record=True) as w2:
     warnings.simplefilter("always")
-    adc.Explicit(substeps=2)
-    adc.IMEX(substeps=2)
+    pops.Explicit(substeps=2)
+    pops.IMEX(substeps=2)
     dep2 = [x for x in w2 if issubclass(x.category, DeprecationWarning)]
     chk(len(dep2) == 0,
         "Explicit() et IMEX() ne levent aucun DeprecationWarning")

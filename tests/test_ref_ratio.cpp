@@ -1,5 +1,5 @@
 // Locks the centralized native AMR refinement-ratio invariant
-// (include/adc/amr/refinement_ratio.hpp): the single constant kAmrRefRatio and
+// (include/pops/amr/refinement_ratio.hpp): the single constant kAmrRefRatio and
 // the require_supported_ref_ratio guard that replaces the literal `2` formerly
 // scattered across the coarse/fine paths (ADC-295). Deliberately light: it pulls
 // only the invariant header plus AmrHierarchy (whose ctor validates the ratio
@@ -10,14 +10,14 @@
 // AmrHierarchy ctor refuses a non-2 ratio at construction (the single entry point)
 // rather than silently mis-coarsening.
 
-#include <adc/amr/hierarchy/amr_hierarchy.hpp>
-#include <adc/amr/hierarchy/refinement_ratio.hpp>
+#include <pops/amr/hierarchy/amr_hierarchy.hpp>
+#include <pops/amr/hierarchy/refinement_ratio.hpp>
 
 #include <cstdio>
 #include <stdexcept>
 #include <string>
 
-using namespace adc;
+using namespace pops;
 
 namespace {
 

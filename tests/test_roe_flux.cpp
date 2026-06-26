@@ -3,13 +3,13 @@
 //  (2) propriete de Roe via l'amont SUPERSONIQUE : si toutes les valeurs propres sont de meme signe
 //      (ecoulement supersonique), F* doit valoir EXACTEMENT le flux amont. C'est equivalent a
 //      F_R - F_L = A_roe (U_R - U_L) : ca ne passe que si la decomposition en ondes est correcte.
-#include <adc/physics/fluids/euler.hpp>
-#include <adc/numerics/fv/numerical_flux.hpp>
+#include <pops/physics/fluids/euler.hpp>
+#include <pops/numerics/fv/numerical_flux.hpp>
 
 #include <cmath>
 #include <cstdio>
 
-using State = adc::StateVec<4>;
+using State = pops::StateVec<4>;
 
 static State cons(double rho, double u, double v, double p, double gamma) {
   State U{};
@@ -28,10 +28,10 @@ static double maxdiff(const State& a, const State& b) {
 }
 
 int main() {
-  adc::Euler e;
+  pops::Euler e;
   e.gamma = 1.4;
-  adc::RoeFlux roe;
-  adc::Aux a{};
+  pops::RoeFlux roe;
+  pops::Aux a{};
 
   // (1) consistance a etat constant, deux etats subsoniques, x et y
   for (const State U : {cons(1.2, 0.3, -0.1, 1.5, 1.4), cons(0.7, -0.2, 0.4, 0.9, 1.4)})

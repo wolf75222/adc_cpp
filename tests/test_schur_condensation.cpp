@@ -1,6 +1,6 @@
 // Tests ANALYTIQUES du batisseur de l'etage source condense par Schur (assemblage SEUL : coefficients
 // de l'operateur tensoriel A_op + second membre condense ; PAS de solve, PAS de reconstruction de
-// vitesse). Cf. include/adc/coupling/schur_condensation.hpp et docs/SCHUR_CONDENSATION_DESIGN.md.
+// vitesse). Cf. include/pops/coupling/schur_condensation.hpp et docs/SCHUR_CONDENSATION_DESIGN.md.
 //
 // CONVENTION FIGEE : A_op = I + c rho B^{-1}, c = theta^2 dt^2 alpha ; B^{-1} = (1/det)[[1,w],[-w,1]],
 // w = theta dt B_z, det = 1+w^2. RHS = -Lap phi^n - theta dt alpha div(rho B^{-1} v^n), v = (mx,my)/rho.
@@ -17,22 +17,22 @@
 //       Poisson canonique, et le RHS (sans terme de flux) = -Lap phi^n BIT-IDENTIQUE au Laplacien
 //       canonique apply_laplacian (negue). Garde-fou de non-regression.
 
-#include <adc/coupling/schur/core/schur_condensation.hpp>
+#include <pops/coupling/schur/core/schur_condensation.hpp>
 
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/layout/distribution_mapping.hpp>
-#include <adc/mesh/execution/for_each.hpp>
-#include <adc/mesh/geometry/geometry.hpp>
-#include <adc/mesh/storage/multifab.hpp>
-#include <adc/mesh/boundary/physical_bc.hpp>
-#include <adc/numerics/elliptic/poisson/poisson_operator.hpp>
-#include <adc/numerics/linalg/lorentz_eliminator.hpp>
-#include <adc/parallel/comm.hpp>
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/layout/distribution_mapping.hpp>
+#include <pops/mesh/execution/for_each.hpp>
+#include <pops/mesh/geometry/geometry.hpp>
+#include <pops/mesh/storage/multifab.hpp>
+#include <pops/mesh/boundary/physical_bc.hpp>
+#include <pops/numerics/elliptic/poisson/poisson_operator.hpp>
+#include <pops/numerics/linalg/lorentz_eliminator.hpp>
+#include <pops/parallel/comm.hpp>
 
 #include <cmath>
 #include <cstdio>
 
-using namespace adc;
+using namespace pops;
 
 static double dabs(double x) {
   return x < 0 ? -x : x;

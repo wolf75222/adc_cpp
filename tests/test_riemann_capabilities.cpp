@@ -4,10 +4,10 @@
 // applique alors l'algorithme GENERIQUE sans hypothese de layout.
 //
 // Verifications :
-//  (1) DETECTION : adc::Euler (sans hooks) ne satisfait PAS les capabilities (il prend le chemin
+//  (1) DETECTION : pops::Euler (sans hooks) ne satisfait PAS les capabilities (il prend le chemin
 //      canonique historique) ; HookedEuler (hooks Euler explicites) les satisfait.
 //  (2) EQUIVALENCE : le chemin GENERIQUE (HookedEuler, hooks reproduisant les formules Euler) rend
-//      le MEME flux que le chemin canonique (adc::Euler) -- HLLC et Roe, subsonique et
+//      le MEME flux que le chemin canonique (pops::Euler) -- HLLC et Roe, subsonique et
 //      supersonique, x et y. C'est la preuve que l'algorithme generique est l'algorithme
 //      historique, la structure en moins.
 //  (3) NON-EULER : un modele ISOTHERME 3 VARIABLES (la ou hllc canonique est impossible,
@@ -15,21 +15,21 @@
 //      F*(U,U) == flux(U), et un CISAILLEMENT STATIONNAIRE (un = 0, saut tangentiel) est preserve
 //      EXACTEMENT (flux tangentiel nul) la ou HLL le diffuse. C'est exactement ce qu'apporte la
 //      resolution de l'onde intermediaire, prouvee hors Euler.
-#include <adc/numerics/fv/numerical_flux.hpp>
-#include <adc/physics/fluids/euler.hpp>
+#include <pops/numerics/fv/numerical_flux.hpp>
+#include <pops/physics/fluids/euler.hpp>
 
 #include <cmath>
 #include <cstdio>
 
-using adc::Aux;
-using adc::Real;
+using pops::Aux;
+using pops::Real;
 
 // ---------------------------------------------------------------------------------------------
-// HookedEuler : adc::Euler + capabilities HLLC/Roe reproduisant EXACTEMENT les formules du chemin
+// HookedEuler : pops::Euler + capabilities HLLC/Roe reproduisant EXACTEMENT les formules du chemin
 // canonique (Toro 10.37 pour le contact, moyenne de Roe + Harten pour la dissipation).
 // ---------------------------------------------------------------------------------------------
-struct HookedEuler : adc::Euler {
-  ADC_HD Real contact_speed(const State& UL, const State& UR, Real pL, Real pR, Real sL, Real sR,
+struct HookedEuler : pops::Euler {
+  POPS_HD Real contact_speed(const State& UL, const State& UR, Real pL, Real pR, Real sL, Real sR,
                             int dir) const {
     const int in = (dir == 0) ? 1 : 2;
     const Real rL = UL[0], rR = UR[0];
@@ -37,7 +37,7 @@ struct HookedEuler : adc::Euler {
     return (pR - pL + rL * unL * (sL - unL) - rR * unR * (sR - unR)) /
            (rL * (sL - unL) - rR * (sR - unR));
   }
-  ADC_HD State hllc_star_state(const State& U, Real p, Real s, Real sStar, int dir) const {
+  POPS_HD State hllc_star_state(const State& U, Real p, Real s, Real sStar, int dir) const {
     const int in = (dir == 0) ? 1 : 2;
     const int it = (dir == 0) ? 2 : 1;
     const Real r = U[0];
@@ -50,7 +50,7 @@ struct HookedEuler : adc::Euler {
     Us[3] = fac * (U[3] / r + (sStar - un) * (sStar + p / (r * (s - un))));
     return Us;
   }
-  ADC_HD State roe_dissipation(const State& UL, const Aux&, const State& UR, const Aux&,
+  POPS_HD State roe_dissipation(const State& UL, const Aux&, const State& UR, const Aux&,
                                int dir) const {
     const int in = (dir == 0) ? 1 : 2;
     const int it = (dir == 0) ? 2 : 1;
@@ -73,7 +73,7 @@ struct HookedEuler : adc::Euler {
     const Real a2 = dr - dp / c2;
     const Real a3 = rho * dut;
     const Real a5 = (dp + rho * c * dun) / (Real(2) * c2);
-    const Real eps = adc::kRoeEntropyFixFraction * c;
+    const Real eps = pops::kRoeEntropyFixFraction * c;
     auto absfix = [eps](Real l) {
       const Real al = l < 0 ? -l : l;
       return al < eps ? Real(0.5) * (l * l / eps + eps) : al;
@@ -95,12 +95,12 @@ struct HookedEuler : adc::Euler {
 // Etat etoile : rho* = rho (s - un)/(s - s*) ; m_n* = rho* s* ; m_t* = rho* u_t.
 // ---------------------------------------------------------------------------------------------
 struct IsoHLLC {
-  using State = adc::StateVec<3>;
-  using Aux = adc::Aux;
+  using State = pops::StateVec<3>;
+  using Aux = pops::Aux;
   static constexpr int n_vars = 3;
   Real cs2 = 0.5;
 
-  ADC_HD State flux(const State& u, const Aux&, int dir) const {
+  POPS_HD State flux(const State& u, const Aux&, int dir) const {
     const int in = (dir == 0) ? 1 : 2;
     const int it = (dir == 0) ? 2 : 1;
     const Real un = u[in] / u[0];
@@ -110,22 +110,22 @@ struct IsoHLLC {
     F[it] = u[it] * un;
     return F;
   }
-  ADC_HD Real max_wave_speed(const State& u, const Aux&, int dir) const {
+  POPS_HD Real max_wave_speed(const State& u, const Aux&, int dir) const {
     const int in = (dir == 0) ? 1 : 2;
     const Real un = u[in] / u[0];
     const Real c = std::sqrt(cs2);
     const Real a = un < 0 ? -un : un;
     return a + c;
   }
-  ADC_HD void wave_speeds(const State& u, const Aux&, int dir, Real& smin, Real& smax) const {
+  POPS_HD void wave_speeds(const State& u, const Aux&, int dir, Real& smin, Real& smax) const {
     const int in = (dir == 0) ? 1 : 2;
     const Real un = u[in] / u[0];
     const Real c = std::sqrt(cs2);
     smin = un - c;
     smax = un + c;
   }
-  ADC_HD Real pressure(const State& u) const { return cs2 * u[0]; }
-  ADC_HD Real contact_speed(const State& UL, const State& UR, Real pL, Real pR, Real sL, Real sR,
+  POPS_HD Real pressure(const State& u) const { return cs2 * u[0]; }
+  POPS_HD Real contact_speed(const State& UL, const State& UR, Real pL, Real pR, Real sL, Real sR,
                             int dir) const {
     const int in = (dir == 0) ? 1 : 2;
     const Real rL = UL[0], rR = UR[0];
@@ -133,7 +133,7 @@ struct IsoHLLC {
     return (pR - pL + rL * unL * (sL - unL) - rR * unR * (sR - unR)) /
            (rL * (sL - unL) - rR * (sR - unR));
   }
-  ADC_HD State hllc_star_state(const State& U, Real /*p*/, Real s, Real sStar, int dir) const {
+  POPS_HD State hllc_star_state(const State& U, Real /*p*/, Real s, Real sStar, int dir) const {
     const int in = (dir == 0) ? 1 : 2;
     const int it = (dir == 0) ? 2 : 1;
     const Real r = U[0];
@@ -147,8 +147,8 @@ struct IsoHLLC {
   }
 };
 
-using State4 = adc::StateVec<4>;
-using State3 = adc::StateVec<3>;
+using State4 = pops::StateVec<4>;
+using State3 = pops::StateVec<3>;
 
 static State4 cons(double rho, double u, double v, double p, double gamma) {
   State4 U{};
@@ -160,7 +160,7 @@ static State4 cons(double rho, double u, double v, double p, double gamma) {
 }
 
 template <int N>
-static double maxdiff(const adc::StateVec<N>& a, const adc::StateVec<N>& b) {
+static double maxdiff(const pops::StateVec<N>& a, const pops::StateVec<N>& b) {
   double m = 0;
   for (int c = 0; c < N; ++c)
     m = std::fmax(m, std::fabs(a[c] - b[c]));
@@ -169,23 +169,23 @@ static double maxdiff(const adc::StateVec<N>& a, const adc::StateVec<N>& b) {
 
 int main() {
   // (1) DETECTION compile-time des capabilities.
-  static_assert(!adc::HasHLLCStructure<adc::Euler>,
+  static_assert(!pops::HasHLLCStructure<pops::Euler>,
                 "Euler sans hooks ne doit PAS satisfaire HasHLLCStructure (chemin canonique)");
-  static_assert(!adc::HasRoeDissipation<adc::Euler>,
+  static_assert(!pops::HasRoeDissipation<pops::Euler>,
                 "Euler sans hooks ne doit PAS satisfaire HasRoeDissipation (chemin canonique)");
-  static_assert(adc::HasHLLCStructure<HookedEuler>, "HookedEuler doit satisfaire HasHLLCStructure");
-  static_assert(adc::HasRoeDissipation<HookedEuler>,
+  static_assert(pops::HasHLLCStructure<HookedEuler>, "HookedEuler doit satisfaire HasHLLCStructure");
+  static_assert(pops::HasRoeDissipation<HookedEuler>,
                 "HookedEuler doit satisfaire HasRoeDissipation");
-  static_assert(adc::HasHLLCStructure<IsoHLLC>, "IsoHLLC doit satisfaire HasHLLCStructure");
+  static_assert(pops::HasHLLCStructure<IsoHLLC>, "IsoHLLC doit satisfaire HasHLLCStructure");
   std::printf("OK  detection des capabilities (Euler canonique, Hooked/Iso capability)\n");
 
-  adc::Euler e;
+  pops::Euler e;
   e.gamma = 1.4;
   HookedEuler he;
   he.gamma = 1.4;
-  adc::HLLCFlux hllc;
-  adc::RoeFlux roe;
-  adc::HLLFlux hll;
+  pops::HLLCFlux hllc;
+  pops::RoeFlux roe;
+  pops::HLLFlux hll;
   Aux a{};
 
   // (2) EQUIVALENCE chemin generique == chemin canonique (memes formules fournies en hooks).

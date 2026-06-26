@@ -2,7 +2,7 @@
 
 Pendant de test_dsl_aot_bz pour le 2e champ aux extra T_e, DERIVE de p/rho d'un bloc fluide. Un
 modele DSL lisant aux('T_e') -> brique GenSrc n_aux=5 -> CompositeModel::n_aux=5 -> .so AOT
-(compile_aot) charge par add_compiled_block : le .so expose adc_compiled_naux()=5, le System elargit
+(compile_aot) charge par add_compiled_block : le .so expose pops_compiled_naux()=5, le System elargit
 le canal aux partage (ensure_aux_width(5)) et marshale 5 composantes vers l'ABI extern "C" (load_aux<5>
 lit a.T_e). Un bloc fluide COMPRESSIBLE fournit T = p/rho via set_electron_temperature_from. On
 verifie de bout en bout cote Python : eval_rhs du bloc compile = source = T_e * n.
@@ -13,8 +13,8 @@ import tempfile
 
 import numpy as np
 
-import adc
-from adc import dsl
+import pops
+from pops import dsl
 
 INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "include"))
 
@@ -35,9 +35,9 @@ def build_te_scalar():
 
 def gas_model(gamma):
     """Bloc fluide compressible source de T_e (T = p/rho) ; pas de contribution au Poisson."""
-    return adc.Model(state=adc.FluidState("compressible", gamma=gamma),
-                     transport=adc.CompressibleFlux(), source=adc.NoSource(),
-                     elliptic=adc.ChargeDensity(charge=0.0))
+    return pops.Model(state=pops.FluidState("compressible", gamma=gamma),
+                     transport=pops.CompressibleFlux(), source=pops.NoSource(),
+                     elliptic=pops.ChargeDensity(charge=0.0))
 
 
 def main():
@@ -55,10 +55,10 @@ def main():
     try:
         so = m.compile_or_jit(os.path.join(tmp, "tescalar_aot.so"), INCLUDE, mode="compile")
 
-        sim = adc.System(n=n, L=L, periodic=True)
+        sim = pops.System(n=n, L=L, periodic=True)
         sim.add_block("gas", model=gas_model(gamma),
-                      spatial=adc.Spatial(flux="rusanov"), time=adc.Explicit())
-        # add_compiled_block : adc_compiled_naux()=5 -> ensure_aux_width(5)
+                      spatial=pops.Spatial(flux="rusanov"), time=pops.Explicit())
+        # add_compiled_block : pops_compiled_naux()=5 -> ensure_aux_width(5)
         sim.add_compiled_block("probe", so, limiter="none", riemann="rusanov",
                                recon="conservative", time="explicit", names=["n"])
         sim.set_poisson(rhs="charge_density", solver="geometric_mg")

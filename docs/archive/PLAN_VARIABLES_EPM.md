@@ -24,7 +24,7 @@ second correction is to **not hard-code Poisson** but to make it an instance of 
   always conservative. Choice carried by a RUNTIME flag `recon_prim` (no template explosion),
   conservative fallback if the model does not expose the conversions.
 - Exposed: `add_block(..., recon="conservative"|"primitive", ...)`; Python
-  `adc.Spatial(recon="primitive")` or `Spatial(primitive=True)`. AMR rejects the primitive
+  `pops.Spatial(recon="primitive")` or `Spatial(primitive=True)`. AMR rejects the primitive
   cleanly (the AMR cases use NoSlope, or prim == cons).
 - Tests: `tests/test_primitive_recon.cpp` (round-trip + concept) + Python test (Euler recon
   cons vs prim: mass conserved ~1e-15 in both, positivity, finite).
@@ -44,12 +44,12 @@ second correction is to **not hard-code Poisson** but to make it an instance of 
   electric_field_from_potential); Poisson = instance; set_poisson shortcut; eps!=1 and alternative
   operators rejected (refinements). Pure Python on top of the existing solver.
 - #55/#56/#59: system recipes models.two_fluid / models.plasma; coupling objects
-  (adc.Ionization / Collision / ThermalExchange) + sim.add_coupling; variable descriptor
+  (pops.Ionization / Collision / ThermalExchange) + sim.add_coupling; variable descriptor
   (sim.variable_names cons/prim per block, introspection).
 - Refinements (done): `HyperbolicModel` concept (Vars + conversions + flux + wave speeds,
   Variables REQUIRED); `Euler` split into a PURE hyperbolic brick (without source or elliptic_rhs);
   `CompositeModel<Hyperbolic, Source, Elliptic>` (ex-Transport) with static_assert(HyperbolicModel);
-  `Variables` descriptor (core/variables.hpp) carried by the hyperbolic; adc.PythonFlux (host
+  `Variables` descriptor (core/variables.hpp) carried by the hyperbolic; pops.PythonFlux (host
   prototyping backend, Rusanov numpy residual, outside Kokkos/GPU).
 - Verified: test_bindings (bricks + frozen + 3 couplings + EPM + introspection + safeguards),
   two_euler and plasma cases, core ctest 46/46 unchanged.
@@ -178,7 +178,7 @@ sim.add_elliptic_model(
         rhs=models.charge_density(species={"ne": -1.0}, background=n_i0),
         output=models.electric_field_from_potential(),   # E = -grad phi
     ),
-    solver=adc.EllipticSolver("geometric_mg"),
+    solver=pops.EllipticSolver("geometric_mg"),
 )
 ```
 `div_eps_grad`, `charge_density`, `electric_field_from_potential` are BRICKS, not
@@ -315,14 +315,14 @@ not only the ideal gas.
 
 ### Diocotron case, target with explicit EPM
 ```python
-sim = adc.AmrSystem(n=n, L=L, regrid_every=10, periodic=True)
+sim = pops.AmrSystem(n=n, L=L, regrid_every=10, periodic=True)
 sim.add_block("ne", model=models.diocotron(B0=1.0, alpha=1.0),
-              spatial=adc.Spatial(none=True, flux="rusanov"))
+              spatial=pops.Spatial(none=True, flux="rusanov"))
 sim.add_elliptic_model("phi", model=models.elliptic(
     unknown="phi", operator=models.div_eps_grad(epsilon=1.0),
     rhs=models.charge_density(species={"ne": -1.0}, background=n_i0),
     output=models.electric_field_from_potential()),
-    solver=adc.EllipticSolver("geometric_mg"))
+    solver=pops.EllipticSolver("geometric_mg"))
 ```
 
 ---
@@ -333,7 +333,7 @@ Design converged with the user. The model INTERFACE stays the same everywhere: `
 (+ EPM for the elliptic). All the numerics (reconstruction, numerical flux NF, assembler) consume
 ONLY this interface. Behind the `Flux` interface, two interchangeable implementations:
 
-- **CompiledFlux** (default, PRODUCTION): compiled C++ bricks `ADC_HD` (CompressibleFlux=Euler,
+- **CompiledFlux** (default, PRODUCTION): compiled C++ bricks `POPS_HD` (CompressibleFlux=Euler,
   IsothermalFlux, ExBVelocity...). Fast, compatible with Kokkos / GPU / MPI. They live in adc_cpp as
   generic operators (on the same footing as Rusanov or the limiters). This is the production path.
 - **PythonFlux** (PROTOTYPING): a function supplied from Python / adc_cases (vectorized numpy:
@@ -341,7 +341,7 @@ ONLY this interface. Behind the `Flux` interface, two interchangeable implementa
   a novel flux without recompiling. GOLDEN RULE: must NEVER be used in a Kokkos / GPU kernel
   (safeguard: if Kokkos/GPU backend active -> clear error).
 
-On the Python side, `adc.Model(...)` can therefore EITHER select a compiled brick (`adc.CompressibleFlux()`),
+On the Python side, `pops.Model(...)` can therefore EITHER select a compiled brick (`pops.CompressibleFlux()`),
 OR supply a prototype function (PythonFlux). Same interface, same assembler; only the flux backend
 changes. Performance imposes CompiledFlux; PythonFlux is for iterating fast, outside the GPU/MPI hot path.
 
@@ -351,7 +351,7 @@ adc_cpp / adc_cases boundary:
 - adc_cases: SCENARIOS = Python compositions (diocotron, two-fluid, plasma...) + possible prototyping
   PythonFlux. The scenario NAMES live here.
 
-The `custom_scheme` pattern (task #40) is the ancestor of PythonFlux; DONE (#62): `adc.PythonFlux`
+The `custom_scheme` pattern (task #40) is the ancestor of PythonFlux; DONE (#62): `pops.PythonFlux`
 (flux + max_wave_speed in numpy, finite-volume Rusanov residual on the HOST side) formalizes this
 prototyping backend, OUTSIDE Kokkos/GPU (pure host path, never in a kernel). The named fluxes
 (Euler/isothermal/ExB) are NOT moved out of adc_cpp: they are the CompiledFlux (production).

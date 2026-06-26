@@ -1,4 +1,4 @@
-"""Spec 2 (S2-11 / ADC-447): a pure adc.model.Module compiles via the dsl codegen engine.
+"""Spec 2 (S2-11 / ADC-447): a pure pops.model.Module compiles via the dsl codegen engine.
 
 A Module authored directly -- typed spaces + operators with IR (dsl.Expr) bodies + eigenvalues --
 is a self-contained, compilable model. ``Module.to_dsl`` lowers it to a dsl.Model (reusing the dsl
@@ -9,8 +9,8 @@ is on ROMEO. Pure Python; skips if adc is not importable.
 import sys
 
 try:
-    from adc import dsl, model
-    from adc import time as adctime
+    from pops import dsl, model
+    from pops import time as adctime
 except Exception as exc:  # adc not importable here -> skip, never fake
     print("skip test_module_compile (adc unavailable: %s)" % exc)
     sys.exit(0)
@@ -68,9 +68,9 @@ def test_pure_module_program_emits():
         explicit_rate_operator="explicit_rhs", implicit_operator="lorentz")
     # compile_problem(model=Module) lowers the Module internally; emit the .so source (no compile).
     src = P.emit_cpp_program(model=mod.to_dsl())
-    assert "adc_install_program" in src
+    assert "pops_install_program" in src
     # the GeneratedModule descriptor reflects the pure Module's operators
-    assert "adc_module_operator_count() { return" in src
+    assert "pops_module_operator_count() { return" in src
     for op in ("electric", "lorentz", "fields_from_state", "explicit_rhs"):
         assert '"%s"' % op in src, op
     print("OK  a pure operator-first Module + generic macro emits a combined .so source")

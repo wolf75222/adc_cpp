@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""adc.time control flow + reductions codegen (epic ADC-399 / ADC-404a).
+"""pops.time control flow + reductions codegen (epic ADC-399 / ADC-404a).
 
 `emit_cpp_program` now lowers a CONVERGENCE LOOP: scalar reductions (``P.norm2`` / ``P.dot`` ->
-``adc::dot`` collective all_reduce), scalar comparisons (``P.norm2(diff) > tol`` -> a Bool value), and
+``pops::dot`` collective all_reduce), scalar comparisons (``P.norm2(diff) > tol`` -> a Bool value), and
 ``P.while_(state, cond_fn, body_fn)`` (an infinite C++ loop with a break that RE-EVALUATES the
 condition each pass, mutating the loop-variable state in place). The cond / body ops are recorded in a
 SEPARATE sub-block (a recording scope), not the flat SSA list, so the body re-runs each iteration.
 
-(A) Codegen (pure Python, always runs): a Program with a while_ loop lowers to ``adc::dot`` +
+(A) Codegen (pure Python, always runs): a Program with a while_ loop lowers to ``pops::dot`` +
     ``std::sqrt`` (norm2), ``for (;;)`` + ``if (!(`` + ``break;`` (the loop), and the scalar / bool
     value types + the loud Python guards (a Scalar/Bool must not silently collapse to a Python bool /
     index).
@@ -15,7 +15,7 @@ SEPARATE sub-block (a recording scope), not the flat SSA list, so the body re-ru
 (B) End-to-end parity (skips unless the full toolchain is present): a convergent fixed-point iteration
     x <- x + omega*(target - x) (omega = 0.5) looping while ``norm2(target - x) > tol``; compile_problem
     -> problem.so, install_program, step once, and compare the final state to the OFFLINE geometric
-    reference x_k = target + (1-omega)^k (x0 - target). Self-skips without numpy / _adc / a compiler /
+    reference x_k = target + (1-omega)^k (x0 - target). Self-skips without numpy / _pops / a compiler /
     Kokkos / install_program (never faking the engine).
 """
 import sys
@@ -23,9 +23,9 @@ import sys
 
 def _adc_time():
     try:
-        import adc.time as t
+        import pops.time as t
     except Exception as exc:  # adc not importable here -> skip, never fake
-        print("skip test_time_control_flow (adc.time unavailable: %s)" % exc)
+        print("skip test_time_control_flow (pops.time unavailable: %s)" % exc)
         sys.exit(0)
     return t
 
@@ -125,7 +125,7 @@ def test_state_bool_still_loud(t):
 def test_while_codegen(t):
     P = _convergence_program(t)
     src = P.emit_cpp_program()
-    for frag in ("adc::dot", "std::sqrt", "for (;;)", "if (!(", "break;"):
+    for frag in ("pops::dot", "std::sqrt", "for (;;)", "if (!(", "break;"):
         assert frag in src, "the generated while loop must contain %r\n%s" % (frag, src)
 
 
@@ -140,18 +140,18 @@ def _run_section_b(t):
     try:
         import numpy as np
 
-        import adc
-    except Exception as exc:  # noqa: BLE001  -- numpy / _adc unavailable in this interpreter
+        import pops
+    except Exception as exc:  # noqa: BLE001  -- numpy / _pops unavailable in this interpreter
         print("-- (B) skipped: adc/numpy unavailable: %s --" % exc)
         return None
 
     n = 8
-    sim = adc.System(n=n, L=1.0, periodic=True)
+    sim = pops.System(n=n, L=1.0, periodic=True)
     if not hasattr(sim, "install_program"):
-        print("-- (B) skipped: _adc lacks the install_program binding (rebuild _adc) --")
+        print("-- (B) skipped: _pops lacks the install_program binding (rebuild _pops) --")
         return None
 
-    from adc import dsl
+    from pops import dsl
 
     # A minimal 1-variable model with NO Poisson coupling: solve_fields is inert and the while body
     # needs no fields. A complete compilable block (flux + primitive + eigenvalue).
@@ -167,7 +167,7 @@ def _run_section_b(t):
 
     omega, tol = 0.5, 1e-10
     try:
-        compiled = adc.compile_problem(
+        compiled = pops.compile_problem(
             model=passive_model("cflow_prog"),
             time=_convergence_program(t, name="cflow_step", omega=omega, tol=tol))
     except RuntimeError as exc:  # no compiler / no Kokkos visible / .so compile failed
@@ -182,8 +182,8 @@ def _run_section_b(t):
         print("-- (B) skipped: model compile could not build the .so: %s --" % str(exc)[:160])
         return None
     sim.add_equation("blk", compiled_model,
-                     spatial=adc.FiniteVolume(limiter="none", riemann="rusanov"),
-                     time=adc.Explicit(method="euler"))
+                     spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                     time=pops.Explicit(method="euler"))
     x = (np.arange(n) + 0.5) / n
     X, Y = np.meshgrid(x, x, indexing="ij")
     rho0 = 1.0 + 0.3 * np.sin(2 * np.pi * X) * np.cos(2 * np.pi * Y)

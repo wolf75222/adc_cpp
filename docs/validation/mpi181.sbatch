@@ -28,7 +28,7 @@ romeo_load_armgpu_env
 spack load openmpi +cuda
 echo "noeud=$(hostname) arch=$(uname -m)"
 nvidia-smi --query-gpu=name --format=csv,noheader | head -2
-BIN="$HOME/adc_gpu_p1/gpuval2_mpi_build/gpu_amr_bz_mpi_validate"
+BIN="$HOME/pops_gpu_p1/gpuval2_mpi_build/gpu_amr_bz_mpi_validate"
 test -x "$BIN" || { echo "BIN introuvable: $BIN"; exit 2; }
 OUT="/scratch_p/$USER/adc181/mpi_out.txt"
 mkdir -p "$(dirname "$OUT")"; : > "$OUT"

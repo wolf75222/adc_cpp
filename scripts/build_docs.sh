@@ -38,12 +38,12 @@ fi
 echo "--- 1/5 lint documentaire (docs/check_docs.py) ---"
 python docs/check_docs.py
 
-# Le module _adc doit etre importable par autodoc (sphinx -W echoue sinon). On reutilise un
+# Le module _pops doit etre importable par autodoc (sphinx -W echoue sinon). On reutilise un
 # build existant, sinon on construit le minimum (preset python = build-py).
-echo "--- 2/5 module Python _adc (autodoc) ---"
+echo "--- 2/5 module Python _pops (autodoc) ---"
 PYMOD=""
 for d in build-py build-py-kokkos build; do
-  if ls "$d"/python/adc/_adc.*.so >/dev/null 2>&1; then PYMOD="$PWD/$d/python"; break; fi
+  if ls "$d"/python/pops/_pops.*.so >/dev/null 2>&1; then PYMOD="$PWD/$d/python"; break; fi
 done
 if [ -z "$PYMOD" ]; then
   # preset `python` si l'env conda est actif (pin interpreteur de l'env), sinon `ci-python`
@@ -51,7 +51,7 @@ if [ -z "$PYMOD" ]; then
   PRESET=python
   [ -z "${CONDA_PREFIX:-}" ] && PRESET=ci-python
   echo "    (aucun build existant : cmake --preset $PRESET)"
-  # CMAKE_POSITION_INDEPENDENT_CODE=ON : le module _adc est une extension partagee qui lie Kokkos
+  # CMAKE_POSITION_INDEPENDENT_CODE=ON : le module _pops est une extension partagee qui lie Kokkos
   # en statique ; le Kokkos recupere par FetchContent (preset ci-python) doit donc etre compile
   # -fPIC, sinon le link de la .so echoue (relocations R_X86_64_PC32 / TPOFF32 contre les symboles
   # Kokkos). ci.yml fait l'equivalent en buildant Kokkos PIC a part (cle de cache "...-pic").
@@ -63,8 +63,8 @@ echo "    module : $PYMOD"
 
 # Single source of the version (docs/VERSIONING.md): project(VERSION) in CMakeLists.txt,
 # injected into Doxygen (PROJECT_NUMBER) below; conf.py reads the same value for Sphinx.
-ADC_DOCS_VERSION="$(grep -E '^[[:space:]]*VERSION[[:space:]]+[0-9]+\.[0-9]+\.[0-9]+' CMakeLists.txt | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
-echo "    version: ${ADC_DOCS_VERSION:-(unknown)}"
+POPS_DOCS_VERSION="$(grep -E '^[[:space:]]*VERSION[[:space:]]+[0-9]+\.[0-9]+\.[0-9]+' CMakeLists.txt | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)"
+echo "    version: ${POPS_DOCS_VERSION:-(unknown)}"
 
 if [ "$ONLY_SPHINX" != "--sphinx" ]; then
   echo "--- 3/5 reference C++ embarquee (doxygen + doxysphinx) ---"
@@ -80,7 +80,7 @@ if [ "$ONLY_SPHINX" != "--sphinx" ]; then
   # Le site Doxygen autonome /cpp/ (etape 5/5) garde le theme : il possede toute sa page.
   rm -rf docs/sphinx/doxygen
   ( cat docs/Doxyfile
-    echo "PROJECT_NUMBER=$ADC_DOCS_VERSION"
+    echo "PROJECT_NUMBER=$POPS_DOCS_VERSION"
     echo "OUTPUT_DIRECTORY=docs/sphinx"
     echo "HTML_OUTPUT=doxygen"
     echo "HTML_EXTRA_STYLESHEET="
@@ -107,7 +107,7 @@ fi
 
 echo "--- 5/5 Doxygen + site combine ---"
 mkdir -p docs/_build
-( cat docs/Doxyfile; echo "PROJECT_NUMBER=$ADC_DOCS_VERSION" ) | doxygen -
+( cat docs/Doxyfile; echo "PROJECT_NUMBER=$POPS_DOCS_VERSION" ) | doxygen -
 # Doxygen rend le README avec <img src="docs/..."> mais ne copie pas les images.
 mkdir -p docs/_build/doxygen/html/docs
 cp docs/*.png docs/*.gif docs/_build/doxygen/html/docs/ 2>/dev/null || true

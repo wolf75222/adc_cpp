@@ -1,6 +1,6 @@
 """Named physical-model sources: m.source_term and m.linear_source (ADC-400, Phase 1).
 
-Pure Python (adc.dsl); no compilation. Covers the spec "Extension de adc.dsl.Model" tests 1-8
+Pure Python (pops.dsl); no compilation. Covers the spec "Extension de pops.dsl.Model" tests 1-8
 plus the cache-key contract:
 
   - source_term / linear_source declaration + validation (dimensions, names, collisions);
@@ -16,7 +16,7 @@ Run with python3 (PYTHONPATH = built adc package).
 """
 import numpy as np
 
-from adc import dsl
+from pops import dsl
 
 # Golden hashes computed on master BEFORE this feature (build() / build(with_source=False)
 # below). The feature must NOT perturb the cache key of a model that uses only m.source(...).

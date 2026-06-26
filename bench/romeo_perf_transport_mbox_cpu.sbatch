@@ -7,19 +7,19 @@
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=64G
 #SBATCH --time=00:45:00
-#SBATCH --job-name=adc_perf_mbox_cpu
-#SBATCH --output=/home/rmdraux/adc_perf_20260608/logs/transport_mbox_cpu_%j.out
-#SBATCH --error=/home/rmdraux/adc_perf_20260608/logs/transport_mbox_cpu_%j.err
+#SBATCH --job-name=pops_perf_mbox_cpu
+#SBATCH --output=/home/rmdraux/pops_perf_20260608/logs/transport_mbox_cpu_%j.out
+#SBATCH --error=/home/rmdraux/pops_perf_20260608/logs/transport_mbox_cpu_%j.err
 
 set -u
 
-BASE="$HOME/adc_perf_20260608"
+BASE="$HOME/pops_perf_20260608"
 SRC="$BASE/adc_cpp"
 RESULTS="$BASE/results"
 LOGS="$BASE/logs"
-SCRIPT_DIR="${ADC_PERF_SCRIPT_DIR:-$BASE/scripts}"
-TARGET_COMMIT="${ADC_CPP_TARGET_COMMIT:-origin/master}"
-KROOT="${ADC_KOKKOS_CPU_ROOT:-$HOME/adc_cpu_mpiomp/kinstall_omp}"
+SCRIPT_DIR="${POPS_PERF_SCRIPT_DIR:-$BASE/scripts}"
+TARGET_COMMIT="${POPS_CPP_TARGET_COMMIT:-origin/master}"
+KROOT="${POPS_KOKKOS_CPU_ROOT:-$HOME/pops_cpu_mpiomp/kinstall_omp}"
 
 mkdir -p "$RESULTS" "$LOGS"
 
@@ -55,8 +55,8 @@ if [ ! -d "$SRC/.git" ]; then
 fi
 git -C "$SRC" fetch origin --prune
 git -C "$SRC" checkout --detach "$TARGET_COMMIT"
-ADC_CPP_COMMIT="$(git -C "$SRC" rev-parse --short HEAD)"
-echo "ADC_CPP_COMMIT=$ADC_CPP_COMMIT"
+POPS_CPP_COMMIT="$(git -C "$SRC" rev-parse --short HEAD)"
+echo "POPS_CPP_COMMIT=$POPS_CPP_COMMIT"
 
 if [ -f "$SCRIPT_DIR/profile_transport_mbox.cpp" ]; then
   cp "$SCRIPT_DIR/profile_transport_mbox.cpp" "$SRC/bench/profile_transport_mbox.cpp"
@@ -65,7 +65,7 @@ if ! grep -q "profile_transport_mbox" "$SRC/bench/CMakeLists.txt"; then
   {
     echo ""
     echo "add_executable(profile_transport_mbox profile_transport_mbox.cpp)"
-    echo "target_link_libraries(profile_transport_mbox PRIVATE adc::adc)"
+    echo "target_link_libraries(profile_transport_mbox PRIVATE pops::pops)"
   } >> "$SRC/bench/CMakeLists.txt"
 fi
 
@@ -79,21 +79,21 @@ if [ ! -f "$KROOT/lib64/cmake/Kokkos/KokkosConfig.cmake" ] && [ ! -f "$KROOT/lib
   exit 2
 fi
 
-STEPS="${ADC_TRANSPORT_STEPS:-24}"
-WARMUP="${ADC_TRANSPORT_WARMUP:-5}"
-LIMITER="${ADC_TRANSPORT_LIMITER:-minmod}"
-MAX_GRID="${ADC_TRANSPORT_MAX_GRID:-128}"
-N_STRONG="${ADC_TRANSPORT_N_STRONG:-1024}"
-N_WEAK_ROOT="${ADC_TRANSPORT_N_WEAK_ROOT:-384}"
+STEPS="${POPS_TRANSPORT_STEPS:-24}"
+WARMUP="${POPS_TRANSPORT_WARMUP:-5}"
+LIMITER="${POPS_TRANSPORT_LIMITER:-minmod}"
+MAX_GRID="${POPS_TRANSPORT_MAX_GRID:-128}"
+N_STRONG="${POPS_TRANSPORT_N_STRONG:-1024}"
+N_WEAK_ROOT="${POPS_TRANSPORT_N_WEAK_ROOT:-384}"
 
-PHASE_CSV="$RESULTS/perf_phases_transport_mbox_cpu_${ADC_CPP_COMMIT}_${SLURM_JOBID}.csv"
-SCALING_CSV="$RESULTS/perf_scaling_transport_mbox_cpu_${ADC_CPP_COMMIT}_${SLURM_JOBID}.csv"
+PHASE_CSV="$RESULTS/perf_phases_transport_mbox_cpu_${POPS_CPP_COMMIT}_${SLURM_JOBID}.csv"
+SCALING_CSV="$RESULTS/perf_scaling_transport_mbox_cpu_${POPS_CPP_COMMIT}_${SLURM_JOBID}.csv"
 printf "commit,case,backend,np,threads,n,steps,phase,total_s,per_step_ms,pct\n" > "$PHASE_CSV"
 printf "commit,repo,case,scaling,backend,machine,np,threads,gpus,n_global,n_local,steps,warmup,wall_s,per_step_ms,speedup,efficiency,notes\n" > "$SCALING_CSV"
 
 parse_transport_log () {
   local log="$1" case="$2" scaling="$3" backend="$4" np="$5" threads="$6" n="$7" nlocal="$8" notes="$9"
-  python3 - "$log" "$PHASE_CSV" "$SCALING_CSV" "$ADC_CPP_COMMIT" "$case" "$scaling" "$backend" "$np" "$threads" "$n" "$nlocal" "$STEPS" "$WARMUP" "$notes" <<'PY'
+  python3 - "$log" "$PHASE_CSV" "$SCALING_CSV" "$POPS_CPP_COMMIT" "$case" "$scaling" "$backend" "$np" "$threads" "$n" "$nlocal" "$STEPS" "$WARMUP" "$notes" <<'PY'
 import csv, re, sys
 log, phase_csv, scaling_csv, commit, case, scaling, backend, np, threads, n, nlocal, steps, warmup, notes = sys.argv[1:]
 phase_re = re.compile(r"^([A-Za-z_]+)\s+([-\d.eE+]+)\s+([-\d.eE+]+)\s+([-\d.eE+]+)%")

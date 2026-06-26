@@ -30,7 +30,7 @@ silent changes).
 
 - The path stays EXACTLY ForwardEuler(transport without source) + LOCAL backward-Euler on the
   source (per-cell Newton). The documentation (IMEX/SourceImplicit) now NAMES it
-  explicitly and denies the IMEX-RK family; alias `adc.SourceImplicitBE = adc.SourceImplicit`.
+  explicitly and denies the IMEX-RK family; alias `pops.SourceImplicitBE = pops.SourceImplicit`.
 - `NewtonOptions {max_iters, rel_tol, abs_tol, fd_eps}` (implicit_stepper.hpp): defaults = the
   historical constants (2 / 0 / 0 / 1e-7) -> path (2a) bit-identical, ZERO cost. Active tolerances
   -> instrumented path (per-cell stop on ||F||_inf <= abs_tol + rel_tol*||F0||_inf,
@@ -39,7 +39,7 @@ silent changes).
   `sim.newton_report(block)` = {enabled, converged, max_residual, max_iters_used, n_failed}, aggregated
   over the substeps of the last advance. The offending cell (i, j) is NOT located (an
   arg-max device reduction would be a separate work item; the report gives the worst residual and the count).
-- Plumbing: adc.IMEX / adc.SourceImplicit (kwargs newton_*) -> System::add_block -> build_block ->
+- Plumbing: pops.IMEX / pops.SourceImplicit (kwargs newton_*) -> System::add_block -> build_block ->
   AdvanceImex*. Non-default options OUTSIDE imex or on a .so backend (ABI not carried) -> explicit
   rejection, never a silent ignore.
 
@@ -52,7 +52,7 @@ silent changes).
 - `hll` (generic with signed waves, requires wave_speeds) is now also routed by the AMR
   (dispatch_amr_block + dispatch_amr_compiled, same requires-gate as System) and documented everywhere
   (Spatial / FiniteVolume / system.hpp / Sphinx). Visible test:
-  `adc.FiniteVolume(limiter="minmod", riemann="hll", variables="primitive")` on the isothermal 3-var
+  `pops.FiniteVolume(limiter="minmod", riemann="hll", variables="primitive")` on the isothermal 3-var
   (test_fv_hll_minmod, System + AmrSystem + explicit rejections).
 
 ## 4. Named couplings: multi-box/MPI-safe
@@ -64,8 +64,8 @@ silent changes).
 
 ## 5. Magnetic bricks exposed + latent bug fixed
 
-- `adc.MagneticLorentzForce(charge)` and `adc.PotentialMagneticForce(charge)` exposed in
-  adc.Model(...) (C++ factory "magnetic"/"potential_magnetic" already ready) and in the hybrid path
+- `pops.MagneticLorentzForce(charge)` and `pops.PotentialMagneticForce(charge)` exposed in
+  pops.Model(...) (C++ factory "magnetic"/"potential_magnetic" already ready) and in the hybrid path
   (_native_to_brick, including CompositeSource via nested fields a.qom/b.qom).
 - **Latent bug fixed**: System::add_block (native path) NEVER called
   `ensure_aux_width(aux_comps<M>())` -- a native model with n_aux=4 (magnetic brick) read B_z
@@ -85,7 +85,7 @@ silent changes).
 - `kCflSpeedFloor` (1e-30, types.hpp), `kRoeEntropyFixFraction` (0.1, numerical_flux.hpp),
   `NewtonOptions.fd_eps` (1e-7), IMEX iters -> `NewtonOptions.max_iters`,
   Schur tolerances: `set_krylov(tol, max_iters)` on the cartesian (1e-10/400)
-  and polar (1e-10/600) condensed steppers, exposed via `adc.CondensedSchur(krylov_tol=, krylov_max_iters=)`.
+  and polar (1e-10/600) condensed steppers, exposed via `pops.CondensedSchur(krylov_tol=, krylov_max_iters=)`.
 
 ## 8. Outputs / checkpoint
 
@@ -121,12 +121,12 @@ WIRES them (the rejection stays only where the architecture is not ready, and it
 5. **Schur roles in the ABI**: set_source_stage carries density/momentum_x/momentum_y/energy
    (stable role name OR variable name) + bz_aux_component; the cartesian stepper gains an
    explicit-component constructor (the canonical ctor DELEGATES to it, bit-identical);
-   adc.CondensedSchur(density=..., momentum=(...), magnetic_field=...) forwards instead of
+   pops.CondensedSchur(density=..., momentum=(...), magnetic_field=...) forwards instead of
    rejecting. Defaults = canonical roles, bit-identical.
 6. **IO v1**: sim.write(path, format='vtk'|'npz', step=), sim.checkpoint / sim.restart (npz,
    atomic write); bindings macro_step() / set_clock() / set_potential() -- the restart is
    BIT-IDENTICAL (including stride cadence via macro_step, and MG warm start via restored phi).
-7. **adc.capabilities()**: single truth matrix (riemann x facade, time, stability_policy,
+7. **pops.capabilities()**: single truth matrix (riemann x facade, time, stability_policy,
    poisson, schur, DSL backends, io); stale docstrings corrected (PolarMesh, polar Schur
    stage "does not plug in", Phase 3c perimeter of the AMR Schur, CondensedSchur "mono-rank").
 
@@ -201,7 +201,7 @@ still missing.
 Balance of the POLAR (section 3) and IO (section 10) work items of the plan, at an **honest perimeter** (what
 is wired really is; what is not is documented with file:line, never masked).
 
-1. **POLAR HLL wired** (`include/adc/runtime/block_builder_polar.hpp`, `make_block_polar`). The polar
+1. **POLAR HLL wired** (`include/pops/runtime/block_builder_polar.hpp`, `make_block_polar`). The polar
    RHS `assemble_rhs_polar<Limiter, NumericalFlux, Model>` ALREADY carried the numerical flux as a
    TEMPLATE PARAMETER (injection point identical to the cartesian `build_block<Limiter, Flux>`) and
    calls `nflux(model, L, aux_L, R, aux_R, dir)` -- exactly the signature of `HLLFlux`. Wiring
@@ -211,13 +211,13 @@ is wired really is; what is not is documented with file:line, never masked).
    (`IsothermalFluxPolar : IsothermalFlux`) inherits `wave_speeds` -> eligible; the scalar ExB
    (`ExBVelocityPolar`, no `wave_speeds`) -> CLEAR rejection. **Default `rusanov` strictly
    bit-identical** (separate branch, untouched). HLLC/Roe stay rejected (Euler 4-var, no polar energy
-   flux brick). Facade: `adc.PolarMesh` + `adc.FiniteVolume(riemann='hll')`;
-   `adc.capabilities()['riemann']['system_polar'] = ['rusanov', 'hll']`. Test:
+   flux brick). Facade: `pops.PolarMesh` + `pops.FiniteVolume(riemann='hll')`;
+   `pops.capabilities()['riemann']['system_polar'] = ['rusanov', 'hll']`. Test:
    `python/tests/test_polar_hll.py` (rusanov reproducible, hll finite AND distinct from rusanov) +
    `test_polar_rejections.test_polar_rejects_hll_on_scalar_exb`.
 
 2. **Polar theta splitting: EXPOSED (ADC-67, updates the "NOT exposed" decision above).**
-   `adc.PolarMesh(..., theta_boxes=N)` splits the ring into N theta BANDS (each box covers the whole
+   `pops.PolarMesh(..., theta_boxes=N)` splits the ring into N theta BANDS (each box covers the whole
    radius `[0, nr-1]` and an azimuthal band; `theta_boxes` must DIVIDE `ntheta` and stay
    `<= ntheta`). `theta_boxes=1` (default) = mono-box, STRICTLY bit-identical. Plumbing: `system.cpp`
    `Impl::index_boxarray` builds the BoxArray in bands (reuses the `theta_split` decomposition of the test
@@ -239,10 +239,10 @@ is wired really is; what is not is documented with file:line, never masked).
      now drives the splitting on the facade side.
    Mono-rank (the direct Poisson refuses MPI). Tests: `python/tests/test_polar_theta_boxes.py`
    (isothermal transport bit-identical theta_boxes=1/2/4; scalar ExB; divisibility + direct Poisson
-   multi-box rejections; round-trip get/set state multi-box). `adc.capabilities()['geometry']`.
+   multi-box rejections; round-trip get/set state multi-box). `pops.capabilities()['geometry']`.
 
-3. **MULTI-RANK System IO** (`python/bindings/system/base/system.cpp` + `include/adc/runtime/system.hpp` + bindings +
-   `python/adc/__init__.py`). Finding: `copy_state` / `copy_comp0` / `potential` read `fab(0)`
+3. **MULTI-RANK System IO** (`python/bindings/system/base/system.cpp` + `include/pops/runtime/system.hpp` + bindings +
+   `python/pops/__init__.py`). Finding: `copy_state` / `copy_comp0` / `potential` read `fab(0)`
    (valid on the owner rank -- mono-box, box 0 on rank 0 -- but OUT OF BOUNDS on a rank
    without a box). Added: collective GLOBAL accessors `density_global` / `state_global` /
    `potential_global` (global buffer filled at GLOBAL indices from the local fabs, then
@@ -250,7 +250,7 @@ is wired really is; what is not is documented with file:line, never masked).
    write/read marshalings (`write_state` / `set_potential` / `copy_*`) are now
    guarded against `local_size()==0` (no-op / empty instead of UB). Facade: `sim.write` /
    `sim.checkpoint` do the collective gather (all ranks) then write the file only on rank 0
-   (`_adc.my_rank()`/`n_ranks()` exposed); `sim.restart` reads the file (shared FS) and calls
+   (`_pops.my_rank()`/`n_ranks()` exposed); `sim.restart` reads the file (shared FS) and calls
    `set_state` / `set_potential` MPI-safe (rank 0 writes, others no-op) + `set_clock`. **Mono-rank
    bit-identical** (`state_global == get_state`, all_reduce = identity, box = complete domain):
    test `python/tests/test_io_multirank.py`. GUARANTEED SEMANTICS: under MPI np>1, `write`/`checkpoint`
@@ -259,16 +259,16 @@ is wired really is; what is not is documented with file:line, never masked).
    in central; the gather reuses the pattern already validated by `test_krylov_solver_np*` /
    `test_schur_condensation_np*`.)
 
-4. **AMR clock: macro_step() / set_clock()** (`include/adc/runtime/amr_system.hpp` +
+4. **AMR clock: macro_step() / set_clock()** (`include/pops/runtime/amr_system.hpp` +
    `python/bindings/amr/amr_system.cpp` + `amr_runtime.hpp` + `amr_dsl_block.hpp` + bindings). Parity with System:
    `AmrSystem::Impl` carries an AUTHORITATIVE macro-step counter (incremented by step/step_cfl),
    `macro_step()` returns it, `set_clock(t, ms)` restores it AND pushes it to the CADENCE counter of the
    engine (regrid/stride): `AmrRuntime::set_macro_step` (multi-block) OR `set_macro_step` hook of the
-   mono-block coupler (additive at the tail of `AmrCompiledHooks`, abi_key auto-bumped via ADC_HEADER_SIG).
+   mono-block coupler (additive at the tail of `AmrCompiledHooks`, abi_key auto-bumped via POPS_HEADER_SIG).
    Prerequisite PR-IO-3, **useful alone** (stride cadence + clock restart). Test:
    `python/tests/test_amr_clock.py`.
 
-5. **AMR checkpoint: IMPROVED rejection** (`python/adc/__init__.py`). A bit-identical AMR checkpoint is
+5. **AMR checkpoint: IMPROVED rejection** (`python/pops/__init__.py`). A bit-identical AMR checkpoint is
    IMPOSSIBLE with the current ABI; a "coarse only" fallback would be LOSSY (density() = comp0 only, the
    multi-var momentum/energy not readable) AND not bit-identical (set_conservative_state
    seeds the coarse + prolongs, does not restore the fine patches). The `NotImplementedError` rejection is
@@ -295,12 +295,12 @@ is wired really is; what is not is documented with file:line, never masked).
 3. **Polar**: flux **Rusanov AND HLL** (HLL on the isothermal fluid, wired since wave 4, cf. below),
    but **HLLC/Roe stay NOT wired** (assume n_vars==4 Euler with energy, without polar energy flux
    brick -> explicit rejection, make_block_polar). `theta_boxes` IS exposed
-   (`adc.PolarMesh(theta_boxes=N)`, ADC-67, cf. wave 4 sec.2): the polar transport is multi-box when
+   (`pops.PolarMesh(theta_boxes=N)`, ADC-67, cf. wave 4 sec.2): the polar transport is multi-box when
    `theta_boxes > 1` (split BoxArray + DistributionMapping + collective fill_ghosts), and the tensor
    Schur stage is multi-box / multi-rank by azimuthal split. Only the DIRECT polar Poisson stays
    mono-box / mono-rank (upstream reject if `theta_boxes > 1`; use `theta_boxes = 1` or the tensor
    Schur stage). The earlier "lying facade" rationale was reversed by ADC-67.
-4. **Aux**: extensible by CANONICAL LIST (ADC_AUX_FIELDS + AUX_CANONICAL Python mirror: phi/grad/
+4. **Aux**: extensible by CANONICAL LIST (POPS_AUX_FIELDS + AUX_CANONICAL Python mirror: phi/grad/
    B_z/T_e) **AND, since ADC-70 (phase 1), by NAMED field declared by the model**: `m.aux_field("name")`
    reserves a component of the aux channel starting from `kAuxNamedBase = 5` (after T_e), read in C++ via
    `aux.extra_field(k)` (POD array `Real extra[kAuxMaxExtra]`, device-clean; `load_aux<NComp>` loads it
@@ -310,7 +310,7 @@ is wired really is; what is not is documented with file:line, never masked).
    via `set_aux_field_component`). STATIC persistent fields (re-applied after `ensure_aux_width`,
    like B_z); at most `kAuxMaxExtra = 4` per model. B_z / T_e stay on their dedicated paths (explicit
    rejection redirecting in `set_aux_field`). PERIMETER phase 1 = **CARTESIAN System**; the `.so`
-   exports an optional symbol `adc_compiled_aux_extra_names` (self-description). FOLLOW-UP (phase 2): AMR
+   exports an optional symbol `pops_compiled_aux_extra_names` (self-description). FOLLOW-UP (phase 2): AMR
    (aux channel per level + regrid), polar (validation), custom halos per field, and name -> comp table
    on the C++ `System::Impl` side (resolution without the Python facade).
 5. **Native ROLE-AWARE bricks (done)**: source.hpp (PotentialForce / GravityForce /
@@ -323,7 +323,7 @@ is wired really is; what is not is documented with file:line, never masked).
    (wired in polar too, dispatch_model_polar). LIMIT: from the public API the native bricks
    compose only with these CANONICAL transports; a permuted layout meets a native brick
    only via a direct C++ path (blocker: `requires` detection of the binder + role registry).
-6. **IMEX-RK (done, ARS(2,2,2))**: the IMEX-RK family now EXISTS -- `adc.IMEXRK(scheme="ars222")`
+6. **IMEX-RK (done, ARS(2,2,2))**: the IMEX-RK family now EXISTS -- `pops.IMEXRK(scheme="ars222")`
    wires the Ascher-Ruuth-Spiteri (1997) scheme, **order 2** (explicit transport L = -div F coupled to
    the stiff source implicitly by a staged tableau). gamma = 1 - 1/sqrt(2), delta = 1 - 1/(2 gamma);
    stiffly accurate tableaux (b == last row of A) -> U^{n+1} = last stage. On the C++ side:
@@ -333,11 +333,11 @@ is wired really is; what is not is documented with file:line, never masked).
    consistency relation `dt*gamma*S^(2) = U^(2) - base2` (no extra source kernel). PERIMETER =
    **cartesian System**: `time="imexrk_ars222"` is rejected explicitly on AMR, polar, the .so loaders
    (prototype/aot/production) and the Strang/Schur splittings (hyperbolic != Explicit). The default
-   `adc.IMEX` (= SourceImplicitBE, local backward-Euler, order 1) stays the only local implicit scheme
+   `pops.IMEX` (= SourceImplicitBE, local backward-Euler, order 1) stays the only local implicit scheme
    and is **UNCHANGED / bit-identical** (kind "imex" != "imexrk_ars222", distinct C++ paths). LIMIT:
    the IMEX-RK source is FULLY implicit (the stage consistency relation assumes a homogeneous
    solve) -> incompatible with a partial mask `implicit_vars`/`implicit_roles` (explicit rejection;
-   for a per-component partial IMEX, stay on `adc.IMEX`). The analytic Jacobian
+   for a per-component partial IMEX, stay on `pops.IMEX`). The analytic Jacobian
    (`m.source_jacobian`, wave 3) also improves the IMEX-RK stage solves.
 7. **CoupledSource**: still explicit forward-Euler additive, fixed capacities (kCsMaxReg=32...).
    frequency(mu) now accepts a CONSTANT (historical path) OR an Expr -> PER-CELL frequency
@@ -345,14 +345,14 @@ is wired really is; what is not is documented with file:line, never masked).
    REMAINS: the AMR bound does not see a local underestimate of mu under a fine patch (evaluated on
    the coarse, assumed choice).
 8. **Backends**: DECISION TAKEN (ADC-63) -- the default becomes `backend="auto"`: PRODUCTION
-   (zero-copy native loader) when toolchain parity with the _adc module is established (module
+   (zero-copy native loader) when toolchain parity with the _pops module is established (module
    loadable + baked compiler + matching header signature), AOT otherwise (historical
    safe default, without module). Never silent: CompiledModel.backend tells what was built,
    CompiledModel.backend_auto_reason tells why; an explicit backend short-circuits the
    policy (unchanged). Perimeter: Model.compile / HyperbolicModel.compile (BLOCK models);
    the hybrid bricks keep their aot default (distinct pipeline, follow-up). **Tag registry FACTORED (done)**: the VALIDATION of the
    tags (limiters + Riemann fluxes) and the n_ghost are now a SINGLE SOURCE
-   (include/adc/runtime/dispatch_tags.hpp: kLimiters / kRiemanns + validate_limiter / validate_riemann
+   (include/pops/runtime/dispatch_tags.hpp: kLimiters / kRiemanns + validate_limiter / validate_riemann
    / limiter_n_ghost). make_block, dispatch_amr_block, dispatch_amr_compiled and make_block_polar
    validate FIRST via this registry (historical messages preserved, by context); their final tag
    throws become a registry/dispatch inconsistency guard. RESIDUE: the DISPATCH itself

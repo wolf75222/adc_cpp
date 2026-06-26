@@ -1,10 +1,10 @@
 # Write a model with native bricks
 
 Compose a model from the four native role bricks (`state`, `transport`, `source`,
-`elliptic`), plug it into an `adc.System`, set the system Poisson, and advance a few steps.
+`elliptic`), plug it into an `pops.System`, set the system Poisson, and advance a few steps.
 
 A *native brick* is a generic, already-compiled C++ piece of physics that you assemble from
-Python. `adc.Model(state, transport, source, elliptic)` glues four of them into a model: the
+Python. `pops.Model(state, transport, source, elliptic)` glues four of them into a model: the
 cell-by-cell math stays compiled C++ (no numpy loop on the hot path), and there is no
 just-in-time compilation. This is the most direct way to assemble a model that already exists as
 bricks. To write physics that has no native brick, you use the symbolic DSL instead; see
@@ -56,19 +56,19 @@ python
 
 ```python
 import numpy as np
-import adc
+import pops
 ```
 
 ## Step 3: Compose the model from four bricks
 
-Build the model with `adc.Model(state, transport, source, elliptic)`. Each argument is one role
+Build the model with `pops.Model(state, transport, source, elliptic)`. Each argument is one role
 brick:
 
-- `state=adc.Scalar()` declares one conservative variable `n` (the transported density);
-- `transport=adc.ExB(B0=1.0)` advects `n` by the E x B drift `v = (-d_y phi, d_x phi) / B0`,
+- `state=pops.Scalar()` declares one conservative variable `n` (the transported density);
+- `transport=pops.ExB(B0=1.0)` advects `n` by the E x B drift `v = (-d_y phi, d_x phi) / B0`,
   where `B0` is the background magnetic field and `phi` is the potential solved by the Poisson;
-- `source=adc.NoSource()` adds no pointwise source term (a scalar density needs none);
-- `elliptic=adc.BackgroundDensity(alpha=1.0, n0=0.0)` couples the block to the system Poisson with
+- `source=pops.NoSource()` adds no pointwise source term (a scalar density needs none);
+- `elliptic=pops.BackgroundDensity(alpha=1.0, n0=0.0)` couples the block to the system Poisson with
   the right-hand side `f = alpha (n - n0)`, the neutralizing background.
 
 This is the same brick model that the A->Z tutorial replays. It comes from the tested script
@@ -93,14 +93,14 @@ B0 = 1.0
 ALPHA = 1.0
 ```
 
-`adc.Model(...)` validates the four roles as it builds them. The state and the transport must
+`pops.Model(...)` validates the four roles as it builds them. The state and the transport must
 agree: `Scalar` requires `ExB`. An inconsistent pairing (for example `Scalar` with a fluid flux)
 raises a `ValueError` immediately. The full brick catalog, with every signature and constraint, is
 the [native bricks reference](../reference/native-bricks.md).
 
 ## Step 4: Create the system
 
-Create a periodic Cartesian system. `adc.System(n=, L=, periodic=)` builds the coupler on a square
+Create a periodic Cartesian system. `pops.System(n=, L=, periodic=)` builds the coupler on a square
 domain `[0, L]` by `[0, L]` with `n` by `n` cells. Replace `GRID` with the number of cells per
 direction.
 
@@ -109,7 +109,7 @@ n = 96
 ```
 
 ```python
-sim = adc.System(n=n, L=1.0, periodic=True)
+sim = pops.System(n=n, L=1.0, periodic=True)
 ```
 
 ## Step 5: Set the initial density and the background
@@ -148,14 +148,14 @@ model = native_diocotron_model(n_i0)
 Plug the model into the system with `add_block`. You pass the spatial scheme and the time
 integrator here, not on the model: the same model is reused with different schemes.
 
-- `spatial=adc.Spatial(minmod=True)` uses MUSCL reconstruction with the minmod limiter;
-- `time=adc.Explicit()` uses the explicit SSPRK2 integrator.
+- `spatial=pops.Spatial(minmod=True)` uses MUSCL reconstruction with the minmod limiter;
+- `time=pops.Explicit()` uses the explicit SSPRK2 integrator.
 
 ```python
-sim.add_block("ne", model=model, spatial=adc.Spatial(minmod=True), time=adc.Explicit())
+sim.add_block("ne", model=model, spatial=pops.Spatial(minmod=True), time=pops.Explicit())
 ```
 
-`add_block` dispatches on the model type: the `ModelSpec` returned by `adc.Model(...)` goes to the
+`add_block` dispatches on the model type: the `ModelSpec` returned by `pops.Model(...)` goes to the
 native block adder. The spatial schemes and time integrators are listed in the
 [native bricks reference](../reference/native-bricks.md).
 
@@ -218,17 +218,17 @@ The session runs without raising. After the loop:
 - `sim.potential()` and `sim.density("ne")` are 2D arrays of shape `(n, n)`.
 - The perturbation seeded along `x` grows: the band develops the diocotron instability.
 
-The same model object plugs into `adc.AmrSystem` (adaptive refinement) without any change:
+The same model object plugs into `pops.AmrSystem` (adaptive refinement) without any change:
 `sa.add_block("ne", model=model, ...)`. The A->Z tutorial proves that this brick model produces a
 state that is bit-identical to the same physics written as DSL formulas, and compares the uniform
 and AMR runs.
 
 ## Troubleshooting
 
-- `ValueError` at `adc.Model(...)`: the four roles are inconsistent. `Scalar` must be paired with
+- `ValueError` at `pops.Model(...)`: the four roles are inconsistent. `Scalar` must be paired with
   `ExB`; check the pairing against the [native bricks reference](../reference/native-bricks.md).
 - `ImportError` on `import adc`: the module is not built or not on the path. The error message gives
-  the cause and the rebuild command; run `python -c "import adc; adc.doctor()"` to check the
+  the cause and the rebuild command; run `python -c "import adc; pops.doctor()"` to check the
   environment, and see [Installation](../getting-started/installation.md).
 
 ## Next

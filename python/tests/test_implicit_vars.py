@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Test du MASQUE IMPLICITE par bloc (System-pipeline P3) : adc.IMEX / adc.SourceImplicit acceptent
+"""Test du MASQUE IMPLICITE par bloc (System-pipeline P3) : pops.IMEX / pops.SourceImplicit acceptent
 implicit_vars=[noms] et/ou implicit_roles=[roles physiques] pour choisir QUELLES variables conservees
 sont traitees en implicite dans le pas de source IMEX (les autres restent explicites, Euler avant).
 
@@ -25,7 +25,7 @@ Verifie :
 
 import sys
 import numpy as np
-import adc
+import pops
 
 fails = 0
 
@@ -45,16 +45,16 @@ def meshx(n):
 def electron_model():
     # Euler compressible (4 var) + force du potentiel RAIDE (charge forte) : source non triviale sur
     # qte de mvt (depend de rho) et energie (depend de la qte de mvt).
-    return adc.Model(state=adc.FluidState("compressible", gamma=1.4),
-                     transport=adc.CompressibleFlux(),
-                     source=adc.PotentialForce(charge=-50.0),
-                     elliptic=adc.ChargeDensity(charge=-1.0))
+    return pops.Model(state=pops.FluidState("compressible", gamma=1.4),
+                     transport=pops.CompressibleFlux(),
+                     source=pops.PotentialForce(charge=-50.0),
+                     elliptic=pops.ChargeDensity(charge=-1.0))
 
 
 def run(policy, n=24, dt=0.002, nsteps=4):
     """Avance le bloc electron avec la politique temporelle @p policy ; renvoie l'etat final (4, n, n)."""
-    s = adc.System(n=n, periodic=False)
-    s.add_block("ne", electron_model(), spatial=adc.Spatial(minmod=True), time=policy)
+    s = pops.System(n=n, periodic=False)
+    s.add_block("ne", electron_model(), spatial=pops.Spatial(minmod=True), time=policy)
     s.set_poisson(bc="dirichlet")
     xs = meshx(n)
     rho_e = 1.0 + 0.2 * np.cos(2 * np.pi * xs)[None, :] * np.ones((n, n))
@@ -65,37 +65,37 @@ def run(policy, n=24, dt=0.002, nsteps=4):
 
 # ---- 0. attributs portes par la politique (masque cote bloc, pas modele) -------
 print("== 0. IMEX / SourceImplicit portent le masque implicite ==")
-p = adc.IMEX(substeps=2, implicit_vars=["rho_u", "rho_v"])
+p = pops.IMEX(substeps=2, implicit_vars=["rho_u", "rho_v"])
 chk(p.implicit_vars == ["rho_u", "rho_v"], "IMEX.implicit_vars stocke les noms")
 chk(p.implicit_roles == [], "IMEX.implicit_roles vide par defaut")
-pr = adc.IMEX(implicit_roles=["MomentumX", "MomentumY", "Energy"])
+pr = pops.IMEX(implicit_roles=["MomentumX", "MomentumY", "Energy"])
 # normalisation PascalCase -> cle stable snake_case (cf. role_from_name C++)
 chk(pr.implicit_roles == ["momentum_x", "momentum_y", "energy"],
     "IMEX.implicit_roles normalise PascalCase -> snake_case stable")
-si = adc.SourceImplicit(implicit_vars=["E"])
+si = pops.SourceImplicit(implicit_vars=["E"])
 chk(si.implicit_vars == ["E"], "SourceImplicit.implicit_vars stocke les noms")
-chk(adc.IMEX().implicit_vars == [] and adc.IMEX().implicit_roles == [],
+chk(pops.IMEX().implicit_vars == [] and pops.IMEX().implicit_roles == [],
     "IMEX() sans masque : listes vides (defaut)")
 
 # ---- 1. le masque est APPLIQUE : implicit_vars change la numerique ------------
 print("== 1. implicit_vars=['rho_u','rho_v'] : seules ces composantes implicites ==")
-ref_full = run(adc.IMEX(substeps=2))                                  # defaut : tout implicite
-masked_mom = run(adc.IMEX(substeps=2, implicit_vars=["rho_u", "rho_v"]))  # qte de mvt seule
+ref_full = run(pops.IMEX(substeps=2))                                  # defaut : tout implicite
+masked_mom = run(pops.IMEX(substeps=2, implicit_vars=["rho_u", "rho_v"]))  # qte de mvt seule
 diff = float(np.max(np.abs(masked_mom - ref_full)))
 chk(diff > 0.0,
     "masque qte de mvt != defaut tout-implicite (le masque est applique, diff=%g)" % diff)
 
 # ---- 2. implicit_roles resout aux MEMES indices que implicit_vars -------------
 print("== 2. implicit_roles -> memes indices que implicit_vars (role -> index) ==")
-masked_roles = run(adc.IMEX(substeps=2, implicit_roles=["MomentumX", "MomentumY"]))
+masked_roles = run(pops.IMEX(substeps=2, implicit_roles=["MomentumX", "MomentumY"]))
 d_role_name = float(np.max(np.abs(masked_roles - masked_mom)))
 chk(d_role_name == 0.0,
     "implicit_roles=[MomentumX,MomentumY] == implicit_vars=[rho_u,rho_v] (bit-identique, diff=%g)"
     % d_role_name)
 
 # set complet (qte de mvt + energie) par roles == par noms (3 composantes)
-full3_names = run(adc.IMEX(substeps=2, implicit_vars=["rho_u", "rho_v", "E"]))
-full3_roles = run(adc.IMEX(substeps=2, implicit_roles=["MomentumX", "MomentumY", "Energy"]))
+full3_names = run(pops.IMEX(substeps=2, implicit_vars=["rho_u", "rho_v", "E"]))
+full3_roles = run(pops.IMEX(substeps=2, implicit_roles=["MomentumX", "MomentumY", "Energy"]))
 d3 = float(np.max(np.abs(full3_roles - full3_names)))
 chk(d3 == 0.0,
     "implicit_roles=[MomentumX,MomentumY,Energy] == implicit_vars=[rho_u,rho_v,E] (diff=%g)" % d3)
@@ -105,18 +105,18 @@ chk(float(np.max(np.abs(full3_names - masked_mom))) > 0.0,
 
 # ---- 3. defaut (aucun masque) BIT-IDENTIQUE -----------------------------------
 print("== 3. defaut sans masque : bit-identique ==")
-ref_full_b = run(adc.IMEX(substeps=2))
+ref_full_b = run(pops.IMEX(substeps=2))
 chk(float(np.max(np.abs(ref_full_b - ref_full))) == 0.0,
     "IMEX(substeps=2) sans masque : reproductible et bit-identique a la reference")
 # SourceImplicit sans masque == IMEX sans masque (meme chemin C++)
-si_ref = run(adc.SourceImplicit(substeps=2))
+si_ref = run(pops.SourceImplicit(substeps=2))
 chk(float(np.max(np.abs(si_ref - ref_full))) == 0.0,
     "SourceImplicit(substeps=2) sans masque == IMEX(substeps=2) (bit-identique)")
 
 # ---- 4. erreur claire si nom / role absent du bloc ----------------------------
 print("== 4. erreur explicite sur un nom / role absent ==")
 try:
-    run(adc.IMEX(implicit_vars=["rho_w"]))   # 'rho_w' n'existe pas (le bloc a rho,rho_u,rho_v,E)
+    run(pops.IMEX(implicit_vars=["rho_w"]))   # 'rho_w' n'existe pas (le bloc a rho,rho_u,rho_v,E)
     chk(False, "implicit_vars=['rho_w'] doit lever (nom absent)")
 except Exception as e:
     msg = str(e)
@@ -124,7 +124,7 @@ except Exception as e:
         "nom absent -> erreur mentionnant 'rho_w' et 'implicit_vars'")
 
 try:
-    run(adc.IMEX(implicit_roles=["Pressure"]))  # role absent des conservatives Euler
+    run(pops.IMEX(implicit_roles=["Pressure"]))  # role absent des conservatives Euler
     chk(False, "implicit_roles=['Pressure'] doit lever (role absent)")
 except Exception as e:
     msg = str(e)
@@ -132,7 +132,7 @@ except Exception as e:
         "role absent -> erreur mentionnant 'implicit_roles'")
 
 try:
-    run(adc.IMEX(implicit_roles=["NotARole"]))  # role inconnu (mappe sur Custom)
+    run(pops.IMEX(implicit_roles=["NotARole"]))  # role inconnu (mappe sur Custom)
     chk(False, "implicit_roles=['NotARole'] doit lever (role inconnu)")
 except Exception as e:
     chk("implicit_roles" in str(e),
@@ -140,10 +140,10 @@ except Exception as e:
 
 # ---- 5. masque interdit hors IMEX (explicite) ---------------------------------
 print("== 5. masque rejete sur une politique non-IMEX ==")
-# adc.Explicit ne porte pas implicit_vars ; on simule un appel direct add_block avec un masque
+# pops.Explicit ne porte pas implicit_vars ; on simule un appel direct add_block avec un masque
 # sur une politique explicite : le C++ doit lever (le masque n'a de sens qu'en IMEX).
 try:
-    s = adc.System(n=16, periodic=False)
+    s = pops.System(n=16, periodic=False)
     s._s.add_block("ne", electron_model(), "minmod", "rusanov", "conservative",
                    "explicit", 1, True, 1, ["rho_u"], [])
     chk(False, "add_block(time='explicit', implicit_vars=['rho_u']) doit lever")

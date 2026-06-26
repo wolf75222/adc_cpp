@@ -65,7 +65,7 @@ therefore does not always mean "satisfactory performance"; it means
 ## T3 - Python frontends
 
 - [x] Implement a `python-bricks` Python driver:
-  `adc.Model(FluidState, CompressibleFlux, NoSource, ...)`.
+  `pops.Model(FluidState, CompressibleFlux, NoSource, ...)`.
 - [x] Implement a `python-dsl-production` Python driver:
   `dsl.Model(...).compile(backend="production")`.
 - [x] Check explicitly:
@@ -78,7 +78,7 @@ therefore does not always mean "satisfactory performance"; it means
 - [x] Measure a Python loop `for _ in range(nsteps): step(dt)`.
 - [x] Measure `extract_final` (`get_state` or `density`) separately.
 - [x] Add the `aot` counter-example if the local build supports it.
-- [x] Add the `python/adc/integrate.py` counter-example to quantify the
+- [x] Add the `python/pops/integrate.py` counter-example to quantify the
   misuse with full-array copies per stage.
 - [x] Forbid any diagnostic in the main hot loop.
 
@@ -128,7 +128,7 @@ First campaign completed:
 - [x] Python bricks and DSL `production` measured via job `647815`.
 - [x] Cause of the initial Python build identified:
   static non-PIC Kokkos OpenMP, fixed by
-  `/home/rmdraux/adc_perf_20260608/kinstall_omp_pic`.
+  `/home/rmdraux/pops_perf_20260608/kinstall_omp_pic`.
 
 Corrections required before final publication:
 
@@ -146,7 +146,7 @@ Corrections required before final publication:
 - [x] Investigate the DSL `production` warm: hot loop around `339 ms` and little
   sensitive to threads on the current harness.
 - [x] Add a native C++ measurement with Kokkos PIC to compare exactly to the
-  Python `_adc` module.
+  Python `_pops` module.
 - [x] Separate build and frontend measurement: the isolated job `647848` shows that
   compiling the `frontend_cpp` C++ harness can dominate the campaign time.
   The next re-runs must reuse an already produced PIC build, or
@@ -186,7 +186,7 @@ Follow-up evening of 2026-06-08:
 - [x] Branch graphs generated in
   `docs/perf_figures_matrix_647857_647858/`.
 - [x] DSL `production` warm diagnostic: the native loader was zero-copy but
-  could be compiled without `ADC_HAS_KOKKOS`, hence with serial fallback in the
+  could be compiled without `POPS_HAS_KOKKOS`, hence with serial fallback in the
   inline templates.
 - [x] Local fix added: `kokkos/mpi` features in the ABI key, Kokkos/OpenMP
   flags for `compile_native()` and `HybridModel.compile()`, DSL cache key
@@ -201,7 +201,7 @@ Follow-up evening of 2026-06-08:
   second copy of `libkokkos*`.
 - [x] Integrate the upstream Claude/`origin/feat/dsl-production-optflags` fix
   into the diagnostic: do not link `libkokkos*`, keep a single Kokkos runtime
-  via `_adc`, and compile the production `.so` in `-O3 -DNDEBUG`.
+  via `_pops`, and compile the production `.so` in `-O3 -DNDEBUG`.
 - [x] Re-run a short validation after full alignment with
   `origin/feat/dsl-production-optflags`: expect a clean `exit 0` output and
   a warm DSL ratio close to `1.02-1.04x`. Validation taken into account via

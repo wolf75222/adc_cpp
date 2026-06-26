@@ -50,12 +50,12 @@ diocotron normalization benchmark, not the full Euler-Poisson system.
    The core is header-only; only the Python module is compiled, which takes a few minutes the first
    time.
 
-4. Check that the install is healthy. `adc.doctor()` checks each link in the environment
+4. Check that the install is healthy. `pops.doctor()` checks each link in the environment
    (interpreter, `numpy`, Kokkos, the DSL compiler, header and module sync) and prints a remedy on
    any failure.
 
    ```bash
-   python -c "import adc; adc.doctor()"
+   python -c "import adc; pops.doctor()"
    ```
 
 5. Run the model. The tested example script `diocotron_tutorial.py` is self-contained; it depends
@@ -74,7 +74,7 @@ diocotron normalization benchmark, not the full Euler-Poisson system.
 
 ## What the model is
 
-The script writes the model symbolically with the symbolic DSL (`adc.dsl.Model`): a single
+The script writes the model symbolically with the symbolic DSL (`pops.dsl.Model`): a single
 conservative variable `n`, the auxiliary fields `phi`, `grad_x`, `grad_y` supplied by the solver,
 the E x B advection flux, and the elliptic right-hand side `alpha (n - n_i0)`. Here is the model
 definition from the tested script:
@@ -93,7 +93,7 @@ and the Poisson right-hand side. They are set near the top of the script:
 :lines: 55-57
 ```
 
-The same physics can also be composed from native bricks with `adc.Model(state, transport, source,
+The same physics can also be composed from native bricks with `pops.Model(state, transport, source,
 elliptic)`. The DSL formulas and the native bricks are two ways to describe the same physics and
 produce an identical numerical kernel. The brick catalog is in the
 [native brick reference](../reference/native-bricks.md), and the formula syntax is in the
@@ -125,9 +125,9 @@ If those files appear and the script ends on its `OK` line, you have run your fi
 
 ## Troubleshooting
 
-If `import adc` raises an `ImportError` on `adc._adc`, the extension is pinned to the interpreter
+If `import adc` raises an `ImportError` on `pops._pops`, the extension is pinned to the interpreter
 that built it (suffix `cpython-312`): build and import with the same Python, the one from the conda
-env. Whatever the symptom, run `python -c "import adc; adc.doctor()"` first; each line names the
+env. Whatever the symptom, run `python -c "import adc; pops.doctor()"` first; each line names the
 failing link and its remedy.
 
 ## Next

@@ -9,9 +9,9 @@ cmake-build-*/
 .cache/
 compile_commands.json
 
-# Caches .so du DSL quand ADC_CACHE_DIR pointe DANS le repo (les demos exportent
-# ADC_CACHE_DIR=$PWD/.adc_cache*) ; le defaut ~/.cache/adc/dsl est deja hors source.
-.adc_cache*/
+# Caches .so du DSL quand POPS_CACHE_DIR pointe DANS le repo (les demos exportent
+# POPS_CACHE_DIR=$PWD/.pops_cache*) ; le defaut ~/.cache/pops/dsl est deja hors source.
+.pops_cache*/
 
 # documentation generee (Doxygen + Sphinx)
 docs/_build/

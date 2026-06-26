@@ -6,7 +6,7 @@ the public API that the version number tracks, and the rules for bumping it.
 ## Single source of the version number
 
 The version lives in one place: `project(VERSION x.y.z)` in `CMakeLists.txt`. Everything
-derives from it: `adc.__version__` (baked as `ADC_VERSION` into `_adc`), the pip wheel
+derives from it: `pops.__version__` (baked as `POPS_VERSION` into `_pops`), the pip wheel
 (scikit-build-core regex on `pyproject.toml`), and `adcConfigVersion.cmake`. Do not
 duplicate the number elsewhere. The docs build derives it too: `scripts/build_docs.sh` injects
 `PROJECT_NUMBER` into Doxygen from `project(VERSION)`, and `docs/sphinx/conf.py` reads the same
@@ -16,17 +16,17 @@ value, so the published docs never drift from `CMakeLists.txt`.
 
 What a version bump is allowed to break is exactly this surface:
 
-- C++ runtime facade: `adc::System`, `adc::AmrSystem` and their public methods (block
+- C++ runtime facade: `pops::System`, `pops::AmrSystem` and their public methods (block
   composition, `set_poisson`, `set_refinement`, stepping).
 - The concepts a model composes against: `PhysicalModel`, `NumericalFlux`, `EllipticSolver`,
-  and the named generic bricks in `include/adc/physics/`.
-- Python bindings: the documented `adc.*` surface (`adc.Model`, `adc.System`,
-  `adc.AmrSystem`, `adc.dsl.Model`, the brick classes, `adc.doctor`, `adc.set_threads`,
-  `adc.parallel_info`, `adc.has_kokkos`, `adc.__version__`).
+  and the named generic bricks in `include/pops/physics/`.
+- Python bindings: the documented `pops.*` surface (`pops.Model`, `pops.System`,
+  `pops.AmrSystem`, `pops.dsl.Model`, the brick classes, `pops.doctor`, `pops.set_threads`,
+  `pops.parallel_info`, `pops.has_kokkos`, `pops.__version__`).
 - DSL surface: the fixed aux names (`phi`, `grad_x`, `grad_y`, `B_z`, `T_e`) and the
   documented builders.
-- Consumable CMake: the `adc::adc` target, `find_package(adc)`, and the documented options
-  (`ADC_USE_MPI`, `ADC_USE_HDF5`, `ADC_USE_KOKKOS`, ...) and presets.
+- Consumable CMake: the `pops::pops` target, `find_package(adc)`, and the documented options
+  (`POPS_USE_MPI`, `POPS_USE_HDF5`, `POPS_USE_KOKKOS`, ...) and presets.
 
 ## Internal (no guarantee, may change in any release)
 

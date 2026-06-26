@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""adc.time RHS source routing -- P.rhs flux/source selection (epic ADC-399 / ADC-425).
+"""pops.time RHS source routing -- P.rhs flux/source selection (epic ADC-399 / ADC-425).
 
 Spec criterion 17: a source is included in an RHS only when EXPLICITLY listed in ``sources``, never
 summed implicitly. Before ADC-425 the codegen always lowered the default-flux RHS to ``ctx.rhs_into``
@@ -20,7 +20,7 @@ whether ``"default"`` is among the requested sources.
     sources=["default"] applies the source (out - rho0 == dt*c*rho). A Lie split
     H = rhs(flux=True, sources=[]) ; S = rhs(flux=False, sources=["default"]) reproduces the offline
     single-source split. An existing default-source forward_euler (sources=["default"]) is unchanged.
-    Self-skips if _adc lacks install_program, numpy/_adc is absent, or no compiler/Kokkos is visible --
+    Self-skips if _pops lacks install_program, numpy/_pops is absent, or no compiler/Kokkos is visible --
     never faking the engine.
 
 Run with python3 (PYTHONPATH = built adc package).
@@ -36,11 +36,11 @@ def _skip(msg):
 try:
     import numpy as np
 
-    import adc
-    from adc import dsl
-    from adc import time as adctime
-except Exception as exc:  # noqa: BLE001  -- numpy or _adc unavailable in this interpreter
-    _skip("adc/numpy unavailable: %s" % exc)
+    import pops
+    from pops import dsl
+    from pops import time as adctime
+except Exception as exc:  # noqa: BLE001  -- numpy or _pops unavailable in this interpreter
+    _skip("pops/numpy unavailable: %s" % exc)
 
 fails = 0
 
@@ -133,8 +133,8 @@ chk("ctx.neg_div_flux_default_into(0," in src_named_only,
 
 
 # ---- (B) end-to-end probe: skips unless the full toolchain is present ----
-if not hasattr(adc.System(n=8, L=1.0, periodic=True), "install_program"):
-    print("-- (B) skipped: _adc lacks the install_program binding (rebuild _adc) --")
+if not hasattr(pops.System(n=8, L=1.0, periodic=True), "install_program"):
+    print("-- (B) skipped: _pops lacks the install_program binding (rebuild _pops) --")
     print("%s test_time_rhs_sources (A only)" % ("FAIL" if fails else "PASS"))
     sys.exit(1 if fails else 0)
 
@@ -146,14 +146,14 @@ N = 16
 
 
 def make_sim(prog_model_name):
-    sim = adc.System(n=N, L=1.0, periodic=True)
+    sim = pops.System(n=N, L=1.0, periodic=True)
     try:
         compiled_model = decay_model("decay_block", C).compile(backend="production")
     except RuntimeError as exc:  # no compiler / no Kokkos visible
         _skip("model compile could not build the .so: %s" % str(exc)[:160])
     sim.add_equation("plasma", compiled_model,
-                     spatial=adc.FiniteVolume(limiter="none", riemann="rusanov"),
-                     time=adc.Explicit(method="euler"))
+                     spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                     time=pops.Explicit(method="euler"))
     x = (np.arange(N) + 0.5) / N
     X, Y = np.meshgrid(x, x, indexing="ij")
     rho = 1.0 + 0.3 * np.sin(2 * np.pi * X) * np.cos(2 * np.pi * Y)
@@ -165,7 +165,7 @@ def run_one_step(sources, flux=True):
     """Compile + install a one-step program, step once, return (out, rho0)."""
     pname = "p_%s_%s" % ("flux" if flux else "noflux", "_".join(sources) or "empty")
     try:
-        compiled = adc.compile_problem(model=decay_model("decay_%s" % pname, C),
+        compiled = pops.compile_problem(model=decay_model("decay_%s" % pname, C),
                                        time=one_step_program(pname, sources, flux=flux))
     except RuntimeError as exc:  # no compiler / no Kokkos / .so compile failed
         _skip("compile_problem could not build the .so: %s" % str(exc)[:160])
@@ -206,7 +206,7 @@ def lie_split_program(name):
 
 
 try:
-    compiled_lie = adc.compile_problem(model=decay_model("decay_lie", C), time=lie_split_program("lie"))
+    compiled_lie = pops.compile_problem(model=decay_model("decay_lie", C), time=lie_split_program("lie"))
 except RuntimeError as exc:
     _skip("compile_problem (lie) could not build the .so: %s" % str(exc)[:160])
 sim_lie, rho0l = make_sim("lie")
@@ -224,7 +224,7 @@ chk(d_lie < 1e-12, "Lie split H(flux,sources=[]);S(source) == offline single-sou
 try:
     P_fe = adctime.Program("fe_default")
     adctime.std.forward_euler(P_fe, "plasma", sources=("default",))
-    compiled_fe = adc.compile_problem(model=decay_model("decay_fe", C), time=P_fe)
+    compiled_fe = pops.compile_problem(model=decay_model("decay_fe", C), time=P_fe)
 except RuntimeError as exc:
     _skip("compile_problem (forward_euler) could not build the .so: %s" % str(exc)[:160])
 sim_fe, rho0f = make_sim("fe")

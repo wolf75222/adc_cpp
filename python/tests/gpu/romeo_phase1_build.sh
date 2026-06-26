@@ -1,6 +1,6 @@
 #!/bin/bash -l
 module load cuda/12.6
-cd "$HOME/adc_gpu_p1" || exit 3
+cd "$HOME/pops_gpu_p1" || exit 3
 echo "noeud=$(hostname) arch=$(uname -m)"
 NW="$PWD/kokkos/bin/nvcc_wrapper"
 if ! ls kinstall/lib*/cmake/Kokkos/KokkosConfig.cmake >/dev/null 2>&1; then

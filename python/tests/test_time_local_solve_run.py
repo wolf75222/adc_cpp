@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""adc.time Phase-4b LOCAL LINEAR SOLVE codegen, end to end (epic ADC-399 / ADC-403).
+"""pops.time Phase-4b LOCAL LINEAR SOLVE codegen, end to end (epic ADC-399 / ADC-403).
 
 `emit_cpp_program` now LOWERS the Phase-4 IR ops -- ``source`` (a named ``m.source_term``),
 ``apply`` (LU for a named ``m.linear_source``) and ``solve_local_linear`` ((I -/+ a*L) U = rhs solved
 cell by cell via a dense per-cell inverse) -- reusing ProgramContext + for_each_cell + the existing
-``adc::detail::mat_inverse`` (no flux / solver reimplementation, no heap in the device kernel).
+``pops::detail::mat_inverse`` (no flux / solver reimplementation, no heap in the device kernel).
 
 (A) Codegen (pure Python, always runs): the generated C++ of a Lorentz ``solve_local_linear`` contains
     the per-cell dense-inverse kernel (M = I - dt*L assembled from the aux B_z, mat_inverse, the
@@ -16,8 +16,8 @@ cell by cell via a dense per-cell inverse) -- reusing ProgramContext + for_each_
     a non-trivial momentum IC; a Program W = solve_local_linear(I - dt*L, rhs=U); compile_problem ->
     problem.so, install_program, step(dt). The implicit Lorentz rotation has a closed form: with
     k = dt*B_z, den = 1 + k*k, mx' = (mx + k*my)/den, my' = (-k*mx + my)/den, rho unchanged. The
-    stepped (mx, my) must match it to round-off. Runs in CI (gate-python rebuilds _adc) and locally
-    once _adc is rebuilt; skips if _adc lacks install_program, numpy/_adc is absent, no compiler/Kokkos
+    stepped (mx, my) must match it to round-off. Runs in CI (gate-python rebuilds _pops) and locally
+    once _pops is rebuilt; skips if _pops lacks install_program, numpy/_pops is absent, no compiler/Kokkos
     is visible, or the .so compile fails -- never faking the engine.
 """
 import sys
@@ -31,11 +31,11 @@ def _skip(msg):
 try:
     import numpy as np
 
-    import adc
-    from adc import dsl
-    from adc import time as adctime
-except Exception as exc:  # noqa: BLE001  -- numpy or _adc unavailable in this interpreter
-    _skip("adc/numpy unavailable: %s" % exc)
+    import pops
+    from pops import dsl
+    from pops import time as adctime
+except Exception as exc:  # noqa: BLE001  -- numpy or _pops unavailable in this interpreter
+    _skip("pops/numpy unavailable: %s" % exc)
 
 fails = 0
 
@@ -96,8 +96,8 @@ def lorentz_program(name="lorentz_step"):
 print("== (A) solve_local_linear codegen ==")
 m = lorentz_model()
 src = lorentz_program().emit_cpp_program(model=m)
-for frag in ("adc::for_each_cell(", "adc::detail::mat_inverse<3>(", "adc::Real M_[3][3];",
-             "adc::Real Minv_[3][3];", "auxA(i, j, 3)", "ctx.aux()"):
+for frag in ("pops::for_each_cell(", "pops::detail::mat_inverse<3>(", "pops::Real M_[3][3];",
+             "pops::Real Minv_[3][3];", "auxA(i, j, 3)", "ctx.aux()"):
     chk(frag in src, "generated solve_local_linear kernel has %r" % frag)
 chk("a_ * (B_z)" in src and "a_ * ((-B_z))" in src,
     "the Lorentz operator M = I - dt*L reads +/- B_z off the aux")
@@ -121,8 +121,8 @@ chk(raises(ValueError, lambda: Pbig.emit_cpp_program(model=big)),
     "n_cons > 8 dense-fallback guard fires")
 
 # ---- (B) end-to-end Lorentz parity: skips unless the full toolchain is present ----
-if not hasattr(adc.System(n=8, L=1.0, periodic=True), "install_program"):
-    print("-- (B) skipped: _adc lacks the install_program binding (rebuild _adc) --")
+if not hasattr(pops.System(n=8, L=1.0, periodic=True), "install_program"):
+    print("-- (B) skipped: _pops lacks the install_program binding (rebuild _pops) --")
     print("%s test_time_local_solve_run (A only)" % ("FAIL" if fails else "PASS"))
     sys.exit(1 if fails else 0)
 
@@ -131,15 +131,15 @@ print("== (B) end-to-end: implicit Lorentz solve vs analytic rotation ==")
 
 def make_sim():
     n = 16
-    sim = adc.System(n=n, L=1.0, periodic=True)
+    sim = pops.System(n=n, L=1.0, periodic=True)
     # Production-backend DSL model added as a native block; the Program drives the step.
     try:
         compiled_model = lorentz_model("lorentz_block").compile(backend="production")
     except RuntimeError as exc:  # no compiler / no Kokkos visible
         _skip("model compile could not build the .so: %s" % str(exc)[:160])
     sim.add_equation("plasma", compiled_model,
-                     spatial=adc.FiniteVolume(limiter="none", riemann="rusanov"),
-                     time=adc.Explicit(method="euler"))
+                     spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                     time=pops.Explicit(method="euler"))
     bz = 3.0
     sim.set_magnetic_field(bz * np.ones(n * n))  # constant B_z over the grid
     x = (np.arange(n) + 0.5) / n
@@ -154,14 +154,14 @@ def make_sim():
 dt = 0.05
 
 try:
-    compiled = adc.compile_problem(model=lorentz_model("lorentz_prog"), time=lorentz_program())
+    compiled = pops.compile_problem(model=lorentz_model("lorentz_prog"), time=lorentz_program())
 except RuntimeError as exc:  # no compiler / no Kokkos visible / .so compile failed
     _skip("compile_problem could not build the .so: %s" % str(exc)[:160])
 
 chk(compiled.program_name == "lorentz_step", "handle carries the program name")
 
 prog, bz, U0 = make_sim()
-prog.install_program(compiled.so_path)  # dlopen + ABI-key check + adc_install_program(this)
+prog.install_program(compiled.so_path)  # dlopen + ABI-key check + pops_install_program(this)
 prog.step(dt)
 U = np.array(prog.get_state("plasma"))
 

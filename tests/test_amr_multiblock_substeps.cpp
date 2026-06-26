@@ -18,14 +18,14 @@
 // On travaille surtout au niveau du MOTEUR AmrRuntime + build_amr_block (les briques de cette PR), ou
 // l'on accede aux niveaux/masses/RHS des blocs ; les regressions mono-bloc passent par la facade.
 
-#include <adc/coupling/base/elliptic_rhs.hpp>  // add_scaled_component (RHS de reference assemble main)
-#include <adc/runtime/builders/compiled/amr_dsl_block.hpp>  // detail::make_shared_amr_layout / dispatch_amr_block
-#include <adc/runtime/amr/amr_runtime.hpp>    // AmrRuntime, AmrRuntimeBlock
-#include <adc/runtime/amr_system.hpp>     // facade AmrSystem
-#include <adc/runtime/builders/factory/model_factory.hpp>  // detail::dispatch_model
-#include <adc/runtime/config/model_spec.hpp>
-#include <adc/mesh/storage/mf_arith.hpp>  // norm_inf
-#include <adc/mesh/storage/multifab.hpp>
+#include <pops/coupling/base/elliptic_rhs.hpp>  // add_scaled_component (RHS de reference assemble main)
+#include <pops/runtime/builders/compiled/amr_dsl_block.hpp>  // detail::make_shared_amr_layout / dispatch_amr_block
+#include <pops/runtime/amr/amr_runtime.hpp>    // AmrRuntime, AmrRuntimeBlock
+#include <pops/runtime/amr_system.hpp>     // facade AmrSystem
+#include <pops/runtime/builders/factory/model_factory.hpp>  // detail::dispatch_model
+#include <pops/runtime/config/model_spec.hpp>
+#include <pops/mesh/storage/mf_arith.hpp>  // norm_inf
+#include <pops/mesh/storage/multifab.hpp>
 
 #include <cmath>
 #include <cstdio>
@@ -33,11 +33,11 @@
 #include <string>
 #include <vector>
 
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
 #include <Kokkos_Core.hpp>
 #endif
 
-using namespace adc;
+using namespace pops;
 
 // Spec ExB scalaire (1 var) a charge q : advection pilotee par grad phi, densite de charge q n pour le
 // Poisson de systeme. La charge q (signe inclus) distingue electrons / ions.
@@ -108,7 +108,7 @@ static AmrRuntime make_two_block(int N, double L, double q0, double q1, double B
 }
 
 int main(int argc, char** argv) {
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   Kokkos::ScopeGuard guard(argc, argv);
 #else
   (void)argc;

@@ -31,7 +31,7 @@ import sys
 
 import numpy as np
 
-import adc
+import pops
 
 fails = 0
 
@@ -53,14 +53,14 @@ def err_msg(fn):
 def solve_phi(n, solver, eps=1e-3):
     """System periodique, rho = eps cos(2 pi x) (moyenne nulle) -> phi par le solveur
     demande. Une densite negative est sans objet ici : seul solve_fields est appele."""
-    sim = adc.System(n=n, L=1.0, periodic=True)
+    sim = pops.System(n=n, L=1.0, periodic=True)
     sim.add_block("ions",
-                  adc.Model(state=adc.FluidState("isothermal", cs2=0.5),
-                            transport=adc.IsothermalFlux(),
-                            source=adc.PotentialForce(charge=1.0),
-                            elliptic=adc.ChargeDensity(charge=1.0)),
-                  spatial=adc.FiniteVolume(limiter="none", riemann="rusanov"),
-                  time=adc.Explicit())
+                  pops.Model(state=pops.FluidState("isothermal", cs2=0.5),
+                            transport=pops.IsothermalFlux(),
+                            source=pops.PotentialForce(charge=1.0),
+                            elliptic=pops.ChargeDensity(charge=1.0)),
+                  spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                  time=pops.Explicit())
     sim.set_poisson(rhs="charge_density", solver=solver, bc="periodic")
     x = (np.arange(n) + 0.5) / n
     rho = eps * np.cos(2.0 * np.pi * x)[None, :] * np.ones((n, n))
@@ -91,26 +91,26 @@ e16, _, _ = solve_phi(16, "fft_spectral")
 chk(e16 < 1e-12, f"n=16 : err rel {e16:.2e} < 1e-12 (pas de terme O(h^2))")
 
 print("== (4) rejets ==")
-sim = adc.System(n=32, L=1.0, periodic=False)
+sim = pops.System(n=32, L=1.0, periodic=False)
 sim.add_block("ions",
-              adc.Model(state=adc.FluidState("isothermal", cs2=0.5),
-                        transport=adc.IsothermalFlux(),
-                        source=adc.PotentialForce(charge=1.0),
-                        elliptic=adc.ChargeDensity(charge=1.0)),
-              spatial=adc.FiniteVolume(limiter="none", riemann="rusanov"),
-              time=adc.Explicit())
+              pops.Model(state=pops.FluidState("isothermal", cs2=0.5),
+                        transport=pops.IsothermalFlux(),
+                        source=pops.PotentialForce(charge=1.0),
+                        elliptic=pops.ChargeDensity(charge=1.0)),
+              spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+              time=pops.Explicit())
 sim.set_poisson(rhs="charge_density", solver="fft_spectral", bc="dirichlet",
                 wall="circle", wall_radius=0.4)
 msg = err_msg(sim.solve_fields)
 chk("fft_spectral" in msg and "wall" in msg, f"paroi refusee au kind effectif ({msg[:60]}...)")
-sim2 = adc.System(n=32, L=1.0, periodic=True)
+sim2 = pops.System(n=32, L=1.0, periodic=True)
 sim2.add_block("ions",
-               adc.Model(state=adc.FluidState("isothermal", cs2=0.5),
-                         transport=adc.IsothermalFlux(),
-                         source=adc.PotentialForce(charge=1.0),
-                         elliptic=adc.ChargeDensity(charge=1.0)),
-               spatial=adc.FiniteVolume(limiter="none", riemann="rusanov"),
-               time=adc.Explicit())
+               pops.Model(state=pops.FluidState("isothermal", cs2=0.5),
+                         transport=pops.IsothermalFlux(),
+                         source=pops.PotentialForce(charge=1.0),
+                         elliptic=pops.ChargeDensity(charge=1.0)),
+               spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+               time=pops.Explicit())
 sim2.set_poisson(rhs="charge_density", solver="dct", bc="periodic")
 msg = err_msg(sim2.solve_fields)
 chk("fft_spectral" in msg, f"solver inconnu : la liste inclut fft_spectral ({msg[:60]}...)")
@@ -120,14 +120,14 @@ print("== (5) ghosts de phi : le chemin source complet fft == MG ==")
 
 def rhs_with(solver):
     n = 32
-    sim = adc.System(n=n, L=1.0, periodic=True)
+    sim = pops.System(n=n, L=1.0, periodic=True)
     sim.add_block("ions",
-                  adc.Model(state=adc.FluidState("isothermal", cs2=0.5),
-                            transport=adc.IsothermalFlux(),
-                            source=adc.PotentialForce(charge=1.0),
-                            elliptic=adc.ChargeDensity(charge=1.0)),
-                  spatial=adc.FiniteVolume(limiter="none", riemann="rusanov"),
-                  time=adc.Explicit())
+                  pops.Model(state=pops.FluidState("isothermal", cs2=0.5),
+                            transport=pops.IsothermalFlux(),
+                            source=pops.PotentialForce(charge=1.0),
+                            elliptic=pops.ChargeDensity(charge=1.0)),
+                  spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                  time=pops.Explicit())
     sim.set_poisson(rhs="charge_density", solver=solver, bc="periodic")
     x = (np.arange(n) + 0.5) / n
     rho = 1e-3 * np.cos(2.0 * np.pi * x)[None, :] * np.ones((n, n)) + 1e-3 * np.sin(

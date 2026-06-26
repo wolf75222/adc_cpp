@@ -1,6 +1,6 @@
 """Lot E - verrouillage du rejet de role inconnu dans CoupledSource / add_coupled_source.
 
-Deux points de rejet sont confirmes (lus dans python/adc/dsl.py et python/system.cpp) :
+Deux points de rejet sont confirmes (lus dans python/pops/dsl.py et python/system.cpp) :
 
   (A) CoupledSource.compile() cote PYTHON : _role_canonical() leve ValueError pour un role
       dont le nom n'appartient pas a _ROLE_TO_CANONICAL (p.ex. 'massflux', 'bogus_role').
@@ -22,8 +22,8 @@ Deux points de rejet sont confirmes (lus dans python/adc/dsl.py et python/system
 """
 import pytest
 
-import adc
-from adc import dsl
+import pops
+from pops import dsl
 
 
 # ---------------------------------------------------------------------------
@@ -81,17 +81,17 @@ def test_coupled_source_accepts_valid_role():
 
 def _make_cartesian_system():
     """System cartesien minimal avec un bloc scalaire pour les tests C++ directs."""
-    sim = adc.System(n=4, L=1.0, periodic=True)
+    sim = pops.System(n=4, L=1.0, periodic=True)
     sim.add_block(
         "ne",
-        model=adc.Model(
-            state=adc.Scalar(),
-            transport=adc.ExB(B0=1.0),
-            source=adc.NoSource(),
-            elliptic=adc.ChargeDensity(charge=1.0),
+        model=pops.Model(
+            state=pops.Scalar(),
+            transport=pops.ExB(B0=1.0),
+            source=pops.NoSource(),
+            elliptic=pops.ChargeDensity(charge=1.0),
         ),
-        spatial=adc.Spatial(none=True),
-        time=adc.Explicit(),
+        spatial=pops.Spatial(none=True),
+        time=pops.Explicit(),
     )
     sim.set_poisson(rhs="charge_density", solver="geometric_mg")
     sim.set_density("ne", [1.0] * (4 * 4))

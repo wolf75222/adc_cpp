@@ -1,4 +1,4 @@
-# DSL_API -- Short reference of the Python DSL (adc.dsl)
+# DSL_API -- Short reference of the Python DSL (pops.dsl)
 
 USER reference document. For design, reasoning and history,
 see [docs/DSL_MODEL_DESIGN.md](DSL_MODEL_DESIGN.md).
@@ -8,8 +8,8 @@ see [docs/DSL_MODEL_DESIGN.md](DSL_MODEL_DESIGN.md).
 ## 1. Writing a symbolic model
 
 ```python
-import adc
-from adc import dsl
+import pops
+from pops import dsl
 
 m = dsl.Model("mon_modele")
 
@@ -65,11 +65,11 @@ The `.so` is cached by `model_hash` : an unchanged model is not recompiled.
 ## 3. Wiring onto System / AmrSystem
 
 ```python
-sim = adc.System(n=256, periodic=True)
+sim = pops.System(n=256, periodic=True)
 sim.add_equation("fluide",
                  model=compiled,
-                 spatial=adc.FiniteVolume(limiter="vanleer", riemann="rusanov"),
-                 time=adc.Explicit(substeps=1))
+                 spatial=pops.FiniteVolume(limiter="vanleer", riemann="rusanov"),
+                 time=pops.Explicit(substeps=1))
 # 1er argument positionnel = rhs (valide dans {charge_density, composite}) : passer le solveur
 # par MOT-CLE, pas en positionnel.
 sim.set_poisson(solver="geometric_mg")
@@ -79,11 +79,11 @@ sim.run(t_end=10.0, cfl=0.4)
 ```python
 # AMR : AmrSystemConfig n'a PAS de champ max_level. Champs reels : n, L, regrid_every, periodic,
 # distribute_coarse, coarse_max_grid (regrid_every=0 -> hierarchie figee).
-amr = adc.AmrSystem(n=128, L=1.0, regrid_every=4, periodic=True)
+amr = pops.AmrSystem(n=128, L=1.0, regrid_every=4, periodic=True)
 amr.add_equation("fluide",
                  model=compiled_amr,
-                 spatial=adc.FiniteVolume(limiter="vanleer", riemann="rusanov"),
-                 time=adc.Explicit(substeps=1))
+                 spatial=pops.FiniteVolume(limiter="vanleer", riemann="rusanov"),
+                 time=pops.Explicit(substeps=1))
 ```
 
 Important points :
@@ -126,12 +126,12 @@ Important points :
   compiled = m.compile(backend="aot")                 # cache key inclut les params
   compiled.runtime_param_names                         # -> ['cs2'] (ordre des indices C++)
 
-  sim = adc.System(n=64, periodic=True)
+  sim = pops.System(n=64, periodic=True)
   sim.add_equation("gas", model=compiled,
-                   spatial=adc.FiniteVolume(limiter="minmod", riemann="rusanov"))
+                   spatial=pops.FiniteVolume(limiter="minmod", riemann="rusanov"))
   sim.set_block_params("gas", [4.0])                   # change cs2 au RUNTIME, sans recompiler
   ```
-- `adc.PythonFlux` : numpy host TEST tool, outside the GPU/MPI hot path. Never use in
+- `pops.PythonFlux` : numpy host TEST tool, outside the GPU/MPI hot path. Never use in
   production.
 - Physical roles (`Density`, `MomentumX`, `MomentumY`, ...) : required for inter-species
   couplings and for the `System` to recover quantities by role. To be supplied to

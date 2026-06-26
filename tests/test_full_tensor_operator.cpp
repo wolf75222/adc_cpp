@@ -27,19 +27,19 @@
 // explicites : c'est volontaire (jalon = operateur, pas solveur non symetrique). L'observation
 // alimente la decision PR2 (Krylov). NON gating : le test ne FAIL jamais sur ce point.
 
-#include <adc/numerics/elliptic/mg/geometric_mg.hpp>
-#include <adc/numerics/elliptic/poisson/poisson_operator.hpp>
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/execution/for_each.hpp>
-#include <adc/mesh/geometry/geometry.hpp>
-#include <adc/mesh/storage/mf_arith.hpp>
-#include <adc/mesh/storage/multifab.hpp>
-#include <adc/mesh/boundary/physical_bc.hpp>
+#include <pops/numerics/elliptic/mg/geometric_mg.hpp>
+#include <pops/numerics/elliptic/poisson/poisson_operator.hpp>
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/execution/for_each.hpp>
+#include <pops/mesh/geometry/geometry.hpp>
+#include <pops/mesh/storage/mf_arith.hpp>
+#include <pops/mesh/storage/multifab.hpp>
+#include <pops/mesh/boundary/physical_bc.hpp>
 
 #include <cmath>
 #include <cstdio>
 
-using namespace adc;
+using namespace pops;
 static constexpr double kPi = 3.14159265358979323846;
 
 // Foncteur de remplissage commun aux tests (A) et (B) : pose phi = sin(pi x) sin(2 pi y) et
@@ -47,7 +47,7 @@ static constexpr double kPi = 3.14159265358979323846;
 struct FillPhiRhsKernel {
   Array4 ap, af;
   Geometry geom;
-  ADC_HD void operator()(int i, int j) const {
+  POPS_HD void operator()(int i, int j) const {
     const double x = geom.x_cell(i), y = geom.y_cell(j);
     ap(i, j) = std::sin(kPi * x) * std::sin(2 * kPi * y);
     af(i, j) = std::cos(kPi * x) * std::sin(kPi * y);
@@ -66,14 +66,14 @@ static double eps_y_field(double /*x*/, double y) {
 
 // Foncteur de remplissage MMS (C) : pose phi = phi_exact (sin(pi x) sin(pi y)) et f = div(A grad phi)
 // analytique pour A constant non diagonal. Top-level / device-clean (recette #64/#97/#133 : struct a
-// portee namespace tenant Array4 + Geometry + scalaires en membres, operator()(i, j) ADC_HD avec le
+// portee namespace tenant Array4 + Geometry + scalaires en membres, operator()(i, j) POPS_HD avec le
 // corps verbatim). phi_exact (fonction hote static) est INLINE ici en s = sin(pi x) sin(pi y) : math
 // strictement identique (phi_exact(x, y) == s), corps device-callable sans appeler une fonction hote.
 struct OperatorMmsFillKernel {
   Array4 ap, af;
   Geometry geom;
   double axx, ayy, csum;
-  ADC_HD void operator()(int i, int j) const {
+  POPS_HD void operator()(int i, int j) const {
     const double x = geom.x_cell(i), y = geom.y_cell(j);
     const double s = std::sin(kPi * x) * std::sin(kPi * y);
     const double cc = std::cos(kPi * x) * std::cos(kPi * y);
@@ -88,7 +88,7 @@ struct ObserveMgRhsKernel {
   Array4 af;
   Geometry geom;
   double csum;
-  ADC_HD void operator()(int i, int j) const {
+  POPS_HD void operator()(int i, int j) const {
     const double x = geom.x_cell(i), y = geom.y_cell(j);
     const double s = std::sin(kPi * x) * std::sin(kPi * y);
     const double cc = std::cos(kPi * x) * std::cos(kPi * y);

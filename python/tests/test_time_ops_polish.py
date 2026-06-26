@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""adc.time op-set completeness (epic ADC-399 / ADC-414): the spec ops 10/16/21/22/23 + the mandatory
+"""pops.time op-set completeness (epic ADC-399 / ADC-414): the spec ops 10/16/21/22/23 + the mandatory
 validation errors #18/#19.
 
   - solve_local_nonlinear (op 10): a per-cell Newton solve (ADC-422); the builder validates its inputs
     and lowers a residual sub-block to a device FD-Jacobian Newton kernel;
   - reductions (op 16): P.sum / P.max / P.min / P.sum_component build a 'reduce' IR op and lower to the
-    matching adc:: collective reduction (adc::reduce_sum / reduce_max / reduce_min);
+    matching pops:: collective reduction (pops::reduce_sum / reduce_max / reduce_min);
   - fill_boundary (op 22): P.fill_boundary lowers to ctx.fill_boundary (the shared ghost exchange);
   - project (op 21): P.project lowers to ctx.apply_projection (the block's own positivity projection);
   - record_scalar (op 23): P.record_scalar lowers to ctx.record_scalar; the value is retrievable after
@@ -14,10 +14,10 @@ validation errors #18/#19.
   - validation #19: install_program with an ABI-mismatched module fails loud with the explicit message.
 
 (A) Pure Python (IR + codegen), always runs: the builders produce typed IR and emit_cpp_program lowers
-    each to the right ProgramContext / adc:: call. No compile, no engine.
+    each to the right ProgramContext / pops:: call. No compile, no engine.
 (B) End-to-end (reductions + record_scalar): a 1-variable model whose sum / max / min / sum_component of
     a known field match the analytic values; record_scalar stores a norm retrievable after the step.
-    Self-skips (exit 0) without numpy / _adc / a compiler / a visible Kokkos -- never fakes the engine.
+    Self-skips (exit 0) without numpy / _pops / a compiler / a visible Kokkos -- never fakes the engine.
 (C) Validation #18 (pure Python, mocked System) + #19 (skips without the engine).
 """
 import sys
@@ -25,9 +25,9 @@ import sys
 
 def _adc_time():
     try:
-        import adc.time as t
+        import pops.time as t
     except Exception as exc:  # adc not importable here -> skip, never fake
-        print("skip test_time_ops_polish (adc.time unavailable: %s)" % exc)
+        print("skip test_time_ops_polish (pops.time unavailable: %s)" % exc)
         sys.exit(0)
     return t
 
@@ -164,9 +164,9 @@ def test_reductions_lower_to_adc_reductions(t):
     P.record_scalar("s_c", s_c)
     P.commit("blk", P.linear_combine(U + P.dt * R))
     src = P.emit_cpp_program()
-    for frag in ("adc::reduce_sum(", "adc::reduce_max(", "adc::reduce_min("):
+    for frag in ("pops::reduce_sum(", "pops::reduce_max(", "pops::reduce_min("):
         assert frag in src, "the reduction codegen must contain %r\n%s" % (frag, src)
-    assert "adc::reduce_sum(r" in src and ", 0)" in src, "sum/sum_component reduce over a component"
+    assert "pops::reduce_sum(r" in src and ", 0)" in src, "sum/sum_component reduce over a component"
 
 
 # ---- (A.3) fill_boundary (op 22) + project (op 21): IR + codegen ----
@@ -301,24 +301,24 @@ def _run_section_b(t):
     try:
         import numpy as np
 
-        import adc
-    except Exception as exc:  # noqa: BLE001 -- numpy / _adc unavailable
+        import pops
+    except Exception as exc:  # noqa: BLE001 -- numpy / _pops unavailable
         print("-- (B) skipped: adc/numpy unavailable: %s --" % exc)
         return None
 
     n = 8
-    sim = adc.System(n=n, L=1.0, periodic=True)
+    sim = pops.System(n=n, L=1.0, periodic=True)
     if not hasattr(sim, "install_program") or not hasattr(sim, "program_diagnostics"):
-        print("-- (B) skipped: _adc lacks the install_program/program_diagnostics bindings "
-              "(rebuild _adc) --")
+        print("-- (B) skipped: _pops lacks the install_program/program_diagnostics bindings "
+              "(rebuild _pops) --")
         return None
 
-    from adc import dsl
+    from pops import dsl
 
     c = 0.5
     P = _reductions_program(t)
     try:
-        compiled = adc.compile_problem(model=_const_source_model(dsl, "red_prog", c), time=P)
+        compiled = pops.compile_problem(model=_const_source_model(dsl, "red_prog", c), time=P)
     except RuntimeError as exc:  # no compiler / no Kokkos visible / .so compile failed
         print("-- (B) skipped: compile_problem could not build the .so: %s --" % str(exc)[:200])
         return None
@@ -328,8 +328,8 @@ def _run_section_b(t):
         print("-- (B) skipped: model compile could not build the .so: %s --" % str(exc)[:200])
         return None
     sim.add_equation("blk", compiled_model,
-                     spatial=adc.FiniteVolume(limiter="none", riemann="rusanov"),
-                     time=adc.Explicit(method="euler"))
+                     spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                     time=pops.Explicit(method="euler"))
 
     # A KNOWN field with distinct min / max / sum: rho(i,j) = 1 + (linear ramp in [0, 1]).
     x = (np.arange(n) + 0.5) / n
@@ -388,20 +388,20 @@ def _run_section_b2(t):
     try:
         import numpy as np
 
-        import adc
+        import pops
     except Exception as exc:  # noqa: BLE001
         print("-- (B.2) skipped: adc/numpy unavailable: %s --" % exc)
         return None
 
     n = 8
-    sim = adc.System(n=n, L=1.0, periodic=True)
+    sim = pops.System(n=n, L=1.0, periodic=True)
     if not hasattr(sim, "install_program"):
-        print("-- (B.2) skipped: _adc lacks the install_program binding (rebuild _adc) --")
+        print("-- (B.2) skipped: _pops lacks the install_program binding (rebuild _pops) --")
         return None
-    from adc import dsl
+    from pops import dsl
     P = _fill_project_program(t)
     try:
-        compiled = adc.compile_problem(model=_const_source_model(dsl, "fp_prog", 0.0), time=P)
+        compiled = pops.compile_problem(model=_const_source_model(dsl, "fp_prog", 0.0), time=P)
     except RuntimeError as exc:
         print("-- (B.2) skipped: compile_problem could not build the .so: %s --" % str(exc)[:200])
         return None
@@ -412,9 +412,9 @@ def _run_section_b2(t):
         return None
     # A positivity floor makes the block carry a real projection closure (else project is a no-op).
     sim.add_equation("blk", compiled_model,
-                     spatial=adc.FiniteVolume(limiter="none", riemann="rusanov",
+                     spatial=pops.FiniteVolume(limiter="none", riemann="rusanov",
                                               positivity_floor=1e-12),
-                     time=adc.Explicit(method="euler"))
+                     time=pops.Explicit(method="euler"))
     x = (np.arange(n) + 0.5) / n
     X, Y = np.meshgrid(x, x, indexing="ij")
     rho0 = 1.0 + 0.3 * np.sin(2 * np.pi * X) * np.cos(2 * np.pi * Y)
@@ -473,7 +473,7 @@ def test_restart_missing_history_fails_loud(t):
     try:
         import numpy as np
 
-        import adc
+        import pops
     except Exception as exc:  # noqa: BLE001
         print("-- (C.1) skipped: adc/numpy unavailable: %s --" % exc)
         return
@@ -482,10 +482,10 @@ def test_restart_missing_history_fails_loud(t):
 
     # Build a checkpoint dict that does NOT contain the required 'blk.R' history (a legacy / wrong
     # checkpoint), then drive System.restart against a System that has registered it.
-    sysobj = adc.System.__new__(adc.System)  # bypass __init__ (no engine needed for the guard path)
+    sysobj = pops.System.__new__(pops.System)  # bypass __init__ (no engine needed for the guard path)
     sysobj._s = _MockSystem()
     ckpt = {
-        "adc_checkpoint_version": 1,
+        "pops_checkpoint_version": 1,
         "nx": 4, "ny": 4,
         "blocks": np.array(["blk"]),
         "ncomp_blk": 1,
@@ -518,26 +518,26 @@ def test_restart_missing_history_fails_loud(t):
 # ---- (C.2) validation #19: ABI mismatch on install_program (skips without the engine) ----
 def _run_section_c2(t):
     try:
-        import adc
+        import pops
     except Exception as exc:  # noqa: BLE001
         print("-- (C.2) skipped: adc unavailable: %s --" % exc)
         return None
 
     n = 4
-    sim = adc.System(n=n, L=1.0, periodic=True)
+    sim = pops.System(n=n, L=1.0, periodic=True)
     if not hasattr(sim, "install_program"):
-        print("-- (C.2) skipped: _adc lacks the install_program binding (rebuild _adc) --")
+        print("-- (C.2) skipped: _pops lacks the install_program binding (rebuild _pops) --")
         return None
     import os
     import tempfile
 
-    # A hand-written .so source whose adc_program_abi_key returns a DELIBERATELY WRONG key. Compiling it
+    # A hand-written .so source whose pops_program_abi_key returns a DELIBERATELY WRONG key. Compiling it
     # needs the toolchain; if it is absent we skip (never fake). The point is the explicit #19 message.
     src = (
-        'extern "C" const char* adc_program_abi_key() { return "deliberately-wrong-abi-key"; }\n'
-        'extern "C" const char* adc_program_name() { return "bad"; }\n'
-        'extern "C" const char* adc_program_hash() { return "0"; }\n'
-        'extern "C" void adc_install_program(void*) {}\n'
+        'extern "C" const char* pops_program_abi_key() { return "deliberately-wrong-abi-key"; }\n'
+        'extern "C" const char* pops_program_name() { return "bad"; }\n'
+        'extern "C" const char* pops_program_hash() { return "0"; }\n'
+        'extern "C" void pops_install_program(void*) {}\n'
     )
     cxx = os.environ.get("CXX", "c++")
     with tempfile.TemporaryDirectory() as tmp:

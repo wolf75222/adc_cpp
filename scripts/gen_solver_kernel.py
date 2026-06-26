@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Emit a GENERATED custom-solver C++ kernel from the @adc.lib.solver IR (ADC-462).
+"""Emit a GENERATED custom-solver C++ kernel from the @pops.lib.solver IR (ADC-462).
 
-Lowers a textbook Richardson solver authored in the ``@adc.lib.solver`` IR-DSL to a
-self-contained C++ kernel (``adc.lib.generate_solver_cpp``) and writes it to a header
+Lowers a textbook Richardson solver authored in the ``@pops.lib.solver`` IR-DSL to a
+self-contained C++ kernel (``pops.lib.generate_solver_cpp``) and writes it to a header
 the C++ validation test (``tests/test_solver_codegen_generated.cpp``) includes. This is
 the build-time half of the codegen->compile->run validation: the test compiles the
-emitted kernel against the real ``adc::adc`` runtime and runs it on a known linear
-system, comparing to the native ``adc::richardson_solve``.
+emitted kernel against the real ``pops::pops`` runtime and runs it on a known linear
+system, comparing to the native ``pops::richardson_solve``.
 
-Run standalone (no ``_adc`` extension needed -- the IR-authoring + codegen layers are
+Run standalone (no ``_pops`` extension needed -- the IR-authoring + codegen layers are
 pure Python): ``python3 scripts/gen_solver_kernel.py <out_header>``.
 """
 import importlib.util
@@ -18,20 +18,20 @@ import types
 
 
 def _load_lib():
-    """Load ``adc.lib`` (and its ``adc.time`` dependency) WITHOUT importing the ``adc``
-    package ``__init__`` (which needs the compiled ``_adc`` extension). The IR-authoring
+    """Load ``pops.lib`` (and its ``pops.time`` dependency) WITHOUT importing the ``adc``
+    package ``__init__`` (which needs the compiled ``_pops`` extension). The IR-authoring
     and codegen layers are pure Python, so they load standalone from source."""
     root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    adc_dir = os.path.join(root, "python", "adc")
+    pops_dir = os.path.join(root, "python", "adc")
     pkg = types.ModuleType("adc")
-    pkg.__path__ = [adc_dir]
+    pkg.__path__ = [pops_dir]
     sys.modules["adc"] = pkg
 
     def load(name):
         spec = importlib.util.spec_from_file_location(
-            "adc." + name, os.path.join(adc_dir, name + ".py"))
+            "pops." + name, os.path.join(pops_dir, name + ".py"))
         module = importlib.util.module_from_spec(spec)
-        sys.modules["adc." + name] = module
+        sys.modules["pops." + name] = module
         spec.loader.exec_module(module)
         return module
 

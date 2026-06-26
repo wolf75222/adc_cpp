@@ -49,8 +49,8 @@ NORMATIVE_ROOT = {
 
 # (motif regex, message). HIGH-CONFIDENCE : choses UNAMBIGUMENT fausses. Verifie sur une seule ligne.
 FORBIDDEN: list[tuple[str, str]] = [
-    (r"ADC_USE_EIGEN", "option CMake fantome (pas d'option(), pas de cible adc_eigen)"),
-    (r"--target\s+adc_py", "mauvaise cible : la cible pybind est `_adc` (python/CMakeLists.txt)"),
+    (r"POPS_USE_EIGEN", "option CMake fantome (pas d'option(), pas de cible pops_eigen)"),
+    (r"--target\s+pops_py", "mauvaise cible : la cible pybind est `_pops` (python/CMakeLists.txt)"),
     (r"limiter\s*=\s*['\"]mc['\"]", "limiteur 'mc' inexistant (NoSlope/Minmod/VanLeer/Weno5)"),
     (r"monotonized[- ]central", "limiteur MC / monotonized-central inexistant"),
     (r"AmrSystem[^\n]{0,40}mono-bloc", "fausse limitation : AmrSystem est mono- ET multi-bloc"),

@@ -23,9 +23,9 @@ Do not confuse axis count with domain shape: this limit is about the number of a
 whereas embedded-boundary / level-set domains (ADC-327) change the shape of the domain inside the
 fixed 2D plane and add no third index.
 
-Source of truth: `adc.capabilities()['dimension']` (`== 2`), the decision record
+Source of truth: `pops.capabilities()['dimension']` (`== 2`), the decision record
 [ADR-0001](https://github.com/wolf75222/adc_cpp/blob/master/docs/adr/ADR-0001-genericity-contracts.md),
-and the `include/adc/mesh/index/box2d.hpp` header comment.
+and the `include/pops/mesh/index/box2d.hpp` header comment.
 
 ## GPU: validated manually on ROMEO, not in CI
 
@@ -40,13 +40,13 @@ Several GPU cells of the matrix remain `?` (not yet exercised on device); see th
 
 ## DSL: parity asserted only if a matching C++ compiler is present
 
-The symbolic DSL (`adc.dsl`) compiles a model to a `.so` at runtime (backends `aot` /
+The symbolic DSL (`pops.dsl`) compiles a model to a `.so` at runtime (backends `aot` /
 `production`) by invoking the C++ compiler against `adc_cpp`'s headers. The parity
 verification (DSL vs native brick) therefore relies on the presence of a working C++ compiler
 that supports the module standard (with `std=None` the loader derives it: C++20 under Kokkos,
 since nvcc CUDA 12.x has no `-std=c++23`; see the [DSL reference](symbolic-dsl.md)). Without a
 working C++ toolchain, compilation of DSL models fails; only the purely native paths
-(`adc.Model(...)` / `add_block`) remain available.
+(`pops.Model(...)` / `add_block`) remain available.
 
 ## DSL backends: prototype/aot are CPU-only
 
@@ -74,17 +74,17 @@ still raise and point to `geometric_mg`, which remains the MPI default. The pote
 
 ## AMR: global Schur on a single block only
 
-The Schur-condensed source stage (`adc.CondensedSchur` via `adc.Split` / `adc.Strang`) is
+The Schur-condensed source stage (`pops.CondensedSchur` via `pops.Split` / `pops.Strang`) is
 available on AMR through `AmrSystem.add_equation`. The condensed stage is assembled and solved
 on the coarse level and requires a single-block hierarchy; it raises on a refined multi-block
-one. `AmrSystem.add_block` rejects `adc.Split` / `adc.Strang` (use `add_equation`). On `System`
+one. `AmrSystem.add_block` rejects `pops.Split` / `pops.Strang` (use `add_equation`). On `System`
 the stage is available on any cartesian or polar grid. Design:
 [SCHUR_CONDENSATION_DESIGN.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/SCHUR_CONDENSATION_DESIGN.md),
 [AMR_MULTIBLOCK_DESIGN.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/AMR_MULTIBLOCK_DESIGN.md).
 
 ## Polar geometry: direct Poisson single-box, no HLLC/Roe, no cartesian coupling
 
-The polar mesh (`adc.PolarMesh`, global ring (r, theta)) is wired into `System.step`
+The polar mesh (`pops.PolarMesh`, global ring (r, theta)) is wired into `System.step`
 (polar transport + polar Poisson + aux in local e_r/e_theta basis), but with sharp
 edges:
 
@@ -98,7 +98,7 @@ edges:
   / multi-rank by azimuthal (theta) split (ADC-67);
 - no cartesian <-> polar coupling: the polar ring is a separate global domain.
 
-Source of truth: `adc.capabilities()['riemann']['system_polar']`,
+Source of truth: `pops.capabilities()['riemann']['system_polar']`,
 `['geometry']['system_polar']` and `['schur']['system_polar']` (revalidated 2026-06).
 
 ## Two-fluid AP: scenario in adc_cases, not a core brick
@@ -107,7 +107,7 @@ The two-fluid isothermal asymptotic-preserving integrator is not a composable br
 core: it is a scenario. Its AP stabilization couples the stiffness to the time step in
 the elliptic, which `System` composition does not reproduce. Its C++ physics lives in
 `adc_cases/two_fluid_ap/` (`two_fluid_ap.hpp`), compiled on the fly against the generic
-headers of `adc_cpp`; the `_adc` module does not expose it and `adc` does not re-export it.
+headers of `adc_cpp`; the `_pops` module does not expose it and `adc` does not re-export it.
 
 ## Hoffart full model: reproduction not established
 
@@ -124,14 +124,14 @@ history but explicitly superseded by this audit).
 
 ## Import footgun: the module is tied to a specific cpython
 
-The Python module (`adc._adc`) is a `.so` linked to the interpreter that compiled it (e.g. a
+The Python module (`pops._pops`) is a `.so` linked to the interpreter that compiled it (e.g. a
 `cpython-312` `.so`). Observed consequences:
 
 - importing it under an interpreter of another version (e.g. a system `python3` 3.9) fails,
   with a message that now names the expected tag and the rebuild command;
-- without numpy, `import adc` and `adc.System` work; only `adc.dsl` (host evaluator)
+- without numpy, `import adc` and `pops.System` work; only `pops.dsl` (host evaluator)
   fails, with a message that asks for numpy.
 
 You must therefore use exactly the 3.12 interpreter that built the module (with numpy), and
 point `PYTHONPATH` at the corresponding `build*/python`, or reinstall with the wanted backend
-(`ADC_USE_KOKKOS=ON pip install .`). See [installation](../getting-started/installation.md).
+(`POPS_USE_KOKKOS=ON pip install .`). See [installation](../getting-started/installation.md).

@@ -24,21 +24,21 @@
 // multi-GPU). Sous Cuda, for_each_cell ne fence pas (async) : density()/mass() de l'AmrSystem font
 // deja un device_fence() interne avant la lecture hote (read_coarse / amr_read_coarse), donc la
 // lecture hote ici est sure. On insere malgre tout un Kokkos::fence() de ceinture avant les diffs.
-#include <adc/physics/bricks/bricks.hpp>         // CompositeModel, GravityForce, GravityCoupling
-#include <adc/physics/fluids/euler.hpp>          // Euler (transport compressible)
-#include <adc/runtime/builders/compiled/amr_dsl_block.hpp>  // add_compiled_model(AmrSystem, ...)
-#include <adc/runtime/amr_system.hpp>
-#include <adc/parallel/comm.hpp>  // comm_init, my_rank, n_ranks, all_reduce_*
+#include <pops/physics/bricks/bricks.hpp>         // CompositeModel, GravityForce, GravityCoupling
+#include <pops/physics/fluids/euler.hpp>          // Euler (transport compressible)
+#include <pops/runtime/builders/compiled/amr_dsl_block.hpp>  // add_compiled_model(AmrSystem, ...)
+#include <pops/runtime/amr_system.hpp>
+#include <pops/parallel/comm.hpp>  // comm_init, my_rank, n_ranks, all_reduce_*
 
 #include <cmath>
 #include <cstdio>
 #include <vector>
 
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
 #include <Kokkos_Core.hpp>
 #endif
 
-using namespace adc;
+using namespace pops;
 using Model = CompositeModel<Euler, GravityForce, GravityCoupling>;
 
 // QUATRE bulles de densite lisses, periodiques, bien separees : chacune depasse le seuil de
@@ -64,7 +64,7 @@ static std::vector<double> four_bubbles(int n) {
 
 int main(int argc, char** argv) {
   comm_init(&argc, &argv);
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   Kokkos::ScopeGuard guard(argc, argv);
 #else
   (void)argc;
@@ -99,7 +99,7 @@ int main(int argc, char** argv) {
   for (int s = 0; s < nsteps; ++s)
     sys.step(dt);
 
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   Kokkos::fence();  // ceinture avant la lecture hote (density()/mass() fencent deja en interne)
 #endif
   const std::vector<double> dens = sys.density();  // grossier REPLIQUE : identique sur chaque rang
@@ -134,7 +134,7 @@ int main(int argc, char** argv) {
         "AMRMPI np=%d patches0=%d patchesF=%d | mass=%.17e | csum=%.17e csumsq=%.17e "
         "cmax=%.17e | crossrank_spread=%.3e\n",
         np, np0, npf, mass, csum, csumsq, cmax, spread);
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
     const char* space = Kokkos::DefaultExecutionSpace::name();
 #else
     const char* space = "Serial(host)";

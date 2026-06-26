@@ -1,4 +1,4 @@
-"""Spec 3 board-like time programs (adc.time board sugar).
+"""Spec 3 board-like time programs (pops.time board sugar).
 
 T.fields / T.define / T.solve / T.commit_many are blackboard notation that lowers
 to the SAME Program IR as the primitive solve_fields / linear_combine /
@@ -7,9 +7,9 @@ RateBundle / StageStateSet / atomic commit_many behaviour.
 """
 import pytest
 
-from adc import model as _model
-from adc.time import Program
-from adc.math import rate, unknown
+from pops import model as _model
+from pops.time import Program
+from pops.math import rate, unknown
 
 
 def _ir(P):

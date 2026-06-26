@@ -5,18 +5,18 @@
 // verifie les valeurs, puis on redistribue les bandes vers de NOUVELLES tuiles
 // et on verifie l'identite du round-trip. Invariant au nombre de rangs.
 
-#include <adc/mesh/index/box2d.hpp>
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/storage/multifab.hpp>
-#include <adc/mesh/layout/refinement.hpp>  // parallel_copy
-#include <adc/parallel/comm.hpp>
-#include <adc/parallel/load_balance.hpp>
+#include <pops/mesh/index/box2d.hpp>
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/storage/multifab.hpp>
+#include <pops/mesh/layout/refinement.hpp>  // parallel_copy
+#include <pops/parallel/comm.hpp>
+#include <pops/parallel/load_balance.hpp>
 
 #include <cmath>
 #include <cstdio>
 #include <vector>
 
-using namespace adc;
+using namespace pops;
 
 int main(int argc, char** argv) {
   comm_init(&argc, &argv);

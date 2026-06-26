@@ -3,14 +3,14 @@
 Pure-Python: builds a model with the PDE shortcuts and asserts that flux / source /
 source_term / linear_source / elliptic_field / projection lower into typed operators
 with the right kinds and signatures, that the typed view does NOT perturb the model
-hash, and that the adc.model type system (StateSpace, FieldSpace, Rate, LocalLinear
-Operator, Signature, OperatorRegistry) behaves as specified. No compilation, no _adc
+hash, and that the pops.model type system (StateSpace, FieldSpace, Rate, LocalLinear
+Operator, Signature, OperatorRegistry) behaves as specified. No compilation, no _pops
 numerics; skips cleanly if the adc package is not importable.
 """
 import sys
 
 try:
-    from adc import dsl, model
+    from pops import dsl, model
 except Exception as exc:  # adc not importable here -> skip, never fake
     print("skip test_operator_registry (adc unavailable: %s)" % exc)
     sys.exit(0)

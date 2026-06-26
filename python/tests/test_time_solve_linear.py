@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""adc.time matrix-free dynamic linear solve, end to end (epic ADC-399 / ADC-405 Phase 6b).
+"""pops.time matrix-free dynamic linear solve, end to end (epic ADC-399 / ADC-405 Phase 6b).
 
 `emit_cpp_program` now lowers a DYNAMIC matrix-free linear solve: a ``matrix_free_operator`` whose
 apply ``out <- A(in)`` is an IR sub-block (``P.set_apply``, built from ``P.laplacian`` + the affine
-algebra) lowered to a C++ ``adc::ApplyFn`` lambda, and ``P.solve_linear(operator=A, rhs=, method=...)``
-lowered to a call into the runtime's Krylov loop (``adc::cg_solve`` / ``bicgstab_solve`` /
+algebra) lowered to a C++ ``pops::ApplyFn`` lambda, and ``P.solve_linear(operator=A, rhs=, method=...)``
+lowered to a call into the runtime's Krylov loop (``pops::cg_solve`` / ``bicgstab_solve`` /
 ``richardson_solve``). The iteration is DYNAMIC and lives C++-side, inside the loop -- the IR carries
 only the apply, the rhs, the method / tolerance / iteration budget. The persistent scratch (the
 Laplacian output, the solution field) is allocated ONCE at install time (a ``std::shared_ptr``
 captured into the step closure), reused across every step and every Krylov iteration.
 
 (A) Codegen (pure Python, always runs): a Helmholtz operator ``A(in) = in - alpha*Lap(in)`` solved by
-    cg / bicgstab / richardson lowers to the apply lambda + ``ctx.laplacian`` + ``adc::cg_solve`` /
+    cg / bicgstab / richardson lowers to the apply lambda + ``ctx.laplacian`` + ``pops::cg_solve`` /
     ``bicgstab_solve`` / ``richardson_solve``; the spec validation errors fire (max_iter absent /
     <= 0 -> ValueError "dynamic solver loops require max_iter"; tol <= 0 -> error; unknown method ->
     error; operator not a matrix_free_operator -> error).
@@ -22,16 +22,16 @@ captured into the step closure), reused across every step and every Krylov itera
     compile_problem -> install_program -> set a smooth periodic rho0 -> step once -> get_state, vs an
     OFFLINE numpy CG on the SAME discrete periodic 5-point system. Asserts max|compiled - offline| <=
     1e-6, the solve changed the state, and the offline solve took > 1 iteration. Self-skips (exit 0)
-    without numpy / _adc / install_program / a compiler / a visible Kokkos -- never fakes the engine.
+    without numpy / _pops / install_program / a compiler / a visible Kokkos -- never fakes the engine.
 """
 import sys
 
 
 def _adc_time():
     try:
-        import adc.time as t
+        import pops.time as t
     except Exception as exc:  # adc not importable here -> skip, never fake
-        print("skip test_time_solve_linear (adc.time unavailable: %s)" % exc)
+        print("skip test_time_solve_linear (pops.time unavailable: %s)" % exc)
         sys.exit(0)
     return t
 
@@ -62,20 +62,20 @@ def _solve_program(t, *, name="solve_lin", method="cg", tol=1e-10, max_iter=200,
 # ---- (A) codegen: pure Python, always runs ----
 def test_apply_lambda_and_cg_codegen(t):
     src = _solve_program(t, method="cg").emit_cpp_program()
-    for frag in ("adc::ApplyFn apply_A", "ctx.laplacian", "adc::cg_solve",
-                 "std::make_shared<adc::MultiFab>(ctx.alloc_scalar_field"):
+    for frag in ("pops::ApplyFn apply_A", "ctx.laplacian", "pops::cg_solve",
+                 "std::make_shared<pops::MultiFab>(ctx.alloc_scalar_field"):
         assert frag in src, "the generated cg solve must contain %r\n%s" % (frag, src)
 
 
 def test_bicgstab_codegen(t):
     src = _solve_program(t, method="bicgstab").emit_cpp_program()
-    assert "adc::bicgstab_solve" in src, src
-    assert "adc::ApplyFn{}" in src, "bicgstab uses the identity (empty) preconditioner\n%s" % src
+    assert "pops::bicgstab_solve" in src, src
+    assert "pops::ApplyFn{}" in src, "bicgstab uses the identity (empty) preconditioner\n%s" % src
 
 
 def test_richardson_codegen(t):
     src = _solve_program(t, method="richardson").emit_cpp_program()
-    assert "adc::richardson_solve" in src, src
+    assert "pops::richardson_solve" in src, src
 
 
 def test_solve_validates(t):
@@ -173,7 +173,7 @@ def _np_cg(apply, b, *, tol=1e-10, max_iter=2000):
 
 def _discrete_helmholtz(n, alpha):
     """The discrete periodic 5-point Helmholtz matvec A x = x - alpha*Lap(x) on an n x n unit-square
-    grid (dx = dy = 1/n), matching adc::apply_laplacian's bare path with periodic ghosts."""
+    grid (dx = dy = 1/n), matching pops::apply_laplacian's bare path with periodic ghosts."""
     import numpy as np
 
     h2 = (1.0 / n) ** 2
@@ -190,18 +190,18 @@ def _run_section_b(t):
     try:
         import numpy as np
 
-        import adc
-    except Exception as exc:  # noqa: BLE001  -- numpy / _adc unavailable in this interpreter
+        import pops
+    except Exception as exc:  # noqa: BLE001  -- numpy / _pops unavailable in this interpreter
         print("-- (B) skipped: adc/numpy unavailable: %s --" % exc)
         return None
 
     n = 16
-    sim = adc.System(n=n, L=1.0, periodic=True)
+    sim = pops.System(n=n, L=1.0, periodic=True)
     if not hasattr(sim, "install_program"):
-        print("-- (B) skipped: _adc lacks the install_program binding (rebuild _adc) --")
+        print("-- (B) skipped: _pops lacks the install_program binding (rebuild _pops) --")
         return None
 
-    from adc import dsl
+    from pops import dsl
 
     # A minimal 1-variable model with NO flux and NO Poisson coupling: the Program never runs a rhs or
     # solve_fields; the block's single conservative variable (rho) doubles as the scalar field the
@@ -218,7 +218,7 @@ def _run_section_b(t):
 
     tol = 1e-10
     try:
-        compiled = adc.compile_problem(
+        compiled = pops.compile_problem(
             model=passive_model("solve_prog"),
             time=_solve_program(t, name="solve_step", method="cg", tol=tol, max_iter=200))
     except RuntimeError as exc:  # no compiler / no Kokkos visible / .so compile failed
@@ -233,8 +233,8 @@ def _run_section_b(t):
         print("-- (B) skipped: model compile could not build the .so: %s --" % str(exc)[:200])
         return None
     sim.add_equation("blk", compiled_model,
-                     spatial=adc.FiniteVolume(limiter="none", riemann="rusanov"),
-                     time=adc.Explicit(method="euler"))
+                     spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                     time=pops.Explicit(method="euler"))
 
     x = (np.arange(n) + 0.5) / n
     X, Y = np.meshgrid(x, x, indexing="ij")

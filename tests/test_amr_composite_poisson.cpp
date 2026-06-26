@@ -1,5 +1,5 @@
 // Poisson AMR COMPOSITE branche dans AmrCouplerMP (set_composite_poisson) : test de fidelite.
-// Cf. include/adc/coupling/amr_coupler_mp.hpp (compute_aux_composite) + composite_fac_poisson.hpp.
+// Cf. include/pops/coupling/amr_coupler_mp.hpp (compute_aux_composite) + composite_fac_poisson.hpp.
 //
 // On construit une hierarchie AMR 2 niveaux (grossier + UN patch fin central) portant un modele
 // SCALAIRE dont elliptic_rhs(U) = U : le coupleur resout donc Lap phi = U. On pose U = f_rhs =
@@ -13,22 +13,22 @@
 //
 // Serie (Kokkos OFF) : grossier mono-box replique, 1 patch mono-box. Multi-patch / MPI = phases ulterieures.
 
-#include <adc/coupling/amr/amr_coupler_mp.hpp>
+#include <pops/coupling/amr/amr_coupler_mp.hpp>
 
-#include <adc/core/state/state.hpp>
-#include <adc/mesh/index/box2d.hpp>
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/layout/distribution_mapping.hpp>
-#include <adc/mesh/geometry/geometry.hpp>
-#include <adc/mesh/storage/multifab.hpp>
-#include <adc/mesh/boundary/physical_bc.hpp>
-#include <adc/parallel/comm.hpp>
+#include <pops/core/state/state.hpp>
+#include <pops/mesh/index/box2d.hpp>
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/layout/distribution_mapping.hpp>
+#include <pops/mesh/geometry/geometry.hpp>
+#include <pops/mesh/storage/multifab.hpp>
+#include <pops/mesh/boundary/physical_bc.hpp>
+#include <pops/parallel/comm.hpp>
 
 #include <cmath>
 #include <cstdio>
 #include <vector>
 
-using namespace adc;
+using namespace pops;
 static constexpr double kPi = 3.14159265358979323846;
 
 static double u_exact(double x, double y) {
@@ -41,12 +41,12 @@ static double f_rhs(double x, double y) {
 // Modele SCALAIRE minimal : aucune dynamique (flux/source nuls) ; elliptic_rhs(U) = U -> Lap phi = U.
 struct ScalarCharge {
   using State = StateVec<1>;
-  using Aux = adc::Aux;
+  using Aux = pops::Aux;
   static constexpr int n_vars = 1;
-  ADC_HD State flux(const State&, const Aux&, int) const { return State{Real(0)}; }
-  ADC_HD Real max_wave_speed(const State&, const Aux&, int) const { return Real(0); }
-  ADC_HD State source(const State&, const Aux&) const { return State{Real(0)}; }
-  ADC_HD Real elliptic_rhs(const State& u) const { return u[0]; }
+  POPS_HD State flux(const State&, const Aux&, int) const { return State{Real(0)}; }
+  POPS_HD Real max_wave_speed(const State&, const Aux&, int) const { return Real(0); }
+  POPS_HD State source(const State&, const Aux&) const { return State{Real(0)}; }
+  POPS_HD Real elliptic_rhs(const State& u) const { return u[0]; }
 };
 
 // Pose U(i,j,0) = f_rhs(x_cell, y_cell) sur les cellules valides (selon la geometrie @p g du niveau).

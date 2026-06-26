@@ -11,12 +11,12 @@
 //   (2) la facade multi-blocs : refiner sur l'energie (composante 3 de l'Euler compressible) deplace le
 //       patch fin vers la bosse d'energie, la ou le selecteur par defaut (densite uniforme) garde le
 //       seed central -> les deux layouts DIFFERENT, preuve que la composante lue a change.
-#include <adc/physics/fluids/euler.hpp>          // Euler::conservative_vars (rho, rho_u, rho_v, E)
-#include <adc/core/state/variables.hpp>         // VariableSet, VariableRole, VariableKind
-#include <adc/mesh/layout/patch_box.hpp>         // PatchBox (signature index-espace des patchs fins)
-#include <adc/runtime/amr_system.hpp>     // AmrSystem, AmrSystemConfig
-#include <adc/runtime/builders/factory/model_factory.hpp>  // detail::resolve_selected_component (ADC-296)
-#include <adc/runtime/config/model_spec.hpp>
+#include <pops/physics/fluids/euler.hpp>          // Euler::conservative_vars (rho, rho_u, rho_v, E)
+#include <pops/core/state/variables.hpp>         // VariableSet, VariableRole, VariableKind
+#include <pops/mesh/layout/patch_box.hpp>         // PatchBox (signature index-espace des patchs fins)
+#include <pops/runtime/amr_system.hpp>     // AmrSystem, AmrSystemConfig
+#include <pops/runtime/builders/factory/model_factory.hpp>  // detail::resolve_selected_component (ADC-296)
+#include <pops/runtime/config/model_spec.hpp>
 
 #include <algorithm>
 #include <climits>
@@ -25,11 +25,11 @@
 #include <string>
 #include <vector>
 
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
 #include <Kokkos_Core.hpp>
 #endif
 
-using namespace adc;
+using namespace pops;
 
 template <class F>
 static bool raises(F&& f) {
@@ -119,7 +119,7 @@ static std::vector<PatchBox> run_case(int N, double thr, const std::string& vari
 }
 
 int main(int argc, char** argv) {
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   Kokkos::ScopeGuard guard(argc, argv);
 #else
   (void)argc;

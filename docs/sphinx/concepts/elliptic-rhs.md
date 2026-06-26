@@ -44,7 +44,7 @@ of charge is composed across species.
 
 After assembling the summed right-hand side, the system solves the elliptic
 equation for `phi`, then derives the field and stores everything in `aux` (the
-`adc::Aux` channel). The channel carries:
+`pops::Aux` channel). The channel carries:
 
 - `phi`: the potential.
 - `grad_x`, `grad_y`: the components of its gradient.
@@ -76,8 +76,8 @@ deliberately identical between the single-level and AMR pipelines.
 ## Writing the contract two ways
 
 You declare the same contract whichever way you author a model. With native
-bricks you pick an elliptic brick in `adc.Model(..., elliptic=...)`, for example
-`adc.ChargeDensity` or `adc.BackgroundDensity`. With the DSL you write
+bricks you pick an elliptic brick in `pops.Model(..., elliptic=...)`, for example
+`pops.ChargeDensity` or `pops.BackgroundDensity`. With the DSL you write
 `m.elliptic_rhs(expr)` and reference the aux fields you need with `m.aux("phi")`,
 `m.aux("grad_x")`, `m.aux("grad_y")`. Both produce the same C++ object and plug
 into a `System` or `AmrSystem` the same way.

@@ -1,10 +1,10 @@
 # GH200 device validation: dense_eig + hyqmom15 (.so), single + multi-GPU
 
 ADC-181. Validates on GH200 (ROMEO, NVIDIA GH200 120GB, aarch64) the device path of the exact
-eigenvalue-based wave speeds: `include/adc/numerics/linalg/dense_eig.hpp` (`real_eig_minmax`: Hessenberg
-reduction + Francis double-shift QR iteration, named `ADC_HD` functors, on-stack buffers, zero
+eigenvalue-based wave speeds: `include/pops/numerics/linalg/dense_eig.hpp` (`real_eig_minmax`: Hessenberg
+reduction + Francis double-shift QR iteration, named `POPS_HD` functors, on-stack buffers, zero
 allocation) through the compiled hyqmom15 `.so` (DSL-emitted bricks, `exact_speeds=True`,
-`riemann="hll"`), wired by the `adc::add_compiled_model` compilation seam (full native path: device
+`riemann="hll"`), wired by the `pops::add_compiled_model` compilation seam (full native path: device
 `assemble_rhs`, halos).
 
 `dense_eig.hpp` was designed for nvcc but had never been EXECUTED on device. This note provides the
@@ -17,8 +17,8 @@ the EIGEN path (signed HLL wave-speed bounds) end to end in a run.
 ## Recipe (recap)
 
 `armgpu` node (Grace-Hopper, aarch64), `module load cuda/12.6` + `romeo_load_armgpu_env`. Device
-compiler = the `nvcc_wrapper` of the Kokkos install `~/adc_gpu_p1/kinstall` (SERIAL;CUDA, sm_90). The
-driver `diocotron_gpu.cpp` (`Hyqmom15Hyp/Src/Ell` bricks + `adc::System` + Poisson `geometric_mg`)
+compiler = the `nvcc_wrapper` of the Kokkos install `~/pops_gpu_p1/kinstall` (SERIAL;CUDA, sm_90). The
+driver `diocotron_gpu.cpp` (`Hyqmom15Hyp/Src/Ell` bricks + `pops::System` + Poisson `geometric_mg`)
 reads the binary initial state `ic_128.raw` and advances the 15-moment diocotron.
 
 ## Reproducibility (versioned sources)
@@ -40,7 +40,7 @@ identically by `make_brick_and_ic.py` on a machine with the adc python module (t
 required for the DSL emission, pure-python):
 
 ```
-ADC_CASES=/path/adc_cases PYTHONPATH=/path/adc_cpp/python \
+POPS_CASES=/path/adc_cases PYTHONPATH=/path/adc_cpp/python \
   python docs/validation/make_brick_and_ic.py --ns 128 256 --out $WORK
 ```
 
@@ -70,7 +70,7 @@ noeud=romeo-a045  NVIDIA GH200 120GB
 
 `real_eig_minmax` is called PER CELL at each step (HLL flux wave-speed bounds). 24706 steps with no
 NaN nor destructive Gershgorin fallback, mass drift 1.7e-13: the per-cell QR loop stays bounded (no
-stall nor iteration-count blow-up) on device. This is the first proof that the Hessenberg+QR `ADC_HD`
+stall nor iteration-count blow-up) on device. This is the first proof that the Hessenberg+QR `POPS_HD`
 path executes on GH200.
 
 ## 2. Host (Serial) / device (Cuda) parity, SAME node
@@ -86,7 +86,7 @@ anymore):
 Under Serial, `DefaultExecutionSpace == DefaultHostExecutionSpace`: the `if constexpr` guard of
 `for_each_cell` (#165) takes the sequential host loop on the small boxes (coarse V-cycle levels)
 where the device keeps `parallel_for`; no inter-iteration dependency, so bit-identical expected
-outside reductions. `real_eig_minmax` is the SAME `ADC_HD` source instantiated host on one side,
+outside reductions. `real_eig_minmax` is the SAME `POPS_HD` source instantiated host on one side,
 device on the other.
 
 20 steps from the SAME initial state `ic_128.raw`, binary dump of the final state (15 moments + phi),
@@ -115,7 +115,7 @@ Reading:
 * **`dense_eig` path: agreement to the printed precision (~1 ULP), not a bit-exact proof.** The time
   step `dt` (column `dt` of `growth.csv`) comes from `step_cfl` = CFL on the MAX of the wave-speed
   bounds returned by `real_eig_minmax` cell by cell. The MAX reduction is exact regardless of order:
-  at identical input, the `ADC_HD` QR returns identical bounds device/host (this is the algorithmic
+  at identical input, the `POPS_HD` QR returns identical bounds device/host (this is the algorithmic
   property of the eigen path, deterministic and from the SAME host/device source). But what we
   OBSERVE is only an agreement to the PRINTED precision: `growth.csv` writes `dt` only in `%.3e`
   (4 digits) and the `a_l` modes in `%.6e` (7 digits), not the 16 digits of a double. The cumulative
@@ -140,7 +140,7 @@ Reading:
 
 ## 3. Multi-GPU MPI (halo substrate, jobs 654863 then 654999) and scope
 
-The hyqmom15 driver uses `adc::System` (mono-box, mono-rank): it has NO MPI domain decomposition. The
+The hyqmom15 driver uses `pops::System` (mono-box, mono-rank): it has NO MPI domain decomposition. The
 multi-GPU correctness of the model factors into two independent bricks:
 
 1. correctness of the model on one GPU, including `dense_eig` (section 1 + section 2);
@@ -170,7 +170,7 @@ and documented behavior.
 ### Direct multi-rank hyqmom15 (System, mono-box round-robin) -- `diocotron_mpi.sbatch`
 
 The SAME driver `diocotron_gpu.cpp` (`Hyqmom15Hyp/Src/Ell` bricks + Poisson `geometric_mg`), linked
-to CUDA-aware OpenMPI by `-DADC_VALIDATION_MPI=ON` (a CMake option that defines `ADC_HAS_MPI` and
+to CUDA-aware OpenMPI by `-DADC_VALIDATION_MPI=ON` (a CMake option that defines `POPS_HAS_MPI` and
 switches `comm.hpp` + the collectives of `system.cpp` onto the real MPI path), runs under
 `srun -n {1,2,4} --gpus-per-task=1` (one GH200 per rank). Topology = MPI decomposition of `System`
 mono-box round-robin (box 0 on rank 0; the other ranks have `local_size()==0` and contribute 0 to the
@@ -178,7 +178,7 @@ all-reduce), identical to the CPU topology already validated by `run_mpi.py`. Th
 snapshot reads go through `state_global` / `potential_global` (collective all-reduce,
 `system.cpp:1808/1824`); the `step_cfl` / `solve_fields` step is collective; the `DT_COLLAPSE` vote
 goes through `all_reduce_max` (all ranks exit together, never a deadlock). Only rank 0 writes files +
-stdout. Without `ADC_HAS_MPI`, the stubs of `comm.hpp` (`my_rank()=0` / `n_ranks()=1`) keep the
+stdout. Without `POPS_HAS_MPI`, the stubs of `comm.hpp` (`my_rank()=0` / `n_ranks()=1`) keep the
 serial path (`parity181.sbatch`) bit-unchanged.
 
 Validation criterion (`diocotron_mpi.sbatch`, embedded python): mass conservation
@@ -244,7 +244,7 @@ bit-identical across np was an artifact of that topology). ADC-320 records the D
 real DOMAIN-DECOMPOSED run where the halos exchange the state between GPUs.
 
 The driver `diocotron_amr_gpu.cpp` wires the SAME composite (`Hyqmom15Hyp/Src/Ell` bricks + Poisson
-`geometric_mg`) onto `adc::AmrSystem` with `distribute_coarse=true`: the coarse level becomes a
+`geometric_mg`) onto `pops::AmrSystem` with `distribute_coarse=true`: the coarse level becomes a
 MULTI-BOX `BoxArray` (2x2 tiles, `coarse_max_grid=n/2`) spread round-robin across `n_ranks()` GPUs.
 At np>1 the coarse transport calls `fill_boundary` on this multi-box MultiFab (`amr_subcycling.hpp`),
 a REAL cross-rank MPI exchange of the 15 conserved components over `SharedHostPinnedSpace` buffers
@@ -310,7 +310,7 @@ Reading:
 
 ## Conclusion
 
-* `dense_eig` (`real_eig_minmax`, Hessenberg+QR `ADC_HD`) EXECUTED and CORRECT on GH200 device
+* `dense_eig` (`real_eig_minmax`, Hessenberg+QR `POPS_HD`) EXECUTED and CORRECT on GH200 device
   through the hyqmom15 `.so` (`exact_speeds`, `hll`): section 1 (24706 steps) + section 2 (host/device
   parity same node, ~1 ULP agreement on the observable, diffuse machine-noise-level gaps maximal in
   the multigrid potential).

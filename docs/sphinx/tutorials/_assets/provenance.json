@@ -1,14 +1,14 @@
 {
   "script": "docs/sphinx/tutorials/diocotron_tutorial.py",
   "command": "python diocotron_tutorial.py --n 96 --steps 60",
-  "adc_cpp_sha": "d9cb61591f1f24c947d773f288d3da80b0ca6304",
+  "pops_cpp_sha": "d9cb61591f1f24c947d773f288d3da80b0ca6304",
   "backend_compile": "aot",
   "backend_runtime": "serial (defaut ; cf. getting_started/backend pour Kokkos/MPI)",
   "resolution": "96x96",
   "steps": 60,
   "cfl": 0.4,
   "python": "3.12.2",
-  "adc_module": "/Users/romaindespoulain/Documents/Stage_Romain/adc_cpp/build-master/python/adc/__init__.py",
+  "pops_module": "/Users/romaindespoulain/Documents/Stage_Romain/adc_cpp/build-master/python/pops/__init__.py",
   "assets": [
     "diocotron_growth.png",
     "diocotron_cover.png",

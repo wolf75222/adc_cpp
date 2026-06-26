@@ -36,8 +36,8 @@ Open branches/PRs to isolate from `master` measurements:
 Publication rule: each perf table must begin with:
 
 ```text
-adc_cpp_commit=<sha>
-adc_cases_commit=<sha ou n/a>
+pops_cpp_commit=<sha>
+pops_cases_commit=<sha ou n/a>
 backend=<serial|kokkos-openmp|kokkos-cuda|mpi+kokkos-openmp|mpi+kokkos-cuda>
 compiler=<id/version>
 kokkos=<version/devices>
@@ -83,16 +83,16 @@ cout acceptable = compilation DSL froide, si amortie par cache et run long
 
 Status observed in ADC at audit time:
 
-- `include/adc/runtime/system.hpp` documents the contract: Python composes, the
+- `include/pops/runtime/system.hpp` documents the contract: Python composes, the
   cell-by-cell compute stays compiled C++; no Python callback in the
   hot path, except custom integrator via `eval_rhs/get_state/set_state`.
 - `python/bindings/core/bindings.cpp` exposes `step` and `advance` directly. The visible
   copies are at the `set_*` boundaries (`flat(arr)`) and diagnostics
   `get_state`, `density`, `potential` (`to_2d`, `to_3d` with `memcpy`).
-- `python/adc/integrate.py` is the path to ban from production measurements:
+- `python/pops/integrate.py` is the path to ban from production measurements:
   it calls `eval_rhs`, `get_state`, `set_state` from Python and therefore copies
   full fields at each stage.
-- `python/adc/dsl.py` distinguishes `prototype`, `aot` and `production`. For
+- `python/pops/dsl.py` distinguishes `prototype`, `aot` and `production`. For
   production measurements, you must require `backend="production"` and check that
   the adder is `add_native_block`.
 
@@ -260,7 +260,7 @@ and adds a lot of MPI/MG latency.
 Run exactly the same smooth periodic Euler case in three variants:
 
 1. `cpp-native`: native C++, without Python.
-2. `python-bricks`: `adc.Model(FluidState, CompressibleFlux, NoSource, ...)`.
+2. `python-bricks`: `pops.Model(FluidState, CompressibleFlux, NoSource, ...)`.
 3. `python-dsl-production`: `dsl.Model(...).compile(backend="production")`.
 
 Required controls:
@@ -271,7 +271,7 @@ Required controls:
 - No `eval_rhs/get_state/set_state` call in the measured loop.
 - Measure `advance(dt, nsteps)` and the Python `for step(dt)` loop separately.
 - Measure final `get_state` in an `extract_final` phase, not in `step`.
-- Clear or isolate `ADC_CACHE_DIR` for the cold compile measurement, then redo
+- Clear or isolate `POPS_CACHE_DIR` for the cold compile measurement, then redo
   warm cache with the same model.
 
 Target table:
@@ -364,7 +364,7 @@ generates synthetic values.
 3. For frontends, make `advance(dt, nsteps)` the primary measurement and
    `for step(dt)` a measurement of the pybind boundary cost.
 4. For the DSL, publish cold compile, warm cache and hot loop separately.
-5. Ban `python/adc/integrate.py` from production numbers; keep it as
+5. Ban `python/pops/integrate.py` from production numbers; keep it as
    a quantified anti-example.
 6. On GPU, put diagnostics in their own phase: any host
    extraction may hide a `fence` or a unified-memory migration.
@@ -432,8 +432,8 @@ docs/perf_figures_647780_647781_647815/
 ROMEO results:
 
 ```text
-/home/rmdraux/adc_perf_20260608/results/
-/home/rmdraux/adc_perf_20260608/logs/
+/home/rmdraux/pops_perf_20260608/results/
+/home/rmdraux/pops_perf_20260608/logs/
 ```
 
 Generated graphs:
@@ -552,7 +552,7 @@ relocation R_X86_64_32 ... libkokkoscore.a ... recompile with -fPIC
 ```
 
 Campaign correction: build a dedicated PIC Kokkos OpenMP in
-`/home/rmdraux/adc_perf_20260608/kinstall_omp_pic`, then relaunch only the
+`/home/rmdraux/pops_perf_20260608/kinstall_omp_pic`, then relaunch only the
 Python frontend on the same commit `1f9fb4a`.
 
 The native C++ lines come from job `647780`; the Python lines come from
@@ -661,7 +661,7 @@ and not be launched during another active GH200 job.
 
 Job `647848` relaunched native C++, Python bricks and Python DSL `production`
 in the same ROMEO job, on the same `x64cpu` node, with the same PIC Kokkos OpenMP
-(`/home/rmdraux/adc_perf_20260608/kinstall_omp_pic`) and the same commit
+(`/home/rmdraux/pops_perf_20260608/kinstall_omp_pic`) and the same commit
 `adc_cpp=adde23b`.
 
 | job | commit | target | status | time |
@@ -802,26 +802,26 @@ The `647848` catch-up showed that `python-dsl-production` warm stays around
 `341 ms` regardless of the number of threads. The code investigation indicates a
 plausible and actionable cause: the DSL `production` loader is zero-copy and
 correctly uses `add_native_block`, but it compiled its header-only templates
-without explicitly propagating `ADC_HAS_KOKKOS`, the Kokkos includes and
+without explicitly propagating `POPS_HAS_KOKKOS`, the Kokkos includes and
 `-fopenmp`.
 
-Consequence: on a Python module `_adc` compiled with Kokkos OpenMP, the DSL
+Consequence: on a Python module `_pops` compiled with Kokkos OpenMP, the DSL
 block could stay on the serial fallback in the inline portions of the loader,
 while looking like a native production path. This is not a
 MUFFIN problem of Python copies; it is a C++ backend inconsistency between
-the `_adc` module and the `.so` generated by the DSL.
+the `_pops` module and the `.so` generated by the DSL.
 
 Experimental local fix added in this worktree:
 
-- `include/adc/runtime/abi_key.hpp` now encodes the ABI features
+- `include/pops/runtime/abi_key.hpp` now encodes the ABI features
   `kokkos=on/off` and `mpi=on/off`. A loader compiled without Kokkos can no longer
-  be considered ABI-equivalent to an `_adc` module compiled with Kokkos.
-- `python/adc/dsl.py` detects `ADC_KOKKOS_ROOT`/`Kokkos_ROOT`/`KOKKOS_ROOT`,
-  uses `ADC_KOKKOS_CXX` or `nvcc_wrapper` if available, adds
+  be considered ABI-equivalent to an `_pops` module compiled with Kokkos.
+- `python/pops/dsl.py` detects `POPS_KOKKOS_ROOT`/`Kokkos_ROOT`/`KOKKOS_ROOT`,
+  uses `POPS_KOKKOS_CXX` or `nvcc_wrapper` if available, adds
   `-DADC_HAS_KOKKOS`, the Kokkos includes, `-fopenmp` in OpenMP, and puts these
   features in the DSL cache key. In the current version of the worktree,
   the loader no longer links `libkokkos*`; it lets the symbols resolve
-  against `_adc`.
+  against `_pops`.
 - `bench/romeo_perf_frontends_cpu.sbatch` knows how to overlay these two
   patched files on an explicit ROMEO checkout, and reuse the native C++
   lines already measured to relaunch only the Python frontend.
@@ -830,7 +830,7 @@ Warning: this local variant is stricter than the upstream branch
 `origin/feat/dsl-production-optflags`. The upstream branch puts the Kokkos backend
 in the Python cache key and avoids linking `libkokkos*` in the production `.so`;
 it does not modify the public C++ ABI key
-`include/adc/runtime/abi_key.hpp`. The local ABI modification must therefore be
+`include/pops/runtime/abi_key.hpp`. The local ABI modification must therefore be
 read as a safety experiment, not as a patch to merge without review.
 The `HybridModel.compile()` part was also extended locally and requires a
 dedicated test before integration.
@@ -839,7 +839,7 @@ Targeted ROMEO validation:
 
 ```text
 jobs=648017, 648031, 648034
-base=/home/rmdraux/adc_perf_frontends_dslkokkos_20260608
+base=/home/rmdraux/pops_perf_frontends_dslkokkos_20260608
 checkout=adde23b + patch local dsl/abi
 reference_cpp=job 647848, lignes cpp-native uniquement
 objectif=verifier si DSL warm suit enfin les threads Kokkos OpenMP
@@ -850,16 +850,16 @@ because the patch automatically chose `bin/nvcc_wrapper` as soon as the file
 existed in the PIC Kokkos root. On ROMEO CPU, this OpenMP installation
 does provide `nvcc_wrapper`, but `nvcc` is not loaded. The final fix
 is therefore deliberately explicit: `nvcc_wrapper` is used only if
-`ADC_KOKKOS_CXX` designates it or if `ADC_KOKKOS_USE_NVCC_WRAPPER=1`; OpenMP takes
+`POPS_KOKKOS_CXX` designates it or if `POPS_KOKKOS_USE_NVCC_WRAPPER=1`; OpenMP takes
 the host compiler `g++` with `-fopenmp`.
 
 Job `648034` then produced the complete lines. The Python process
 ends afterward with `rc=134` on `Kokkos::finalize()` ("Execution space
 instance to be removed couldn't be found!") after writing the CSV. The upstream
 branch `origin/feat/dsl-production-optflags` fixes this cause: you must
-not link `libkokkos*` in the production `.so`, because the `_adc` module has already
+not link `libkokkos*` in the production `.so`, because the `_pops` module has already
 loaded the Kokkos runtime. The loader must leave the Kokkos symbols undefined
-and resolve them at load time against `_adc` promoted to `RTLD_GLOBAL`; otherwise
+and resolve them at load time against `_pops` promoted to `RTLD_GLOBAL`; otherwise
 you create two Kokkos singletons and finalization aborts.
 
 Local results:
@@ -890,7 +890,7 @@ Kokkos runtime in the `.so`. The `648034` ratios therefore serve to diagnose
 the return of the OpenMP scaling, not to give the final cost of the frontend.
 
 The upstream branch also adds `-O3 -DNDEBUG` by default for the production `.so`
-(`ADC_DSL_OPTFLAGS` allows overriding, for example `-march=native`) and does not
+(`POPS_DSL_OPTFLAGS` allows overriding, for example `-march=native`) and does not
 link `libkokkos*` in the loader. According to its adc_cases report
 `origin/feat/perf-campaign-harness`, this variant brings the DSL to serial
 parity (`1.04x`) and to OpenMP threaded parity (`1.02x` at 8 threads) with clean
@@ -908,7 +908,7 @@ buffers must go through pinned host memory rather than
 through a UVM/device pointer that triggers CUDA IPC under ROMEO GPU cgroups.
 
 Provenance nuance: the local worktree of this report is still on
-`HEAD=0187329` and its `include/adc/mesh/fill_boundary.hpp` shows the old
+`HEAD=0187329` and its `include/pops/mesh/fill_boundary.hpp` shows the old
 `fab_allocator` buffers in unified memory. The code audited for `#254` is
 therefore `origin/master`/the ROMEO branch, not the local file currently
 checked out. This distinction avoids mixing audit of local code and code
@@ -977,7 +977,7 @@ T_step = T_kernel + T_halo + T_reduction + T_poisson + T_fence + T_py_boundary
    measurements `647848/648034` show ratios around `0.93-0.97x`, to read
    as measurement noise and not as "Python faster".
 2. The DSL `production` was not slowed by Python but by the "how" of
-   the loader compilation: without `ADC_HAS_KOKKOS`, the inline templates
+   the loader compilation: without `POPS_HAS_KOKKOS`, the inline templates
    use the serial fallback; with `libkokkos*` linked in the `.so`, you create
    a second Kokkos runtime; with `-O2` without `-DNDEBUG`, the hot loop keeps
    insufficient checks/optimizations. The theory says that `T_py_boundary` must
@@ -1125,7 +1125,7 @@ What is solid:
    `T_py_boundary` is small; when the halos/reductions or Poisson are
    active, `T_halo`, `T_reduction`, `T_poisson` and `T_fence` dominate. The
    per-phase breakdowns are therefore more important than the total times alone.
-4. `adc::Real` is currently `double`, so the MPI calls in `MPI_DOUBLE`
+4. `pops::Real` is currently `double`, so the MPI calls in `MPI_DOUBLE`
    are not a type error today.
 
 What is only diagnostic, not a final conclusion:
@@ -1146,7 +1146,7 @@ What is only diagnostic, not a final conclusion:
    GPU runs. The consolidated CSVs were corrected when the information was
    known by the job, but the raw field of the harness is a metadata bug.
    It does not affect the times, but it weakens the automatic provenance.
-5. The v2 JSONL indicate `adc_cpp_branch=unknown`; the provenance therefore relies
+5. The v2 JSONL indicate `pops_cpp_branch=unknown`; the provenance therefore relies
    on the Slurm logs and the SHA `1d4cd25e25`, not on the branch field of the JSON.
 
 Self-critique of what I did:
@@ -1168,7 +1168,7 @@ Self-critique of what I did:
    Python speeds up ADC. They signal the variability of the bench and the difficulty
    of comparing separate executables/processes. For a publication, we need
    paired repetitions, median/CI, and stricter CPU pinning.
-5. The local patch `include/adc/runtime/abi_key.hpp` is potentially too
+5. The local patch `include/pops/runtime/abi_key.hpp` is potentially too
    invasive. It protects against a header-only backend mismatch, but it changes
    a public ABI key. The upstream branch solves the same problem through the
    Python cache key; it is probably the path of least risk.

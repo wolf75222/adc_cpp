@@ -27,27 +27,27 @@
 // assert that max_iters = 0 throws std::invalid_argument (spec error 13).
 //
 // SERIAL test: no MPI (single box, DistributionMapping(1, 1)); the dot products in the loops are
-// nonetheless COLLECTIVE (adc::dot -> all_reduce_sum), the identity in serial.
+// nonetheless COLLECTIVE (pops::dot -> all_reduce_sum), the identity in serial.
 
-#include <adc/numerics/elliptic/linear/generic_krylov.hpp>
-#include <adc/numerics/elliptic/poisson/poisson_operator.hpp>  // apply_laplacian (shared 5-point matvec)
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/layout/distribution_mapping.hpp>
-#include <adc/mesh/execution/for_each.hpp>
-#include <adc/mesh/geometry/geometry.hpp>
-#include <adc/mesh/storage/mf_arith.hpp>
-#include <adc/mesh/storage/multifab.hpp>
-#include <adc/mesh/boundary/physical_bc.hpp>  // fill_ghosts (periodic ghost exchange)
+#include <pops/numerics/elliptic/linear/generic_krylov.hpp>
+#include <pops/numerics/elliptic/poisson/poisson_operator.hpp>  // apply_laplacian (shared 5-point matvec)
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/layout/distribution_mapping.hpp>
+#include <pops/mesh/execution/for_each.hpp>
+#include <pops/mesh/geometry/geometry.hpp>
+#include <pops/mesh/storage/mf_arith.hpp>
+#include <pops/mesh/storage/multifab.hpp>
+#include <pops/mesh/boundary/physical_bc.hpp>  // fill_ghosts (periodic ghost exchange)
 
-#include "test_harness.hpp"  // adc::test::Checker + kPi
+#include "test_harness.hpp"  // pops::test::Checker + kPi
 
 #include <cmath>
 #include <cstdio>
 #include <stdexcept>
 #include <vector>
 
-using namespace adc;
-using adc::test::kPi;
+using namespace pops;
+using pops::test::kPi;
 
 namespace {
 
@@ -61,7 +61,7 @@ struct HelmholtzCombineKernel {
   Array4 outv;
   ConstArray4 inv, lapv;
   Real alpha;
-  ADC_HD void operator()(int i, int j) const { outv(i, j) = inv(i, j) - alpha * lapv(i, j); }
+  POPS_HD void operator()(int i, int j) const { outv(i, j) = inv(i, j) - alpha * lapv(i, j); }
 };
 
 // Non-symmetric combine: out = in - alpha*Lap(in) + beta * (in(i) - in(i-1)) / h, a FIRST-order
@@ -73,7 +73,7 @@ struct AdvectionHelmholtzKernel {
   Array4 outv;
   ConstArray4 inv, lapv;
   Real alpha, beta, inv_h;
-  ADC_HD void operator()(int i, int j) const {
+  POPS_HD void operator()(int i, int j) const {
     outv(i, j) = inv(i, j) - alpha * lapv(i, j) + beta * (inv(i, j) - inv(i - 1, j)) * inv_h;
   }
 };
@@ -81,10 +81,10 @@ struct AdvectionHelmholtzKernel {
 // phi_exact(x,y) = sum of several periodic sine modes. A SINGLE mode is an eigenvector of the
 // discrete Laplacian, so CG/BiCGStab would converge in ONE step (masking the iteration loop); a SUM
 // of modes with DISTINCT eigenvalues forces several Krylov steps and a genuine Richardson sweep,
-// which is what we want to exercise. All modes are periodic on the unit square. ADC_HD so it is
+// which is what we want to exercise. All modes are periodic on the unit square. POPS_HD so it is
 // device-callable from the init kernel (else nvcc returns garbage on device, like phi_exact in
 // test_krylov_solver).
-ADC_HD Real phi_exact(Real x, Real y) {
+POPS_HD Real phi_exact(Real x, Real y) {
   return std::sin(2 * kPi * x) * std::sin(2 * kPi * y) +
          Real(0.5) * std::sin(4 * kPi * x) * std::sin(2 * kPi * y) +
          Real(0.3) * std::cos(2 * kPi * x) * std::cos(6 * kPi * y) +
@@ -94,7 +94,7 @@ ADC_HD Real phi_exact(Real x, Real y) {
 struct SampleExactKernel {
   Array4 af;
   Geometry geom;
-  ADC_HD void operator()(int i, int j) const {
+  POPS_HD void operator()(int i, int j) const {
     af(i, j) = phi_exact(geom.x_cell(i), geom.y_cell(j));
   }
 };
@@ -117,7 +117,7 @@ Real max_abs_diff(const MultiFab& a, const MultiFab& b) {
 }  // namespace
 
 int main() {
-  adc::test::Checker chk(adc::test::Checker::Style::Terse);
+  pops::test::Checker chk(pops::test::Checker::Style::Terse);
 
   Box2D dom = Box2D::from_extents(kN, kN);
   Geometry geom{dom, 0.0, 1.0, 0.0, 1.0};

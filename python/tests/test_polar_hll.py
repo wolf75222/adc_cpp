@@ -21,7 +21,7 @@ import math
 
 import numpy as np
 
-import adc
+import pops
 
 RMIN, RMAX = 0.3, 1.0
 
@@ -30,11 +30,11 @@ def iso_polar_model(cs2=1.0):
     """Fluide isotherme NATIF : sur l'anneau, le dispatch polaire (block_builder_polar) instancie
     IsothermalFluxPolar (roles Density / MomentumX (radial) / MomentumY (azimutal)). Second membre
     elliptique neutre (alpha=0) : on isole le TRANSPORT (le flux Riemann), pas le couplage Poisson."""
-    return adc.Model(
-        state=adc.FluidState(kind="isothermal", cs2=cs2),
-        transport=adc.IsothermalFlux(),
-        source=adc.NoSource(),
-        elliptic=adc.BackgroundDensity(alpha=0.0, n0=0.0),
+    return pops.Model(
+        state=pops.FluidState(kind="isothermal", cs2=cs2),
+        transport=pops.IsothermalFlux(),
+        source=pops.NoSource(),
+        elliptic=pops.BackgroundDensity(alpha=0.0, n0=0.0),
     )
 
 
@@ -64,13 +64,13 @@ def _annular_state(nr, nth):
 
 def _build(nr, nth, riemann, cs2=1.0):
     """System polaire isotherme avec le flux Riemann demande, etat initial pose, pret a stepper."""
-    sim = adc.System(mesh=adc.PolarMesh(r_min=RMIN, r_max=RMAX, nr=nr, ntheta=nth))
+    sim = pops.System(mesh=pops.PolarMesh(r_min=RMIN, r_max=RMAX, nr=nr, ntheta=nth))
     sim.set_poisson(rhs="charge_density", solver="polar", bc="dirichlet")
     sim.add_equation(
         "ions",
         model=iso_polar_model(cs2=cs2),
-        spatial=adc.FiniteVolume(limiter="minmod", riemann=riemann, variables="conservative"),
-        time=adc.Explicit(),
+        spatial=pops.FiniteVolume(limiter="minmod", riemann=riemann, variables="conservative"),
+        time=pops.Explicit(),
     )
     u0 = _annular_state(nr, nth)
     sim.set_density("ions", u0[0].ravel())     # pose rho (vitesse au repos)

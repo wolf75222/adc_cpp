@@ -1,12 +1,12 @@
 """Prototype : composition HYBRIDE brique native + brique DSL DANS UN SEUL modele (Phase B).
 
 Jusqu'ici on melangeait natif et DSL au niveau du SYSTEME (un bloc add_block + un bloc add_equation).
-Ce test exerce le MELANGE dans UN modele, via adc.CompositeModel(transport=, source=, elliptic=), ou
-chaque slot est soit une brique native (adc.*) soit une brique DSL partielle compilee
-(adc.dsl.HyperbolicBrick/SourceBrick/EllipticBrick). Le composite est compile en UN .so (backend aot)
+Ce test exerce le MELANGE dans UN modele, via pops.CompositeModel(transport=, source=, elliptic=), ou
+chaque slot est soit une brique native (pops.*) soit une brique DSL partielle compilee
+(pops.dsl.HyperbolicBrick/SourceBrick/EllipticBrick). Le composite est compile en UN .so (backend aot)
 et branche via System.add_equation (add_compiled_block).
 
-On verifie les DEUX SENS contre un oracle 100% natif (adc.Model -> add_block), meme physique
+On verifie les DEUX SENS contre un oracle 100% natif (pops.Model -> add_block), meme physique
 (isotherme cs2=1, force du potentiel qom, densite de charge q) :
   - sens 1 : transport DSL + source native + elliptique native ;
   - sens 2 : transport natif + source DSL + elliptique native.
@@ -20,8 +20,8 @@ import tempfile
 
 import numpy as np
 
-import adc
-from adc import dsl
+import pops
+from pops import dsl
 
 CS2 = 1.0     # vitesse du son au carre (isotherme)
 QOM = -1.0    # q/m de la force du potentiel (non trivial : exerce le cuisson du parametre natif)
@@ -30,7 +30,7 @@ INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "i
 
 
 def build_iso_transport(cs2):
-    """Brique hyperbolique DSL repliquant adc::IsothermalFlux{cs2} (3 variables)."""
+    """Brique hyperbolique DSL repliquant pops::IsothermalFlux{cs2} (3 variables)."""
     b = dsl.HyperbolicBrick("iso")
     rho, rho_u, rho_v = b.conservative_vars("rho", "rho_u", "rho_v")
     u = b.primitive("u", rho_u / rho)
@@ -45,7 +45,7 @@ def build_iso_transport(cs2):
 
 
 def build_force_source(qom):
-    """Brique de source DSL repliquant adc::PotentialForce{qom} sur 3 variables : (q/m) rho E,
+    """Brique de source DSL repliquant pops::PotentialForce{qom} sur 3 variables : (q/m) rho E,
     E = -grad phi (pas de terme d'energie a 3 variables)."""
     s = dsl.SourceBrick("force")
     rho, rho_u, rho_v = s.conservative_vars("rho", "rho_u", "rho_v")
@@ -77,16 +77,16 @@ def main():
     U = init_state(n)
     Uflat = U.reshape(-1).tolist()
     names = ["rho", "rho_u", "rho_v"]
-    spatial = adc.FiniteVolume(limiter="minmod", riemann="rusanov", variables="conservative")
+    spatial = pops.FiniteVolume(limiter="minmod", riemann="rusanov", variables="conservative")
 
     # Oracle 100% natif : CompositeModel<IsothermalFlux, PotentialForce, ChargeDensity> via add_block.
-    spec = adc.Model(state=adc.FluidState("isothermal", cs2=CS2),
-                     transport=adc.IsothermalFlux(),
-                     source=adc.PotentialForce(charge=QOM),
-                     elliptic=adc.ChargeDensity(charge=Q))
+    spec = pops.Model(state=pops.FluidState("isothermal", cs2=CS2),
+                     transport=pops.IsothermalFlux(),
+                     source=pops.PotentialForce(charge=QOM),
+                     elliptic=pops.ChargeDensity(charge=Q))
 
     def fields(setup):
-        s = adc.System(n=n, L=L, periodic=True)
+        s = pops.System(n=n, L=L, periodic=True)
         setup(s)
         s.set_poisson(rhs="charge_density", solver="geometric_mg")
         s.set_state("gas", Uflat)
@@ -96,15 +96,15 @@ def main():
         return R, phi
 
     R_nat, phi_nat = fields(
-        lambda s: s.add_block("gas", spec, spatial=spatial, time=adc.Explicit()))
+        lambda s: s.add_block("gas", spec, spatial=spatial, time=pops.Explicit()))
     assert float(np.max(np.abs(R_nat))) > 1e-3, "residu natif trivial (setup du test)"
 
     tmp = tempfile.mkdtemp()
     try:
         # --- sens 1 : transport DSL + source native + elliptique native ---
-        m1 = adc.CompositeModel(transport=build_iso_transport(CS2).compile(),
-                                source=adc.PotentialForce(charge=QOM),
-                                elliptic=adc.ChargeDensity(charge=Q))
+        m1 = pops.CompositeModel(transport=build_iso_transport(CS2).compile(),
+                                source=pops.PotentialForce(charge=QOM),
+                                elliptic=pops.ChargeDensity(charge=Q))
         assert m1.n_vars == 3 and m1.n_aux == 3
         co1 = m1.compile(backend="aot", so_path=os.path.join(tmp, "h1.so"), include=INCLUDE)
         assert co1.adder == "add_compiled_block"
@@ -118,9 +118,9 @@ def main():
               % max(dphi1, dres1))
 
         # --- sens 2 : transport natif + source DSL + elliptique native ---
-        m2 = adc.CompositeModel(transport=adc.IsothermalFlux(),
+        m2 = pops.CompositeModel(transport=pops.IsothermalFlux(),
                                 source=build_force_source(QOM).compile(),
-                                elliptic=adc.ChargeDensity(charge=Q))
+                                elliptic=pops.ChargeDensity(charge=Q))
         assert m2.n_vars == 3
         co2 = m2.compile(backend="aot", so_path=os.path.join(tmp, "h2.so"), include=INCLUDE)
         R2, phi2 = fields(
@@ -133,7 +133,7 @@ def main():
               % max(dphi2, dres2))
 
         # --- (C) le bloc hybride AVANCE dans le System (masse conservee en periodique) ---
-        adv = adc.System(n=n, L=L, periodic=True)
+        adv = pops.System(n=n, L=L, periodic=True)
         adv.add_equation("gas", co1, spatial=spatial, names=names)
         adv.set_poisson(rhs="charge_density", solver="geometric_mg")
         adv.set_state("gas", Uflat)
@@ -162,8 +162,8 @@ def main():
         # (schema host order 1 != production, donc smoke physique : tourne, fini, masse conservee).
         co1j = m1.compile(backend="prototype", so_path=os.path.join(tmp, "h1j.so"), include=INCLUDE)
         assert co1j.adder == "add_dynamic_block"
-        jit = adc.System(n=n, L=L, periodic=True)
-        jit.add_equation("gas", co1j, spatial=adc.FiniteVolume(limiter="minmod", riemann="rusanov"),
+        jit = pops.System(n=n, L=L, periodic=True)
+        jit.add_equation("gas", co1j, spatial=pops.FiniteVolume(limiter="minmod", riemann="rusanov"),
                          names=names)
         jit.set_poisson(rhs="charge_density", solver="geometric_mg")
         jit.set_state("gas", Uflat)
@@ -177,14 +177,14 @@ def main():
 
         # --- garde-fous : composition tout-native rejetee, slot mal place rejete ---
         try:
-            adc.CompositeModel(transport=adc.IsothermalFlux(), source=adc.NoSource(),
-                               elliptic=adc.ChargeDensity())
+            pops.CompositeModel(transport=pops.IsothermalFlux(), source=pops.NoSource(),
+                               elliptic=pops.ChargeDensity())
             raise AssertionError("composition tout-native acceptee a tort")
         except ValueError:
             pass
         try:
-            adc.CompositeModel(transport=build_force_source(QOM).compile(),  # source dans le slot transport
-                               source=adc.NoSource(), elliptic=adc.ChargeDensity())
+            pops.CompositeModel(transport=build_force_source(QOM).compile(),  # source dans le slot transport
+                               source=pops.NoSource(), elliptic=pops.ChargeDensity())
             raise AssertionError("brique DSL mal placee acceptee a tort")
         except ValueError:
             pass

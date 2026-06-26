@@ -18,8 +18,8 @@ import tempfile
 
 import numpy as np
 
-import adc
-from adc import dsl
+import pops
+from pops import dsl
 
 fails = 0
 
@@ -77,13 +77,13 @@ chk(not rep["ok"] and any("flux" in f for f in rep["failures"]),
 # --- 4. System.check_model : bloc natif sain puis densite cassee --------------------
 print("== System.check_model : bloc natif ==")
 n = 16
-sim = adc.System(n=n, L=1.0, periodic=True)
+sim = pops.System(n=n, L=1.0, periodic=True)
 sim.add_block("ions",
-              adc.Model(state=adc.FluidState("isothermal", cs2=0.5),
-                        transport=adc.IsothermalFlux(),
-                        source=adc.PotentialForce(charge=1.0),
-                        elliptic=adc.ChargeDensity(charge=1.0)),
-              spatial=adc.FiniteVolume(limiter="minmod"), time=adc.Explicit())
+              pops.Model(state=pops.FluidState("isothermal", cs2=0.5),
+                        transport=pops.IsothermalFlux(),
+                        source=pops.PotentialForce(charge=1.0),
+                        elliptic=pops.ChargeDensity(charge=1.0)),
+              spatial=pops.FiniteVolume(limiter="minmod"), time=pops.Explicit())
 sim.set_poisson(rhs="charge_density", solver="geometric_mg", bc="periodic")
 x = (np.arange(n) + 0.5) / n
 X, Y = np.meshgrid(x, x, indexing="xy")

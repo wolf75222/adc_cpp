@@ -1,6 +1,6 @@
 # Report - Compilation profiling of `adc_cpp`
 
-**Audited worktree:** `/Users/romaindespoulain/.codex/worktrees/8a24/adc_cpp_audit`
+**Audited worktree:** `/Users/romaindespoulain/.codex/worktrees/8a24/pops_cpp_audit`
 **Date:** 2026-06-10 - **Measured toolchain:** AppleClang (Xcode), macOS arm64, `-O3 -std=c++2b`, Release
 **Goal:** reduce compilation time **without changing the numerics or the scientific behavior** (the `-O` level does not change the IEEE results as long as `-ffast-math` is not used, which is the case here).
 
@@ -14,14 +14,14 @@ IEEE results bit-identical; guarded by the `dmax==0` parity suite).
 
 | Lever | Issue | Result |
 |---|---|---|
-| Split the heavy TUs by transport x flux | ADC-335 | `_adc` went from **3 TUs to 16**; the critical path dropped from the single ~469 s `system.cpp` to the slowest sub-TU. Measured on this Mac: a full module build **1112 s -> 284 s (~3.9x)**. |
+| Split the heavy TUs by transport x flux | ADC-335 | `_pops` went from **3 TUs to 16**; the critical path dropped from the single ~469 s `system.cpp` to the slowest sub-TU. Measured on this Mac: a full module build **1112 s -> 284 s (~3.9x)**. |
 | Flux-subdivide the isothermal TU | ADC-342 | the post-split long pole (`system_isothermal`, ~120 `-O3` leaves) is split into rusanov + hll sub-TUs (~60 leaves each). |
-| Compile the heavy TUs once | ADC-336 | the ~20x test recompile collapses to one `adc_runtime_{system,amr}` object library, linked by the tests (size-1 Ninja pool as the OOM guard). |
+| Compile the heavy TUs once | ADC-336 | the ~20x test recompile collapses to one `pops_runtime_{system,amr}` object library, linked by the tests (size-1 Ninja pool as the OOM guard). |
 | Derive `-j` from the core count | ADC-339 | no hardcoded `-j8`; the build saturates all cores by default. |
-| Pinned per-OS conda toolchain + heavy-TU pool | ADC-338 | AppleClang (macOS) / conda gcc 14.2 (Linux) pinned; `ADC_HEAVY_TU_POOL` lets `-j` parallelize the now-small sub-TUs on a high-RAM host (CI keeps the size-1 OOM guard). |
+| Pinned per-OS conda toolchain + heavy-TU pool | ADC-338 | AppleClang (macOS) / conda gcc 14.2 (Linux) pinned; `POPS_HEAVY_TU_POOL` lets `-j` parallelize the now-small sub-TUs on a high-RAM host (CI keeps the size-1 OOM guard). |
 | `optnone` on the cold factories | ADC-337 | the once-per-block string->closure wiring is no longer `-O3`-optimized; the hot kernels stay `-O3`. |
 | Gate unused flux x limiter x integrator combos (P1-C) | ADC-340 | **NO-GO**: the `if constexpr` capability guards already prune the impossible combos (recoverable residual ~ 0); further gating would be a forbidden scenario allowlist. Documented and closed. |
-| Targeted PCH for the module (P2) | ADC-361 | **NO-GO**: a precompiled header for pybind11/Kokkos made a COLD `_adc` build **slower** (`361 s -> 416 s`, +15%) on AppleClang/macOS. The frontend is small relative to the `-O3` backend (cf. 3.2), so the PCH build + per-TU PCH load cost more than the parse they save. Cold AppleClang only (GCC-Linux and the warm/ccache path not re-measured -- both could only worsen it). Default OFF, not added. See the PCH note in section 6 (P2). |
+| Targeted PCH for the module (P2) | ADC-361 | **NO-GO**: a precompiled header for pybind11/Kokkos made a COLD `_pops` build **slower** (`361 s -> 416 s`, +15%) on AppleClang/macOS. The frontend is small relative to the `-O3` backend (cf. 3.2), so the PCH build + per-TU PCH load cost more than the parse they save. Cold AppleClang only (GCC-Linux and the warm/ccache path not re-measured -- both could only worsen it). Default OFF, not added. See the PCH note in section 6 (P2). |
 
 The CI `--parallel 2` (7 GB-runner memory bound) and the WSL2 `-j 6` (RAM bound) are intentionally kept.
 
@@ -33,7 +33,7 @@ The CI `--parallel 2` (7 GB-runner memory bound) and the WSL2 `-j 6` (RAM bound)
 |---|---|---|
 | **`system.cpp` = 469 s, `amr_system.cpp` = 218 s** per compilation (single-threaded) | `/usr/bin/time -p` on the isolated TU | - |
 | The cost is **93 % in the LLVM `-O3` backend**, not in parsing nor the frontend | `-ftime-trace`: Backend 435 s / 468 s; `-O0` drops back to **41 s** | lower `-O`, reduce the number of instantiations |
-| `_adc` compiles only **3 files** -> `-j` caps at 3 cores, critical path = `system.cpp` (~469 s) | `python/CMakeLists.txt:9` | **split the TU** |
+| `_pops` compiles only **3 files** -> `-j` caps at 3 cores, critical path = `system.cpp` (~469 s) | `python/CMakeLists.txt:9` | **split the TU** |
 | `system.cpp`/`amr_system.cpp` recompiled **20x** in the test build (6 + 14) | `grep` on `build.ninja` | **single object library** |
 | Root cause = **combinatorial explosion** (~36 CompositeModels x 4 fluxes x 4 limiters x ~3 integrators ~ 1700 paths) all optimized at `-O3` in **one** TU | `model_factory.hpp` + top OptFunction of the trace | reduce the spread / split |
 | **Linking is NOT a problem** (< 1 s per executable) | `.ninja_log`: top link = 0.85 s | - |
@@ -65,7 +65,7 @@ The ~41 s at `-O0` are the incompressible cost (parsing + frontend + unoptimized
 ## 2. Build architecture (what actually compiles)
 
 - **The `adc` core is `INTERFACE` (header-only)** - `CMakeLists.txt:57`. It compiles nothing on its own; all the cost is carried by the TUs that *instantiate* it.
-- **Python module `_adc` = 3 TUs only**: `bindings.cpp`, `system.cpp`, `amr_system.cpp` - `python/CMakeLists.txt:9`. This is where your pain "even `_adc` is slow" comes from: there is nothing to parallelize beyond 3 cores, and the critical path is the slowest TU (`system.cpp`).
+- **Python module `_pops` = 3 TUs only**: `bindings.cpp`, `system.cpp`, `amr_system.cpp` - `python/CMakeLists.txt:9`. This is where your pain "even `_pops` is slow" comes from: there is nothing to parallelize beyond 3 cores, and the critical path is the slowest TU (`system.cpp`).
 - **Tests = ~113 executables** (`grep -c CXX_EXECUTABLE_LINKER build.ninja` -> 113; 133 `.cpp.o` objects). Most are small TUs, **but 20 of them re-list `python/bindings/system/base/system.cpp` or `python/bindings/amr/amr_system.cpp` as an extra source** (e.g. `tests/CMakeLists.txt:204, 304, 334-336, 349, 374, 393, 411, 426, 435...`), so they fully recompile the heavy TU.
 
 ---
@@ -103,7 +103,7 @@ ExecuteCompiler                 468,1 s
 
 ### 3.3 Root cause - combinatorial explosion of the dispatch factories
 
-`include/adc/runtime/model_factory.hpp` nests three dispatchers:
+`include/pops/runtime/model_factory.hpp` nests three dispatchers:
 
 ```
 dispatch_transport : exb | compressible | isothermal                         (3)
@@ -122,13 +122,13 @@ python/bindings/amr/amr_system.cpp  compilé 14×
 
 - **Duplicated CPU cost (serial):** 6 x 469 + 14 x 218 ~ **5866 CPU-s**.
 - **If compiled only once:** 469 + 218 = **687 s**. -> **~88 % of work wasted** (~5200 CPU-s recoverable).
-- With `ADC_USE_MPI=ON`, ~8 additional test variants recompile these TUs (`test_mpi_amr_*`, `test_mpi_system_*`) -> the duplication gets worse.
+- With `POPS_USE_MPI=ON`, ~8 additional test variants recompile these TUs (`test_mpi_amr_*`, `test_mpi_system_*`) -> the duplication gets worse.
 
 ### 3.5 CI impact
 
 `ci.yml` builds **6 configurations** (`build`, `build-py`, `build-mpi`, `build-kokkos`, `build-kokkos-omp`, `build-kokkos-py`), **all at `--parallel 2`** (runner memory constraint ~7 GB, `ci.yml:111-119`). Each config recompiles these heavy TUs from scratch:
 
-- `_adc` in CI (`--parallel 2`): ~469 s + the rest ~ **8 min minimum**, bounded by `system.cpp`.
+- `_pops` in CI (`--parallel 2`): ~469 s + the rest ~ **8 min minimum**, bounded by `system.cpp`.
 - The full test build (`build`, 20 heavy TUs + 113 small ones at `--parallel 2`) ~ **~1 h** on the runner (slower than this Mac).
 - The **Kokkos** configs are even heavier (device instantiation via `nvcc_wrapper`).
 
@@ -137,7 +137,7 @@ python/bindings/amr/amr_system.cpp  compilé 14×
 ## 4. Likely causes, ranked by impact
 
 1. **[Dominant] `-O3` backend optimizer on a combinatorial explosion of instantiations.** 93 % of the time; ~1700 leaf functions. Evidence: `-ftime-trace` (Backend 435/468 s), scaling `-O0`->41 s.
-2. **[Structural] `_adc` has only 3 TUs** -> impossible to parallelize; critical path = `system.cpp` (469 s). Evidence: `python/CMakeLists.txt:9`.
+2. **[Structural] `_pops` has only 3 TUs** -> impossible to parallelize; critical path = `system.cpp` (469 s). Evidence: `python/CMakeLists.txt:9`.
 3. **[Waste] `system.cpp`/`amr_system.cpp` recompiled 20x in the tests** (x6 in CI). Evidence: `grep` on `build.ninja`.
 4. **[Secondary] Frontend / instantiation 31 s** per TU - real but 7x smaller than the backend.
 5. **Non-causes (ruled out by the measurements):** large headers (Source = 1.2 s), linking (< 1 s/exe), LTO (disabled - leave it OFF), Kokkos/pybind in `system.cpp` (the measured TU has neither and already costs 469 s).
@@ -148,9 +148,9 @@ python/bindings/amr/amr_system.cpp  compilé 14×
 
 | Rank | Target | `-O3` single-threaded cost | Multiplicity |
 |---|---|---|---|
-| 1 | `python/bindings/system/base/system.cpp` | **469 s** | x1 in `_adc`, x6 in tests |
-| 2 | `python/bindings/amr/amr_system.cpp` | **218 s** | x1 in `_adc`, x14 in tests |
-| 3 | `bindings.cpp` | not isolated (includes pybind11 + facade) | x1 in `_adc` |
+| 1 | `python/bindings/system/base/system.cpp` | **469 s** | x1 in `_pops`, x6 in tests |
+| 2 | `python/bindings/amr/amr_system.cpp` | **218 s** | x1 in `_pops`, x14 in tests |
+| 3 | `bindings.cpp` | not isolated (includes pybind11 + facade) | x1 in `_pops` |
 | 4 | small test TUs instantiating `make_block` (`test_block_builder`, `test_compiled_model_parity`...) | 15-35 s each | x113 |
 
 ---
@@ -162,13 +162,13 @@ python/bindings/amr/amr_system.cpp  compilé 14×
 ### P0 - high impact, ~zero risk
 
 - **P0-A. Compile `system.cpp` + `amr_system.cpp` ONCE into a shared object library.**
-  `add_library(adc_runtime STATIC python/bindings/system/base/system.cpp python/bindings/amr/amr_system.cpp)` linked by `_adc` **and** by the 20 test executables (replace the `add_executable(test_x test_x.cpp .../system.cpp)` with a link to `adc_runtime`).
+  `add_library(pops_runtime STATIC python/bindings/system/base/system.cpp python/bindings/amr/amr_system.cpp)` linked by `_pops` **and** by the 20 test executables (replace the `add_executable(test_x test_x.cpp .../system.cpp)` with a link to `pops_runtime`).
   -> removes ~18 recompilations (serial) / ~26 (MPI) per config, **x6 in CI**. Test build gain: **~88 %** of the heavy TU cost.
-  *Caution:* some tests pass specific `-D` (`ADC_TEST_CXX`, `ENABLE_EXPORTS`) - those stay on their own test `.cpp`; only the `system.cpp`/`amr_system.cpp` object is shared. `adc_cap_opt_for_kokkos_ram` (the targeted `-O0`) would then apply once to the lib, not N times.
+  *Caution:* some tests pass specific `-D` (`POPS_TEST_CXX`, `ENABLE_EXPORTS`) - those stay on their own test `.cpp`; only the `system.cpp`/`amr_system.cpp` object is shared. `pops_cap_opt_for_kokkos_ram` (the targeted `-O0`) would then apply once to the lib, not N times.
 
 - **P0-B. Split each heavy TU by dispatch axis to parallelize.**
-  Partition the instantiations of `system.cpp` (e.g. one `.cpp` per flux family, or per transport) with explicit instantiation. `_adc` then goes from 3 to ~8-12 TUs -> `-j` becomes useful again, critical path `469 s -> ~469/N`.
-  -> this is **THE** fix for your pain "`_adc` alone is slow". Identical behavior (same instantiations, simply spread out).
+  Partition the instantiations of `system.cpp` (e.g. one `.cpp` per flux family, or per transport) with explicit instantiation. `_pops` then goes from 3 to ~8-12 TUs -> `-j` becomes useful again, critical path `469 s -> ~469/N`.
+  -> this is **THE** fix for your pain "`_pops` alone is slow". Identical behavior (same instantiations, simply spread out).
 
 ### P1 - high impact, to be validated
 
@@ -178,12 +178,12 @@ python/bindings/amr/amr_system.cpp  compilé 14×
 
 ### P2 - convenience / non-regression
 
-- **P2-A. `ccache`** (`-DCMAKE_CXX_COMPILER_LAUNCHER=ccache`) for local iteration: no gain on the 1st build nor when a header changes (the `ADC_HEADER_SIG` signature invalidates), but useful when only a test `.cpp` changes.
+- **P2-A. `ccache`** (`-DCMAKE_CXX_COMPILER_LAUNCHER=ccache`) for local iteration: no gain on the 1st build nor when a header changes (the `POPS_HEADER_SIG` signature invalidates), but useful when only a test `.cpp` changes.
 - **P2-B. CI `-ftime-trace` safeguard**: per-TU compilation time budget to detect a regression (a new flux/limiter that adds a dimension to the combinatorial product).
 - **P2-C. Leave LTO OFF** (enabling it would clearly worsen the backend). Linking is not an issue (< 1 s/exe) - no need to invest in mold/lld.
-- **PCH: NO-GO, measured (ADC-361).** The prediction above (frontend ~31 s vs ~435 s backend per heavy TU) was confirmed by measurement: a precompiled header of `<pybind11/pybind11.h>` (+ `<Kokkos_Core.hpp>`) on the `_adc` module made a COLD build **slower**, 361 s -> 416 s (+15%, isolated empty ccache, `ADC_HEAVY_TU_POOL=4`, AppleClang macOS arm64). The extra PCH-build translation unit plus the per-TU cost of loading a large PCH exceed the parse time it removes, because the `-O3` backend pass -- not the frontend -- dominates this build. The cold number is the measured result; the warm/ccache path was reasoned, not benchmarked (it would need `CCACHE_SLOPPINESS=pch_defines,time_macros` to not defeat ccache on warm rebuilds, and PCH invalidation can only make it worse, never rescue it). Closed NO-GO; the opt-in flag was NOT merged (no dead config). Re-measure only if a future toolchain profile shows the frontend dominating; reproduce by adding `target_precompile_headers(_adc PRIVATE <pybind11/pybind11.h> <Kokkos_Core.hpp>)` and timing a cold `cmake --build --target _adc` with an isolated `CCACHE_DIR`, with vs without.
+- **PCH: NO-GO, measured (ADC-361).** The prediction above (frontend ~31 s vs ~435 s backend per heavy TU) was confirmed by measurement: a precompiled header of `<pybind11/pybind11.h>` (+ `<Kokkos_Core.hpp>`) on the `_pops` module made a COLD build **slower**, 361 s -> 416 s (+15%, isolated empty ccache, `POPS_HEAVY_TU_POOL=4`, AppleClang macOS arm64). The extra PCH-build translation unit plus the per-TU cost of loading a large PCH exceed the parse time it removes, because the `-O3` backend pass -- not the frontend -- dominates this build. The cold number is the measured result; the warm/ccache path was reasoned, not benchmarked (it would need `CCACHE_SLOPPINESS=pch_defines,time_macros` to not defeat ccache on warm rebuilds, and PCH invalidation can only make it worse, never rescue it). Closed NO-GO; the opt-in flag was NOT merged (no dead config). Re-measure only if a future toolchain profile shows the frontend dominating; reproduce by adding `target_precompile_headers(_pops PRIVATE <pybind11/pybind11.h> <Kokkos_Core.hpp>)` and timing a cold `cmake --build --target _pops` with an isolated `CCACHE_DIR`, with vs without.
 
-**Recommended order:** P0-A (CI/tests, safe and immediate) -> P0-B (unblocks your `_adc` pain) -> P1-A/P1-B (shave the backend) -> P1-C (reduce the spread).
+**Recommended order:** P0-A (CI/tests, safe and immediate) -> P0-B (unblocks your `_pops` pain) -> P1-A/P1-B (shave the backend) -> P1-C (reduce the spread).
 
 ---
 
@@ -191,7 +191,7 @@ python/bindings/amr/amr_system.cpp  compilé 14×
 
 ```bash
 # Inventaire des builds et options
-grep -E '^(ADC_USE_|ADC_BUILD_|CMAKE_BUILD_TYPE|CMAKE_CXX_COMPILER):' <build>/CMakeCache.txt
+grep -E '^(POPS_USE_|POPS_BUILD_|CMAKE_BUILD_TYPE|CMAKE_CXX_COMPILER):' <build>/CMakeCache.txt
 
 # Durées par cible depuis les .ninja_log (format: start_ms end_ms mtime output hash ; durée = end-start)
 #   parsées en Python (dédup par output, tri décroissant) -- cf. §3
@@ -203,7 +203,7 @@ sed -n '2550,2556p' <build-audit>/build.ninja      # → -O3 -DNDEBUG -std=c++2b
 SDK=/Applications/Xcode.app/.../MacOSX26.5.sdk
 CXX=/Applications/Xcode.app/.../usr/bin/c++
 /usr/bin/time -p "$CXX" -O3 -DNDEBUG -std=c++2b -arch arm64 -isysroot "$SDK" -I include \
-  -ftime-trace -c python/bindings/system/base/system.cpp -o /tmp/adc_system.o      # → real 469 s, trace JSON
+  -ftime-trace -c python/bindings/system/base/system.cpp -o /tmp/pops_system.o      # → real 469 s, trace JSON
 # idem amr_system.cpp (218 s) ; idem en -O2/-O1/-O0 pour le scaling
 
 # Comptage de la duplication
@@ -211,4 +211,4 @@ grep -c "python/bindings/system/base/system.cpp.o:"     <build-audit>/build.ninj
 grep -c "python/bindings/amr/amr_system.cpp.o:" <build-audit>/build.ninja  # → 14
 ```
 
-> The temporary artifacts (`/tmp/adc_*.o`, JSON traces ~150 MB) were removed after analysis. No project file was modified or deleted; no clean build was launched.
+> The temporary artifacts (`/tmp/pops_*.o`, JSON traces ~150 MB) were removed after analysis. No project file was modified or deleted; no clean build was launched.

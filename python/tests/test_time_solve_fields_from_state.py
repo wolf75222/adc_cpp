@@ -38,11 +38,11 @@ def _skip(msg):
 try:
     import numpy as np
 
-    import adc
-    from adc import dsl
-    from adc import time as adctime
-except Exception as exc:  # noqa: BLE001  -- numpy or _adc unavailable in this interpreter
-    _skip("adc/numpy unavailable: %s" % exc)
+    import pops
+    from pops import dsl
+    from pops import time as adctime
+except Exception as exc:  # noqa: BLE001  -- numpy or _pops unavailable in this interpreter
+    _skip("pops/numpy unavailable: %s" % exc)
 
 fails = 0
 
@@ -126,7 +126,7 @@ chk(len(solve_args) == 2 and solve_args[0] != solve_args[1],
     "the two field solves read DISTINCT stage-state variables (%r)" % solve_args)
 
 # The base state var (= ctx.state(0)) is the first solve's argument.
-base_decl = re.search(r"adc::MultiFab& (\w+) = ctx\.state\(0\);", src)
+base_decl = re.search(r"pops::MultiFab& (\w+) = ctx\.state\(0\);", src)
 chk(base_decl is not None and solve_args and solve_args[0] == base_decl.group(1),
     "the first field solve reads the base state (ctx.state(0))")
 
@@ -143,8 +143,8 @@ chk(src_fe.count("ctx.solve_fields_from_state(0, ") == 1,
 
 
 # ============================ (B) field-coupled parity: skip without the toolchain ===========
-if not hasattr(adc.System(n=8, L=1.0, periodic=True), "install_program"):
-    print("-- (B) skipped: _adc lacks the install_program binding (rebuild _adc) --")
+if not hasattr(pops.System(n=8, L=1.0, periodic=True), "install_program"):
+    print("-- (B) skipped: _pops lacks the install_program binding (rebuild _pops) --")
     print("%s test_time_solve_fields_from_state (A only)" % ("FAIL" if fails else "PASS"))
     sys.exit(1 if fails else 0)
 
@@ -155,14 +155,14 @@ DT = 0.02
 def make_sim(model):
     """A System with ONE field-coupled block (production backend) + shared Poisson, charged with a
     non-uniform rho so a stage change shifts phi. Returns (sim, U0)."""
-    sim = adc.System(n=N, L=1.0, periodic=True)
+    sim = pops.System(n=N, L=1.0, periodic=True)
     try:
         compiled = model.compile(backend="production")
     except RuntimeError as exc:  # no compiler / no Kokkos visible
         _skip("model compile could not build the .so: %s" % str(exc)[:160])
     sim.add_equation("plasma", compiled,
-                     spatial=adc.FiniteVolume(limiter="none", riemann="rusanov"),
-                     time=adc.Explicit(method="euler"))
+                     spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                     time=pops.Explicit(method="euler"))
     sim.set_poisson("charge_density", "geometric_mg")
     x = (np.arange(N) + 0.5) / N
     X, Y = np.meshgrid(x, x, indexing="ij")
@@ -193,7 +193,7 @@ def offline_rhs_frozen(ref, U, U_fields):
 
 print("== (B) field-coupled 2-stage parity (per-stage field solve) ==")
 try:
-    compiled = adc.compile_problem(model=named_source_model("sffs_prog"), time=heun_program())
+    compiled = pops.compile_problem(model=named_source_model("sffs_prog"), time=heun_program())
 except RuntimeError as exc:  # no compiler / no Kokkos visible / .so compile failed
     _skip("compile_problem could not build the .so: %s" % str(exc)[:160])
 

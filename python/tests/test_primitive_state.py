@@ -24,7 +24,7 @@ import tempfile
 
 import numpy as np
 
-import adc
+import pops
 
 N, L = 24, 1.0
 INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "include"))
@@ -50,11 +50,11 @@ def _roundtrip_err(sim, name, **prims):
 def test_compressible():
     """Bloc Euler compressible (4 var) : round-trip (rho, u, v, p) exact + pas physique."""
     rho, u, v, p = _fields()
-    spec = adc.Model(state=adc.FluidState("compressible", gamma=1.4),
-                     transport=adc.CompressibleFlux(),
-                     source=adc.NoSource(), elliptic=adc.ChargeDensity(charge=1.0))
-    s = adc.System(n=N, L=L, periodic=True)
-    s.add_block("e", spec, spatial=adc.Spatial(minmod=True), time=adc.Explicit())
+    spec = pops.Model(state=pops.FluidState("compressible", gamma=1.4),
+                     transport=pops.CompressibleFlux(),
+                     source=pops.NoSource(), elliptic=pops.ChargeDensity(charge=1.0))
+    s = pops.System(n=N, L=L, periodic=True)
+    s.add_block("e", spec, spatial=pops.Spatial(minmod=True), time=pops.Explicit())
     assert s.variable_names("e", "primitive") == ["rho", "u", "v", "p"]
 
     err = _roundtrip_err(s, "e", rho=rho, u=u, v=v, p=p)
@@ -78,11 +78,11 @@ def test_compressible():
 def test_isothermal():
     """Bloc Euler isotherme (3 var, sans p) : round-trip (rho, u, v) exact."""
     rho, u, v, _ = _fields()
-    spec = adc.Model(state=adc.FluidState("isothermal", cs2=0.5),
-                     transport=adc.IsothermalFlux(),
-                     source=adc.NoSource(), elliptic=adc.ChargeDensity(charge=1.0))
-    s = adc.System(n=N, L=L, periodic=True)
-    s.add_block("g", spec, spatial=adc.Spatial(minmod=True), time=adc.Explicit())
+    spec = pops.Model(state=pops.FluidState("isothermal", cs2=0.5),
+                     transport=pops.IsothermalFlux(),
+                     source=pops.NoSource(), elliptic=pops.ChargeDensity(charge=1.0))
+    s = pops.System(n=N, L=L, periodic=True)
+    s.add_block("g", spec, spatial=pops.Spatial(minmod=True), time=pops.Explicit())
     assert s.variable_names("g", "primitive") == ["rho", "u", "v"]
 
     err = _roundtrip_err(s, "g", rho=rho, u=u, v=v)
@@ -103,10 +103,10 @@ def test_isothermal():
 def test_scalar():
     """Bloc scalaire (1 var) : prim == cons -> conversion identite, round-trip exact."""
     rho, _, _, _ = _fields()
-    spec = adc.Model(state=adc.Scalar(), transport=adc.ExB(B0=1.0),
-                     source=adc.NoSource(), elliptic=adc.ChargeDensity(charge=1.0))
-    s = adc.System(n=N, L=L, periodic=True)
-    s.add_block("q", spec, spatial=adc.Spatial(minmod=True), time=adc.Explicit())
+    spec = pops.Model(state=pops.Scalar(), transport=pops.ExB(B0=1.0),
+                     source=pops.NoSource(), elliptic=pops.ChargeDensity(charge=1.0))
+    s = pops.System(n=N, L=L, periodic=True)
+    s.add_block("q", spec, spatial=pops.Spatial(minmod=True), time=pops.Explicit())
     name = s.variable_names("q", "primitive")[0]
     err = _roundtrip_err(s, "q", **{name: rho})
     assert err < 1e-15, "scalaire : round-trip (identite) non exact (%.2e)" % err
@@ -116,11 +116,11 @@ def test_scalar():
 def test_set_density_unchanged():
     """Pas de regression : set_density pose la densite (comp 0) + reste au repos."""
     rho, _, _, _ = _fields()
-    spec = adc.Model(state=adc.FluidState("compressible", gamma=1.4),
-                     transport=adc.CompressibleFlux(),
-                     source=adc.NoSource(), elliptic=adc.ChargeDensity(charge=1.0))
-    s = adc.System(n=N, L=L, periodic=True)
-    s.add_block("e", spec, spatial=adc.Spatial(minmod=True), time=adc.Explicit())
+    spec = pops.Model(state=pops.FluidState("compressible", gamma=1.4),
+                     transport=pops.CompressibleFlux(),
+                     source=pops.NoSource(), elliptic=pops.ChargeDensity(charge=1.0))
+    s = pops.System(n=N, L=L, periodic=True)
+    s.add_block("e", spec, spatial=pops.Spatial(minmod=True), time=pops.Explicit())
     s.set_density("e", rho)
     U = np.array(s.get_state("e")).reshape(4, N, N)
     assert float(np.max(np.abs(U[0] - rho))) < 1e-15, "set_density : densite incorrecte"
@@ -132,11 +132,11 @@ def test_set_density_unchanged():
 def test_errors():
     """Erreur CLAIRE sur un nom de primitive inconnu, et sur une primitive manquante."""
     rho, u, v, p = _fields()
-    spec = adc.Model(state=adc.FluidState("compressible", gamma=1.4),
-                     transport=adc.CompressibleFlux(),
-                     source=adc.NoSource(), elliptic=adc.ChargeDensity(charge=1.0))
-    s = adc.System(n=N, L=L, periodic=True)
-    s.add_block("e", spec, spatial=adc.Spatial(minmod=True), time=adc.Explicit())
+    spec = pops.Model(state=pops.FluidState("compressible", gamma=1.4),
+                     transport=pops.CompressibleFlux(),
+                     source=pops.NoSource(), elliptic=pops.ChargeDensity(charge=1.0))
+    s = pops.System(n=N, L=L, periodic=True)
+    s.add_block("e", spec, spatial=pops.Spatial(minmod=True), time=pops.Explicit())
 
     try:
         s.set_primitive_state("e", rho=rho, u=u, v=v, p=p, bogus=p)
@@ -170,7 +170,7 @@ def test_dsl_compiled():
     try:
         # --- AOT : .so a ABI plate, charge par add_compiled_block ---
         so_aot = e.compile_or_jit(os.path.join(tmp, "ep_aot.so"), INCLUDE, mode="compile")
-        a = adc.System(n=N, L=L, periodic=True)
+        a = pops.System(n=N, L=L, periodic=True)
         a.add_compiled_block("gas", so_aot, limiter="minmod", riemann="rusanov",
                              recon="conservative", names=["rho", "rho_u", "rho_v", "E"])
         assert a.variable_names("gas", "primitive") == ["rho", "u", "v", "p"]
@@ -185,7 +185,7 @@ def test_dsl_compiled():
 
         # --- JIT prototype : .so IModel virtuel, charge par add_dynamic_block ---
         so_jit = e.compile_so(os.path.join(tmp, "ep_jit.so"), INCLUDE)
-        j = adc.System(n=N, L=L, periodic=True)
+        j = pops.System(n=N, L=L, periodic=True)
         j.add_dynamic_block("gas", so_jit, names=["rho", "rho_u", "rho_v", "E"])
         err_j = _roundtrip_err(j, "gas", rho=rho, u=u, v=v, p=p)
         assert err_j < 1e-13, "DSL JIT : round-trip cons<->prim non exact (%.2e)" % err_j

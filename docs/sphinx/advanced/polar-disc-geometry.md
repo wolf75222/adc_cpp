@@ -7,17 +7,17 @@ non-Cartesian geometry.
 ## Global polar ring
 
 The geometry choice lives in a mesh object passed in `mesh=` (never in
-`FiniteVolume`, which only carries reconstruction + flux + variables). `adc.PolarMesh`
+`FiniteVolume`, which only carries reconstruction + flux + variables). `pops.PolarMesh`
 describes a global ring `r in [r_min, r_max] x theta in [0, 2pi)`, `nr x ntheta` cells,
 periodic theta, physical walls at `r_min` / `r_max`. The polar grid lifts the structural
 lock of the diocotron on a Cartesian grid (the Phase-0 proto measured a ratio of 73
 on the diffusion of the radial gradient).
 
 ```python
-import adc
+import pops
 
-mesh = adc.PolarMesh(r_min=0.3, r_max=1.0, nr=128, ntheta=256)  # axe 0 = radial, axe 1 = azimutal
-sim = adc.System(mesh=mesh)   # construit un anneau global et avance dessus
+mesh = pops.PolarMesh(r_min=0.3, r_max=1.0, nr=128, ntheta=256)  # axe 0 = radial, axe 1 = azimutal
+sim = pops.System(mesh=mesh)   # construit un anneau global et avance dessus
 ```
 
 The `SystemConfig` then carries `geometry="polar"`, `nr`, `ntheta`, `r_min`, `r_max`. On the
@@ -29,7 +29,7 @@ Poisson `PolarPoissonSolver` + drift of the aux in the local basis `(e_r, e_thet
 > direct `PolarPoissonSolver`, FFT-in-theta + tridiagonal-in-r by Thomas, refuses MPI
 > and raises on `n_ranks() > 1` or `ba.size() != 1`), no Cartesian <-> polar coupling
 > (it is a global ring). `nr >= 3` (2nd-order one-sided radial stencil at the walls),
-> `ntheta >= 1`. `adc.CondensedSchur` is wired in polar (the polar condensed stepper is
+> `ntheta >= 1`. `pops.CondensedSchur` is wired in polar (the polar condensed stepper is
 > chosen on the C++ side according to the geometry).
 
 ## Disc mask (Cartesian transport)
@@ -50,7 +50,7 @@ by its radial walls `r_min` / `r_max`).
 
 `set_disc_domain` / `disc_mask` are the stable Python *compatibility* helpers for the circle
 (the Hoffart disc). Under them the geometry is a single, named, device-clean C++ contract in
-`include/adc/numerics/spatial/embedded_boundary/domain.hpp`: any POD type exposing
+`include/pops/numerics/spatial/embedded_boundary/domain.hpp`: any POD type exposing
 `level_set(x, y)` (`< 0` inside), a callable `operator()`, and `cell_active` is an embedded
 boundary, with the same three transport modes (`none` / `staircase` / `cutcell`). The disc
 (`detail::DiscDomain`) is one instance; `detail::HalfPlaneDomain` is a built-in non-disc instance,
@@ -63,6 +63,6 @@ callback path: a domain is a compile-time POD, never a `std::function`.
 
 - Bindings: `python/bindings/core/bindings.cpp` (`geometry` / `nr` / `ntheta` / `r_min` / `r_max`,
   `set_disc_domain`, `disc_mask`).
-- Generic contract: `include/adc/numerics/spatial/embedded_boundary/domain.hpp` (`DiscDomain`, `HalfPlaneDomain`,
+- Generic contract: `include/pops/numerics/spatial/embedded_boundary/domain.hpp` (`DiscDomain`, `HalfPlaneDomain`,
   the `LevelSetDomain` concept).
-- Polar solver: `include/adc/numerics/elliptic/polar/polar_poisson_solver.hpp`.
+- Polar solver: `include/pops/numerics/elliptic/polar/polar_poisson_solver.hpp`.

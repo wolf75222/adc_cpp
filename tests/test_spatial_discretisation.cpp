@@ -2,15 +2,15 @@
 // sont des types nommes du coeur. Verification statique des bundles et des aliases :
 // aucun modele requis (le coeur ne connait aucune physique).
 
-#include <adc/numerics/time/integrators/time_integrator.hpp>
-#include <adc/numerics/fv/numerical_flux.hpp>
-#include <adc/numerics/fv/reconstruction.hpp>
-#include <adc/numerics/fv/spatial_discretisation.hpp>
+#include <pops/numerics/time/integrators/time_integrator.hpp>
+#include <pops/numerics/fv/numerical_flux.hpp>
+#include <pops/numerics/fv/reconstruction.hpp>
+#include <pops/numerics/fv/spatial_discretisation.hpp>
 
 #include <cstdio>
 #include <type_traits>
 
-using namespace adc;
+using namespace pops;
 
 // Un bundle expose Limiter et NumericalFlux.
 static_assert(std::is_same_v<FirstOrder::Limiter, NoSlope>);

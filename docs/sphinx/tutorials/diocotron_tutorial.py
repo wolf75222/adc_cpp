@@ -9,15 +9,15 @@ and `matplotlib` -- no dependency on the `adc_cases` application package.
 What it does, in tutorial order
 --------------------------------
 1. imports `adc` and detects the running backend;
-2. WRITES THE MODEL AS FORMULAS with `adc.dsl.Model` (conservative variable, auxiliary fields
+2. WRITES THE MODEL AS FORMULAS with `pops.dsl.Model` (conservative variable, auxiliary fields
    phi/grad, E x B advection flux, eigenvalues, elliptic right-hand side);
 3. COMPILES the model: tries the `production` backend (zero-copy native path, preferred) then
    falls back to `aot` (numerically identical, host-marshalled) -- exactly like the cases;
-4. builds a periodic `adc.System`, picks the scheme (MUSCL minmod + Rusanov, explicit), wires the
+4. builds a periodic `pops.System`, picks the scheme (MUSCL minmod + Rusanov, explicit), wires the
    system Poisson (charge density, multigrid) and sets the initial condition;
 5. integrates in time while capturing diagnostics (perturbation amplitude, mass);
 6. produces the figures: a CURVE (amplitude vs time), a 2D MAP (final density), a GIF, and a
-   uniform/AMR COMPARISON (`adc.AmrSystem` refined vs uniform grid);
+   uniform/AMR COMPARISON (`pops.AmrSystem` refined vs uniform grid);
 7. writes a provenance record (adc_cpp SHA, backend, resolution, command) next to the figures, so
    that each asset is reproducible.
 
@@ -26,7 +26,7 @@ Physics (REDUCED model, not the full Euler-Poisson system)
 A single conservative variable, the density `n`, advected by the E x B drift
 `v = (-d_y phi / B0, d_x phi / B0)` (divergence-free), where `phi` solves the system Poisson
 `-lap phi = alpha (n - n_i0)` (neutralizing ionic background `n_i0`). Conventions anchored in the
-core: `include/adc/physics/hyperbolic.hpp` (`ExBVelocity`) and `.../elliptic.hpp`
+core: `include/pops/physics/hyperbolic.hpp` (`ExBVelocity`) and `.../elliptic.hpp`
 (`BackgroundDensity`). This is the diocotron NORMALIZATION benchmark, not a reproduction of the
 full system (cf. `adc_cases/diocotron` and `docs/HOFFART_FIDELITY.md`).
 
@@ -49,18 +49,18 @@ from pathlib import Path
 
 import numpy as np
 
-import adc
-from adc import dsl
+import pops
+from pops import dsl
 
 # Physical parameters of the reduced model (must be consistent between the formulas and the Poisson RHS).
 B0 = 1.0      # background magnetic field (carries the E x B drift)
 ALPHA = 1.0   # factor of the elliptic right-hand side alpha (n - n_i0)
 
 REPO_ROOT = Path(__file__).resolve().parents[3]   # tutorials -> sphinx -> docs -> repo root
-ADC_INCLUDE = os.environ.get("ADC_INCLUDE", str(REPO_ROOT / "include"))
+POPS_INCLUDE = os.environ.get("POPS_INCLUDE", str(REPO_ROOT / "include"))
 
 
-# --- 2. The model, WRITTEN AS FORMULAS (adc.dsl.Model) ---------------------------------------------
+# --- 2. The model, WRITTEN AS FORMULAS (pops.dsl.Model) ---------------------------------------------
 def diocotron_model(n_i0: float) -> "dsl.Model":
     """Reduced diocotron model as symbolic formulas, reproducing the native bricks `ExBVelocity`
     (transport) and `BackgroundDensity` (elliptic). `n_i0` = neutralizing ionic background (mean of
@@ -68,7 +68,7 @@ def diocotron_model(n_i0: float) -> "dsl.Model":
     m = dsl.Model("diocotron_tutorial")
 
     (n,) = m.conservative_vars("n")          # single conservative variable: the density (Density role)
-    m.aux("phi")                             # auxiliary fields provided by the solver (adc::Aux channel)
+    m.aux("phi")                             # auxiliary fields provided by the solver (pops::Aux channel)
     grad_x = m.aux("grad_x")
     grad_y = m.aux("grad_y")
 
@@ -91,10 +91,10 @@ def native_diocotron_model(n_i0: float):
     ExB (E x B transport) + NoSource + BackgroundDensity (elliptic right-hand side alpha (n - n_i0)).
     This is the other way to write a model -- we prove below (`native_vs_dsl`) that it produces a
     BIT-IDENTICAL state to the formulas. C++ conventions: `ExBVelocity` and `BackgroundDensity`."""
-    return adc.Model(state=adc.Scalar(),
-                     transport=adc.ExB(B0=B0),
-                     source=adc.NoSource(),
-                     elliptic=adc.BackgroundDensity(alpha=ALPHA, n0=n_i0))
+    return pops.Model(state=pops.Scalar(),
+                     transport=pops.ExB(B0=B0),
+                     source=pops.NoSource(),
+                     elliptic=pops.BackgroundDensity(alpha=ALPHA, n0=n_i0))
 
 
 # --- 4. Initial condition (perturbed charge band, azimuthal mode) ----------------------------------
@@ -121,22 +121,22 @@ def perturbation_amplitude(density: np.ndarray) -> float:
 
 # --- 3+4. Compilation + wiring: production (native) if possible, else aot (identical) --------------
 def compile_and_build(model: "dsl.Model", ne0: np.ndarray, L: float, outdir: Path):
-    """Compile the DSL model AND wire it into a periodic `adc.System`.
+    """Compile the DSL model AND wire it into a periodic `pops.System`.
 
     Tries `production` first (zero-copy native path `add_native_block`, the plan's target), then
     falls back to `aot` (`add_compiled_block`, numerically identical, host-marshalled) -- exactly the
-    cases' strategy (cf. `adc_cases/diocotron_dsl`). The native path requires the `_adc` module and the
+    cases' strategy (cf. `adc_cases/diocotron_dsl`). The native path requires the `_pops` module and the
     model `.so` to have BEEN COMPILED WITH THE SAME adc headers (ABI guard); a fresh module (built as in
     getting-started/installation) takes the native path, otherwise `aot` applies. Returns (sim, backend)."""
     last = None
     for backend in ("production", "aot"):
         try:
             compiled = model.compile(str(outdir / f"diocotron_{backend}.so"),
-                                     ADC_INCLUDE, backend=backend)
-            sim = adc.System(n=ne0.shape[0], L=L, periodic=True)
+                                     POPS_INCLUDE, backend=backend)
+            sim = pops.System(n=ne0.shape[0], L=L, periodic=True)
             sim.add_equation("ne", model=compiled,
-                             spatial=adc.FiniteVolume(limiter="minmod", riemann="rusanov"),
-                             time=adc.Explicit())
+                             spatial=pops.FiniteVolume(limiter="minmod", riemann="rusanov"),
+                             time=pops.Explicit())
             sim.set_poisson(rhs="charge_density", solver="geometric_mg")
             sim.set_density("ne", ne0)
             return sim, backend
@@ -145,16 +145,16 @@ def compile_and_build(model: "dsl.Model", ne0: np.ndarray, L: float, outdir: Pat
             print(f"  backend {backend!r} unavailable ({type(exc).__name__}: "
                   f"{str(exc).splitlines()[0][:80]}), trying the next one")
     # Both backends failed. On a fresh install the usual cause is a missing/incompatible Kokkos root
-    # for the DSL .so (ADC_KOKKOS_ROOT). Delegate the diagnosis + copy-paste fixes to adc.doctor()
+    # for the DSL .so (POPS_KOKKOS_ROOT). Delegate the diagnosis + copy-paste fixes to pops.doctor()
     # rather than re-implementing the environment checks here.
-    print("\nNo DSL backend could be wired. Running adc.doctor() for a diagnosis:\n")
+    print("\nNo DSL backend could be wired. Running pops.doctor() for a diagnosis:\n")
     try:
-        adc.doctor()
+        pops.doctor()
     except Exception:  # noqa: BLE001 - doctor is best-effort here
         pass
     raise RuntimeError(
-        "no DSL backend could be wired to the System; see the adc.doctor() output above "
-        "(typically: set ADC_KOKKOS_ROOT, cf. getting-started/installation.md)") from last
+        "no DSL backend could be wired to the System; see the pops.doctor() output above "
+        "(typically: set POPS_KOKKOS_ROOT, cf. getting-started/installation.md)") from last
 
 
 def run(sim, steps: int, cfl: float, capture_every: int):
@@ -215,21 +215,21 @@ def make_figures(frames, times, amps, ne0, L, outdir: Path):
 
 # --- 6bis. Uniform vs AMR comparison ---------------------------------------------------------------
 def uniform_vs_amr(ne0, n_i0, L, steps, cfl, outdir: Path):
-    """Replays the SAME physics on a uniform grid and on `adc.AmrSystem` (adaptive refinement), and
+    """Replays the SAME physics on a uniform grid and on `pops.AmrSystem` (adaptive refinement), and
     plots both final densities side by side. We use the NATIVE brick composition for this comparison
     (both paths, uniform and AMR, share exactly the same model)."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    su = adc.System(n=ne0.shape[0], L=L, periodic=True)
-    su.add_block("ne", model=native_diocotron_model(n_i0), spatial=adc.Spatial(minmod=True),
-                 time=adc.Explicit())
+    su = pops.System(n=ne0.shape[0], L=L, periodic=True)
+    su.add_block("ne", model=native_diocotron_model(n_i0), spatial=pops.Spatial(minmod=True),
+                 time=pops.Explicit())
     su.set_poisson(rhs="charge_density", solver="geometric_mg"); su.set_density("ne", ne0)
 
-    sa = adc.AmrSystem(n=ne0.shape[0], L=L, periodic=True)
-    sa.add_block("ne", model=native_diocotron_model(n_i0), spatial=adc.Spatial(minmod=True),
-                 time=adc.Explicit())
+    sa = pops.AmrSystem(n=ne0.shape[0], L=L, periodic=True)
+    sa.add_block("ne", model=native_diocotron_model(n_i0), spatial=pops.Spatial(minmod=True),
+                 time=pops.Explicit())
     sa.set_refinement(0.05)
     sa.set_poisson(rhs="charge_density", solver="geometric_mg"); sa.set_density("ne", ne0)
 
@@ -258,9 +258,9 @@ def native_vs_dsl(dsl_final: np.ndarray, ne0, n_i0, L, steps, cfl, outdir: Path)
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    sb = adc.System(n=ne0.shape[0], L=L, periodic=True)
-    sb.add_block("ne", model=native_diocotron_model(n_i0), spatial=adc.Spatial(minmod=True),
-                 time=adc.Explicit())
+    sb = pops.System(n=ne0.shape[0], L=L, periodic=True)
+    sb.add_block("ne", model=native_diocotron_model(n_i0), spatial=pops.Spatial(minmod=True),
+                 time=pops.Explicit())
     sb.set_poisson(rhs="charge_density", solver="geometric_mg")
     sb.set_density("ne", ne0)
     for _ in range(steps):
@@ -314,7 +314,7 @@ def main() -> None:
     outdir = Path(args.outdir); outdir.mkdir(parents=True, exist_ok=True)
     L = 1.0
 
-    print(f"adc imported from: {adc.__file__}")
+    print(f"adc imported from: {pops.__file__}")
     print(f"parallelism backend: {detect_backend_runtime()}")
 
     ne0 = band_density(args.n, L, amp=1.0, width=0.05, mode=2, disp=0.02)
@@ -347,14 +347,14 @@ def main() -> None:
     provenance = {
         "script": "docs/sphinx/tutorials/diocotron_tutorial.py",
         "command": f"python diocotron_tutorial.py --n {args.n} --steps {args.steps}",
-        "adc_cpp_sha": git_sha(REPO_ROOT),
+        "pops_cpp_sha": git_sha(REPO_ROOT),
         "backend_compile": backend,
         "backend_runtime": detect_backend_runtime(),
         "resolution": f"{args.n}x{args.n}",
         "steps": args.steps,
         "cfl": args.cfl,
         "python": sys.version.split()[0],
-        "adc_module": adc.__file__,
+        "pops_module": pops.__file__,
         "assets": ["diocotron_growth.png", "diocotron_cover.png", "diocotron.gif",
                    "diocotron_native_vs_dsl.png", "diocotron_uniform_vs_amr.png"],
         "growth_factor": growth,

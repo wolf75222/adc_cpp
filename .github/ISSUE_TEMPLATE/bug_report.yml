@@ -27,7 +27,7 @@ body:
     id: version
     attributes:
       label: Version
-      description: adc.__version__, or the git tag / commit.
+      description: pops.__version__, or the git tag / commit.
     validations:
       required: true
   - type: dropdown

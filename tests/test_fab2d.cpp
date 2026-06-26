@@ -2,13 +2,13 @@
 // (handle Array4 capture par valeur, comme un kernel Kokkos), ghosts intacts,
 // coherence du handle avec operator(), et layout composante-lente.
 
-#include <adc/mesh/index/box2d.hpp>
-#include <adc/mesh/storage/fab2d.hpp>
-#include <adc/mesh/execution/for_each.hpp>
+#include <pops/mesh/index/box2d.hpp>
+#include <pops/mesh/storage/fab2d.hpp>
+#include <pops/mesh/execution/for_each.hpp>
 
 #include <cstdio>
 
-using namespace adc;
+using namespace pops;
 
 int main() {
   int fails = 0;

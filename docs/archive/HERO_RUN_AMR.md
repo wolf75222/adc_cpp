@@ -18,21 +18,21 @@ state), mass conserved to roundoff, and the GPU port bit-identical to the CPU.
   bit-identical). Level 0 replicated, levels > 0 distributed; `average_down` and
   reflux via global coarse buffer + `all_reduce_sum_inplace`; register
   RESTRICTED to the coarse-fine interface (`O(interface)`, not `O(NX*NY)`).
-  (`include/adc/integrator/amr_reflux_mf.hpp`.)
+  (`include/pops/integrator/amr_reflux_mf.hpp`.)
 - **Distributed AMR coupler**: `AmrCouplerMP` orchestrates everything; its aux injection
   `coupler_inject_aux_mb` goes through `parallel_copy` when the parent is distributed
-  (`test_mpi_coupler_inject`). (`include/adc/coupling/amr/amr_coupler_mp.hpp`.)
+  (`test_mpi_coupler_inject`). (`include/pops/coupling/amr/amr_coupler_mp.hpp`.)
 - **SFC balancing**: `make_sfc_distribution` (Morton Z-order) WIRED IN and
   verified under distributed AMR (`maxdiff = 0` vs rank 0, `np=1/2/4`).
 - **Execution seam**: `for_each_cell` picks ONE backend at compile time
   (serial / OpenMP / Kokkos). Under Kokkos the kernels launch on the GPU.
-  (`include/adc/mesh/for_each.hpp`.)
+  (`include/pops/mesh/for_each.hpp`.)
 - **Uniform GPU**: `examples/gpu/coupled_kokkos.cpp` does the FULL Euler-Poisson step
   on GPU (uniform, single-level), bit-identical to CPU.
 - **Geometric MG**: `GeometricMG` applies stencils PER FAB, restriction and
   prolongation by box kernels, without level-by-level gather: structurally
   ready for a distributed multi-box coarse, BUT never exercised as such (the
-  diocotron keeps the coarse replicated). (`include/adc/elliptic/geometric_mg.hpp`.)
+  diocotron keeps the coarse replicated). (`include/pops/elliptic/geometric_mg.hpp`.)
 
 ## The three blockers for the hero-run
 
@@ -41,7 +41,7 @@ state), mass conserved to roundoff, and the GPU port bit-identical to the CPU.
    IMPOSSIBLE at high coarse or on the whole machine.
 2. **Regrid of distributed levels (gather-tags)**: tagging is local per rank,
    the Berger-Rigoutsos clustering runs on a LOCAL `TagBox`; gathering the
-   distributed tags before clustering is NOT implemented (`include/adc/amr/tag_box.hpp:11`).
+   distributed tags before clustering is NOT implemented (`include/pops/amr/tag_box.hpp:11`).
    `comm.hpp` has no `gather`/`broadcast`, only `all_reduce`.
 3. **GPU + AMR never combined**: the GPU only runs uniform. `parallel_copy`,
    the reflux gather, and the regrid (tagging + host clustering) have host-side
@@ -236,7 +236,7 @@ equivalent uniform run (the M2b promise, at scale).
     the circle's alignment on the hierarchy: eff 640/1280/2048 diverge, 512/896 only stagnate). The warm
     start propagates the divergence from one step to the next -> `phi` then the field to `nan`. Measurement: at
     nc=640 the MG residual rises (`ratio = r_fin / r_0 = 2.7e2`) where nc=224 converges (`5.7e-9`).
-  - Fix: `GeometricMG::solve_robust` (`include/adc/elliptic/geometric_mg.hpp`). It runs the
+  - Fix: `GeometricMG::solve_robust` (`include/pops/elliptic/geometric_mg.hpp`). It runs the
     standard V-cycle, EXACTLY like `solve()` (so BIT-IDENTICAL when it converges or stagnates);
     ONLY if the final residual EXCEEDS the initial residual (true divergence, not a stagnation
     `ratio < 1` which we keep as is) does it harden the GS smoothing in a STICKY way (nu doubled,

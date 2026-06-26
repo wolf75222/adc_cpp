@@ -1,13 +1,13 @@
-# Builds a PREBUILT macOS arm64 / CPython 3.12 wheel of the `_adc` module so end users can
+# Builds a PREBUILT macOS arm64 / CPython 3.12 wheel of the `_pops` module so end users can
 # `pip install adc_cpp-*.whl` in seconds with no local toolchain (the from-source `pip install .`
 # recompiles the heavy Kokkos module). The wheel is self-contained: Kokkos is built Serial + STATIC
-# + PIC and linked into `_adc.*.so`, and cibuildwheel runs delocate-wheel to bundle any remaining
+# + PIC and linked into `_pops.*.so`, and cibuildwheel runs delocate-wheel to bundle any remaining
 # dynamic dependency. Kokkos stays ON and mandatory (adc_cpp is Kokkos-only).
 #
 # Triggers: on a vX.Y.Z tag (attach the wheel to the GitHub Release made by release.yml) and on
 # demand (workflow_dispatch). It is SEPARATE from ci.yml's required `gate` (an artifact build, not a
 # correctness gate), and deliberately does NOT run on PRs: ci.yml's required gate-python already
-# builds `_adc` WITH Kokkos and runs the python suite on every PR, so the only signal unique to this
+# builds `_pops` WITH Kokkos and runs the python suite on every PR, so the only signal unique to this
 # job is the packaging path (cibuildwheel + delocate + static-Kokkos link + pyproject). To validate
 # that before cutting a release, run this workflow manually (workflow_dispatch) on the candidate.
 name: Wheels
@@ -55,7 +55,7 @@ jobs:
       # workflow): any edit to a Kokkos flag here rolls the key (no stale-flag reuse) and editing the
       # file is the escape hatch from a bad cache. macos-14 is pinned, and libc++ ABI is stable across
       # its image updates, so the runner SDK is not in the key (an archive built on an older image links
-      # fine into a fresh _adc on a newer one).
+      # fine into a fresh _pops on a newer one).
       - name: Cache Kokkos install (macOS arm64, Serial static PIC)
         id: kokkos-cache
         uses: actions/cache@v5
@@ -63,21 +63,21 @@ jobs:
           path: /tmp/kokkos-install
           key: kokkos-wheel-macos-arm64-4.4.01-15dc143e-serial-static-pic-cxx20-dt11-${{ hashFiles('.github/workflows/wheels.yml') }}
 
-      # ccache for the heavy -O3 _adc TUs. Rolling key (sha) + restore-keys reuse the most recent cache.
+      # ccache for the heavy -O3 _pops TUs. Rolling key (sha) + restore-keys reuse the most recent cache.
       # cibuildwheel builds in a temp dir, so CCACHE_BASEDIR + CCACHE_NOHASHDIR (set in CIBW_ENVIRONMENT)
       # are what give cross-run hits; the actual warm hit-rate is reported by the `ccache -s` step below.
       - name: Cache ccache (wheel)
         uses: actions/cache@v5
         with:
-          path: ~/.cache/adc-wheel-ccache
+          path: ~/.cache/pops-wheel-ccache
           key: ccache-wheel-macos-arm64-${{ github.sha }}
           restore-keys: |
             ccache-wheel-macos-arm64-
 
       # cibuildwheel builds cp312-macosx_arm64 in an isolated env. CIBW_BEFORE_ALL runs ONCE on the
       # runner (macOS builds are native, not containerized), installing a Serial+static+PIC Kokkos that
-      # find_package(Kokkos) then links INTO _adc -> the wheel carries no external Kokkos dylib.
-      # ADC_HEAVY_TU_POOL=2: post-split (ADC-335/342/359) the heavy module TUs are SMALL sub-TUs, so two
+      # find_package(Kokkos) then links INTO _pops -> the wheel carries no external Kokkos dylib.
+      # POPS_HEAVY_TU_POOL=2: post-split (ADC-335/342/359) the heavy module TUs are SMALL sub-TUs, so two
       # -O3 compiles fit the ~7 GB / 3-vCPU runner; the original pool=1 OOM guard (for the old monolithic
       # system.cpp / amr_system.cpp) made the serial build ~1 h here. MACOSX_DEPLOYMENT_TARGET=11.0 keeps
       # the wheel installable on older macOS than the runner SDK.
@@ -85,13 +85,13 @@ jobs:
         env:
           CIBW_BUILD: cp312-macosx_arm64
           CIBW_ARCHS_MACOS: arm64
-          CIBW_CONFIG_SETTINGS: cmake.define.ADC_HEAVY_TU_POOL=2
+          CIBW_CONFIG_SETTINGS: cmake.define.POPS_HEAVY_TU_POOL=2
           MACOSX_DEPLOYMENT_TARGET: '11.0'
           # Builds Kokkos ONLY on a cache miss (the install dir is restored above otherwise). The clone
           # is retried (a transient network blip must not waste a multi-hour build) and its checkout is
           # asserted against the pinned commit of tag 4.4.01 (detects a re-pointed tag -- supply chain).
           # -DCMAKE_OSX_DEPLOYMENT_TARGET=11.0 is explicit so Kokkos targets 11.0 regardless of env
-          # inheritance, matching the _adc target (no static-archive min-version skew).
+          # inheritance, matching the _pops target (no static-archive min-version skew).
           CIBW_BEFORE_ALL: |
             set -e
             if [ ! -f /tmp/kokkos-install/lib/cmake/Kokkos/KokkosConfig.cmake ]; then
@@ -111,7 +111,7 @@ jobs:
               cmake --build /tmp/kbuild --target install -j3
             fi
             test -f /tmp/kokkos-install/lib/cmake/Kokkos/KokkosConfig.cmake
-          # ccache wraps the heavy -O3 _adc compiles. COMPILERCHECK=content keys on the compiler binary
+          # ccache wraps the heavy -O3 _pops compiles. COMPILERCHECK=content keys on the compiler binary
           # (not its mtime); MAXSIZE bounds the cached dir so it cannot crowd out the Kokkos cache under
           # the repo's 10 GB budget. CAVEAT: cibuildwheel builds under a per-run temp dir, so the absolute
           # source/-I paths vary run-to-run and CCACHE_BASEDIR cannot fully normalise them -- cross-run
@@ -123,7 +123,7 @@ jobs:
             CMAKE_PREFIX_PATH=/tmp/kokkos-install
             MACOSX_DEPLOYMENT_TARGET=11.0
             CMAKE_CXX_COMPILER_LAUNCHER=ccache
-            CCACHE_DIR=$HOME/.cache/adc-wheel-ccache
+            CCACHE_DIR=$HOME/.cache/pops-wheel-ccache
             CCACHE_BASEDIR=$HOME
             CCACHE_MAXSIZE=2G
             CCACHE_NOHASHDIR=1
@@ -132,7 +132,7 @@ jobs:
           # Smoke-test the built wheel in cibuildwheel's isolated venv: it must import self-contained
           # (this is the real self-containment check; doctor() is skipped here as the bare venv has no
           # compiler/Kokkos and would print noisy but harmless FAIL lines).
-          CIBW_TEST_COMMAND: 'python -c "import adc; print(adc.__version__)"'
+          CIBW_TEST_COMMAND: 'python -c "import pops; print(pops.__version__)"'
         run: python -m cibuildwheel --output-dir wheelhouse
 
       - name: ccache stats (wheel)
@@ -140,12 +140,12 @@ jobs:
         # Surfaces the warm-run hit-rate. If it stays near zero across runs, cibuildwheel's per-build
         # temp source path is defeating CCACHE_BASEDIR -> the next lever is a persistent scikit-build-core
         # build-dir cache (deferred: higher cross-runner cmake-cache risk).
-        run: CCACHE_DIR="$HOME/.cache/adc-wheel-ccache" ccache -s
+        run: CCACHE_DIR="$HOME/.cache/pops-wheel-ccache" ccache -s
 
       - name: Upload wheel artifact
         uses: actions/upload-artifact@v7
         with:
-          name: adc_cpp-macos-arm64-cp312
+          name: pops-macos-arm64-cp312
           path: wheelhouse/*.whl
           if-no-files-found: error
 

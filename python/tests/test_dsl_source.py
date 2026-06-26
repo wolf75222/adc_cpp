@@ -4,7 +4,7 @@ emit_cpp_source() produit un struct C++ expose apply(U, a) cense reproduire une 
 ECRITE A LA MAIN. Ce test : (1) construit le modele a 4 variables avec la source (q/m) rho E (forme
 electrostatique), aux = grad_x/grad_y ; (2) genere la brique GenForce ; (3) si un compilateur et les
 en-tetes adc sont presents, compile un programme qui inclut les vrais en-tetes adc et compare, sur des
-etats ET des aux deterministes, GenForce::apply a adc::PotentialForce{-1.0}::apply composante par
+etats ET des aux deterministes, GenForce::apply a pops::PotentialForce{-1.0}::apply composante par
 composante. Le programme imprime l'ecart max, qu'on exige < 1e-12. Lance avec python3.
 """
 import os
@@ -12,7 +12,7 @@ import shutil
 import subprocess
 import tempfile
 
-from adc import dsl
+from pops import dsl
 
 QOM = -1.0
 INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "include"))
@@ -26,7 +26,7 @@ def build_force_model():
       S[1] = qom * rho * Ex          avec Ex = -grad_x
       S[2] = qom * rho * Ey          avec Ey = -grad_y
       S[3] = qom * (rho_u Ex + rho_v Ey)   (travail sur l'energie)
-    Identique a adc::PotentialForce{qom} sur 4 variables.
+    Identique a pops::PotentialForce{qom} sur 4 variables.
     """
     m = dsl.HyperbolicModel("force")
     rho, rho_u, rho_v, E = m.conservative_vars("rho", "rho_u", "rho_v", "E")
@@ -42,14 +42,14 @@ def build_force_model():
 
 
 HARNESS = r"""
-#include <adc/physics/bricks/bricks.hpp>
+#include <pops/physics/bricks/bricks.hpp>
 %s
 #include <cstdio>
 #include <cmath>
 
 int main() {
-  adc_generated::GenForce gen;
-  adc::PotentialForce ref{%r};
+  pops_generated::GenForce gen;
+  pops::PotentialForce ref{%r};
 
   // etats deterministes (rho > 0) et aux deterministes (gradients varies, signes mixtes).
   const double S[][4] = {{1.0,0.2,-0.1,2.5},{2.0,0.5,0.3,6.0},
@@ -61,9 +61,9 @@ int main() {
   double maxdiff = 0.0;
   auto upd = [&](double a, double b){ double d = std::fabs(a-b); if (d>maxdiff) maxdiff=d; };
   for (int k=0;k<ns;++k){
-    adc::StateVec<4> u{}; for(int i=0;i<4;++i) u[i]=S[k][i];
+    pops::StateVec<4> u{}; for(int i=0;i<4;++i) u[i]=S[k][i];
     for (int j=0;j<ng;++j){
-      adc::Aux a{}; a.grad_x = G[j][0]; a.grad_y = G[j][1];
+      pops::Aux a{}; a.grad_x = G[j][0]; a.grad_y = G[j][1];
       auto sg = gen.apply(u, a);
       auto sr = ref.apply(u, a);
       for(int i=0;i<4;++i) upd(sg[i], sr[i]);
@@ -81,9 +81,9 @@ def main():
 
     # (1) forme de la brique (sans compilateur)
     assert "struct GenForce {" in struct
-    for token in ("apply(const adc::StateVec<4>&", "const adc::Aux& a",
-                  "const adc::Real grad_x = a.grad_x;", "const adc::Real grad_y = a.grad_y;",
-                  "adc::StateVec<4> S{};"):
+    for token in ("apply(const pops::StateVec<4>&", "const pops::Aux& a",
+                  "const pops::Real grad_x = a.grad_x;", "const pops::Real grad_y = a.grad_y;",
+                  "pops::StateVec<4> S{};"):
         assert token in struct, "membre attendu absent : %s" % token
     print("OK  emit_cpp_source : struct genere (%d lignes)" % struct.count("\n"))
 
@@ -104,8 +104,8 @@ def main():
         out = subprocess.run([exe], capture_output=True, text=True, check=True).stdout
 
     maxdiff = float(out.strip())
-    assert maxdiff < 1e-12, "source generee != adc::PotentialForce (ecart max %.2e)" % maxdiff
-    print("OK  GenForce::apply == adc::PotentialForce{%.1f} (ecart max %.1e)" % (QOM, maxdiff))
+    assert maxdiff < 1e-12, "source generee != pops::PotentialForce (ecart max %.2e)" % maxdiff
+    print("OK  GenForce::apply == pops::PotentialForce{%.1f} (ecart max %.1e)" % (QOM, maxdiff))
     print("test_dsl_source : tout est vert")
 
 

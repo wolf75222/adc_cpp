@@ -1,21 +1,21 @@
 // Phase 4 du portage runtime : le KERNEL de couplage inter-especes (ionisation) en for_each_cell,
 // sur la vraie infra MultiFab (memoire unifiee sous CUDA). Reproduit la math de System::add_ionization
 // (n_g -= dt k n_e n_g ; n_i += ; n_e +=) et verifie la conservation n_i + n_g. Portable seriel/Kokkos.
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/layout/distribution_mapping.hpp>
-#include <adc/mesh/execution/for_each.hpp>
-#include <adc/mesh/storage/multifab.hpp>
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/layout/distribution_mapping.hpp>
+#include <pops/mesh/execution/for_each.hpp>
+#include <pops/mesh/storage/multifab.hpp>
 
 #include <cstdio>
 
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
 #include <Kokkos_Core.hpp>
 #endif
 
-using namespace adc;
+using namespace pops;
 
 int main(int argc, char** argv) {
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   Kokkos::initialize(argc, argv);
 #else
   (void)argc;
@@ -36,7 +36,7 @@ int main(int argc, char** argv) {
       Array4 ue = Ue.fab(0).array();
       Array4 ui = Ui.fab(0).array();
       Array4 ug = Ug.fab(0).array();
-      for_each_cell(Ue.box(0), [=] ADC_HD(int i, int j) {  // ionisation, sur device
+      for_each_cell(Ue.box(0), [=] POPS_HD(int i, int j) {  // ionisation, sur device
         const Real dn = dt * k * ue(i, j, 0) * ug(i, j, 0);
         ug(i, j, 0) -= dn;
         ui(i, j, 0) += dn;
@@ -55,7 +55,7 @@ int main(int argc, char** argv) {
         ni += ai(i, j, 0);
         ng += ag(i, j, 0);
       }
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
     const char* space = Kokkos::DefaultExecutionSpace::name();
 #else
     const char* space = "Serial(host)";
@@ -63,7 +63,7 @@ int main(int argc, char** argv) {
     std::printf("exec=%s steps=%d  n_e=%.10f  n_i=%.10f  n_g=%.10f  (n_i+n_g)=%.10f\n", space,
                 steps, ne, ni, ng, ni + ng);
   }
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   Kokkos::finalize();
 #endif
   return 0;

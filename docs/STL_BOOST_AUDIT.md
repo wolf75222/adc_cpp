@@ -32,9 +32,9 @@ with an STL primitive.
 
 Important lint nuance: `.clang-tidy` enables modernize-*/readability-* (which
 would flag readability-use-anyofallof / modernize-use-ranges /
-modernize-loop-convert), BUT its HeaderFilterRegex is `include/adc/.*`, so the
+modernize-loop-convert), BUT its HeaderFilterRegex is `include/pops/.*`, so the
 `python/*.cpp` pybind translation units are NEVER linted -- the findings there
-are net-new and will not be auto-surfaced. The single `include/adc/**` site
+are net-new and will not be auto-surfaced. The single `include/pops/**` site
 (load_balance.hpp) IS inside the regex and would be flagged once a tidy pass
 exercises it.
 
@@ -47,7 +47,7 @@ not strictly clearer.
 
 | Sev | Where | Issue |
 |-----|-------|-------|
-| Low | include/adc/parallel/load_balance.hpp:108 (in make_knapsack_distribution) | Hand-rolled min-element scan (`if (load[q] < load[r]) r = q;`) over the load vector -- exactly std::min_element. Host orchestration (LPT knapsack, once per regrid). File already includes <algorithm> and <numeric>; this site IS inside the clang-tidy HeaderFilterRegex. |
+| Low | include/pops/parallel/load_balance.hpp:108 (in make_knapsack_distribution) | Hand-rolled min-element scan (`if (load[q] < load[r]) r = q;`) over the load vector -- exactly std::min_element. Host orchestration (LPT knapsack, once per regrid). File already includes <algorithm> and <numeric>; this site IS inside the clang-tidy HeaderFilterRegex. |
 | Low | python/bindings/system/base/system.cpp (resolve_implicit_components name search) | Hand-rolled linear name search over cons.names by index; a textbook std::find / std::ranges::find on a std::vector<std::string>. Host-side block setup. TU already includes <algorithm>. NOT covered by .clang-tidy (python/*.cpp excluded), so net-new. |
 | Low | python/bindings/amr/amr_system.cpp (resolve_implicit_components name search) | Exact copy of the system.cpp linear name search plus the same index-based CSV build. Same STL-find opportunity, same uncovered-by-tidy status. The two copies are themselves a small duplication: both could call one shared host helper. |
 

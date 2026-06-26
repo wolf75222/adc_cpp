@@ -7,13 +7,13 @@ existing IR -- they prove the board and operator-first writings share one kernel
 """
 import pytest
 
-physics = pytest.importorskip("adc.physics")
-amath = pytest.importorskip("adc.math")
-from adc.time import Program  # noqa: E402
+physics = pytest.importorskip("pops.physics")
+amath = pytest.importorskip("pops.math")
+from pops.time import Program  # noqa: E402
 
 
 def _board_model():
-    from adc.math import sqrt, grad, div, laplacian, ddt
+    from pops.math import sqrt, grad, div, laplacian, ddt
     m = physics.Model("euler_poisson_lorentz")
     U = m.state("U", components=["rho", "mx", "my"],
                 roles={"rho": "density", "mx": "momentum_x", "my": "momentum_y"})
@@ -75,7 +75,7 @@ def test_model_dump_module_ir_lists_spaces_and_operators():
 def test_callable_operator_rebinds_for_out_of_order_registration():
     # A callable operator used before a LATER operator is registered must still resolve
     # the later one: CallableOperator rebinds the model's fresh module when needed.
-    from adc.math import sqrt, grad, div, laplacian, ddt
+    from pops.math import sqrt, grad, div, laplacian, ddt
     m = physics.Model("ep")
     U = m.state("U", components=["rho", "mx", "my"])
     rho, mx, my = U

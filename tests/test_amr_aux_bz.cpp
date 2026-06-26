@@ -14,56 +14,56 @@
 //       canal aux PARTAGE a la largeur MAX (4) a chaque niveau ; B_z peuple a c ; le bloc qui
 //       lit B_z croit (source = B_z u), le bloc de base sur le meme aux elargi reste inerte.
 
-#include <adc/core/model/coupled_system.hpp>
-#include <adc/core/model/physical_model.hpp>
-#include <adc/core/state/state.hpp>
-#include <adc/coupling/system/amr_system_coupler.hpp>
-#include <adc/mesh/index/box2d.hpp>
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/layout/distribution_mapping.hpp>
-#include <adc/mesh/geometry/geometry.hpp>
-#include <adc/mesh/storage/mf_arith.hpp>
-#include <adc/mesh/storage/multifab.hpp>
-#include <adc/mesh/boundary/physical_bc.hpp>
-#include <adc/mesh/layout/refinement.hpp>              // coarsen_index
-#include <adc/numerics/time/amr/reflux/amr_reflux_mf.hpp>  // AmrLevelMP, advance_amr
-#include <adc/parallel/comm.hpp>
+#include <pops/core/model/coupled_system.hpp>
+#include <pops/core/model/physical_model.hpp>
+#include <pops/core/state/state.hpp>
+#include <pops/coupling/system/amr_system_coupler.hpp>
+#include <pops/mesh/index/box2d.hpp>
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/layout/distribution_mapping.hpp>
+#include <pops/mesh/geometry/geometry.hpp>
+#include <pops/mesh/storage/mf_arith.hpp>
+#include <pops/mesh/storage/multifab.hpp>
+#include <pops/mesh/boundary/physical_bc.hpp>
+#include <pops/mesh/layout/refinement.hpp>              // coarsen_index
+#include <pops/numerics/time/amr/reflux/amr_reflux_mf.hpp>  // AmrLevelMP, advance_amr
+#include <pops/parallel/comm.hpp>
 
 #include <cmath>
 #include <cstdio>
 
-using namespace adc;
+using namespace pops;
 
 // Modele jouet : croissance pilotee par B_z. flux nul, pas de couplage elliptique (phi = 0).
 // source S = B_z * u -> du/dt = B_z u. Declare n_aux=4 : LIT a.B_z.
 struct BzGrow {
   using State = StateVec<1>;
-  using Aux = adc::Aux;
+  using Aux = pops::Aux;
   static constexpr int n_vars = 1;
   static constexpr int n_aux = 4;  // phi, grad_x, grad_y, B_z
-  ADC_HD State flux(const State&, const Aux&, int) const { return State{Real(0)}; }
-  ADC_HD Real max_wave_speed(const State&, const Aux&, int) const { return Real(0); }
-  ADC_HD State source(const State& u, const Aux& a) const {
+  POPS_HD State flux(const State&, const Aux&, int) const { return State{Real(0)}; }
+  POPS_HD Real max_wave_speed(const State&, const Aux&, int) const { return Real(0); }
+  POPS_HD State source(const State& u, const Aux& a) const {
     State s{};
     s[0] = a.B_z * u[0];
     return s;
   }
-  ADC_HD Real elliptic_rhs(const State&) const { return Real(0); }
+  POPS_HD Real elliptic_rhs(const State&) const { return Real(0); }
 };
 
 // Modele de BASE (n_aux defaut = 3) : advection en x a vitesse v (E x B-like, mais vitesse
 // constante portee par le flux, aux non lue). Source nulle.
 struct AdvectX {
   using State = StateVec<1>;
-  using Aux = adc::Aux;
+  using Aux = pops::Aux;
   static constexpr int n_vars = 1;
   Real v = Real(1);
-  ADC_HD State flux(const State& u, const Aux&, int dir) const {
+  POPS_HD State flux(const State& u, const Aux&, int dir) const {
     return State{dir == 0 ? v * u[0] : Real(0)};
   }
-  ADC_HD Real max_wave_speed(const State&, const Aux&, int) const { return std::fabs(v); }
-  ADC_HD State source(const State&, const Aux&) const { return State{}; }
-  ADC_HD Real elliptic_rhs(const State&) const { return Real(0); }
+  POPS_HD Real max_wave_speed(const State&, const Aux&, int) const { return std::fabs(v); }
+  POPS_HD State source(const State&, const Aux&) const { return State{}; }
+  POPS_HD Real elliptic_rhs(const State&) const { return Real(0); }
 };
 
 static_assert(PhysicalModel<BzGrow> && PhysicalModel<AdvectX>);

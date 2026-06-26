@@ -5,10 +5,10 @@ Contexte (decouvert en basculant les drivers hyqmom15 en backend production). La
 hors-source incluait deja le backend (chemins distincts par backend). Restait un cache aveugle au
 backend : le cache de HANDLES du chargeur dynamique (dlopen / dyld), keye PAR CHEMIN. Recompiler un
 .so 'production' sur un chemin ou un .so 'aot' a deja ete charge dans le MEME process fait resservir
-l'ancien handle aot -> add_native_block echoue sur 'adc_native_abi_key absent'. Le chemin so_path
+l'ancien handle aot -> add_native_block echoue sur 'pops_native_abi_key absent'. Le chemin so_path
 EXPLICITE etant fige par l'appelant, deux backends s'y ecrasaient.
 
-Le fix (python/adc/dsl.py) : un registre EN PROCESS du backend ecrit a chaque chemin ; un so_path
+Le fix (python/pops/dsl.py) : un registre EN PROCESS du backend ecrit a chaque chemin ; un so_path
 explicite deja occupe par un AUTRE backend est redirige vers un frere distinct ('.<backend>.so') pour
 que dlopen recharge un handle neuf. Le cache hors-source reste keye par backend (non-regression).
 
@@ -16,7 +16,7 @@ On verifie :
  (1) PUR-PYTHON (aucun compilateur) : semantique du registre + redirection backend ;
  (2) DECISION (compilateur + en-tetes adc requis ; auto-skip sinon) :
      (a) so_path explicite, aot PUIS production au meme chemin -> chemins RETENUS distincts, chacun
-         portant les symboles de SON backend (production exporte adc_native_abi_key, aot non) ;
+         portant les symboles de SON backend (production exporte pops_native_abi_key, aot non) ;
      (b) l'inverse production puis aot -> idem ;
      (c) cache hors-source aot puis production sans so_path -> chemins distincts, symboles corrects ;
  (3) CHARGEMENT NATIF (production chargeable dans cet environnement ; auto-skip sinon) :
@@ -32,10 +32,10 @@ import tempfile
 
 import numpy as np
 
-import adc
-from adc import dsl
+import pops
+from pops import dsl
 
-INCLUDE = os.environ.get("ADC_INCLUDE") or os.path.abspath(
+INCLUDE = os.environ.get("POPS_INCLUDE") or os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "..", "include"))
 
 fails = 0
@@ -79,7 +79,7 @@ def initial_state(n):
 
 
 def is_production_so(path):
-    """True si le .so exporte adc_native_abi_key (artefact backend production), False sinon (aot).
+    """True si le .so exporte pops_native_abi_key (artefact backend production), False sinon (aot).
 
     nm (POSIX) si present ; sinon scan d'octets du fichier (le nom d'un symbole EXPORTE figure dans la
     table de chaines, ELF comme Mach-O). Les deux distinguent production (exporte) d'aot (n'exporte
@@ -90,13 +90,13 @@ def is_production_so(path):
             out = subprocess.check_output([nm, "-gU", path], stderr=subprocess.DEVNULL).decode()
             for line in out.splitlines():
                 toks = line.split()
-                if toks and toks[-1].lstrip("_") == "adc_native_abi_key":
+                if toks and toks[-1].lstrip("_") == "pops_native_abi_key":
                     return True
             return False
         except Exception:  # noqa: BLE001  (nm absent d'un format -> repli octets)
             pass
     with open(path, "rb") as f:
-        return b"adc_native_abi_key" in f.read()
+        return b"pops_native_abi_key" in f.read()
 
 
 def pure_python_checks():
@@ -158,9 +158,9 @@ def decision_checks():
     chk(cm_aot.so_path == so,
         "(a) le chemin aot explicite est preserve (retro-compat)")
     chk(is_production_so(cm_prod.so_path),
-        "(a) l'artefact production retenu exporte adc_native_abi_key")
+        "(a) l'artefact production retenu exporte pops_native_abi_key")
     chk(not is_production_so(cm_aot.so_path),
-        "(a) l'artefact aot (intouche) n'exporte pas adc_native_abi_key")
+        "(a) l'artefact aot (intouche) n'exporte pas pops_native_abi_key")
 
     # (b) l'inverse : production PUIS aot au meme chemin -> chemins distincts, symboles coherents
     d2 = tempfile.mkdtemp()
@@ -174,8 +174,8 @@ def decision_checks():
 
     # (c) cache hors-source (sans so_path) : aot puis production -> chemins distincts par backend
     cache = tempfile.mkdtemp()
-    old = os.environ.get("ADC_CACHE_DIR")
-    os.environ["ADC_CACHE_DIR"] = cache
+    old = os.environ.get("POPS_CACHE_DIR")
+    os.environ["POPS_CACHE_DIR"] = cache
     try:
         mc = build_euler("euler_cacheb_c")
         cm_c_aot = mc.compile(backend="aot", include=INCLUDE)
@@ -186,23 +186,23 @@ def decision_checks():
             "(c) cache hors-source : symboles corrects par backend")
     finally:
         if old is None:
-            os.environ.pop("ADC_CACHE_DIR", None)
+            os.environ.pop("POPS_CACHE_DIR", None)
         else:
-            os.environ["ADC_CACHE_DIR"] = old
+            os.environ["POPS_CACHE_DIR"] = old
         shutil.rmtree(cache, ignore_errors=True)
     shutil.rmtree(d, ignore_errors=True)
     shutil.rmtree(d2, ignore_errors=True)
 
 
 def _native_load_probe():
-    """True si un .so production DSL se CHARGE dans cet environnement (module _adc compatible Kokkos).
+    """True si un .so production DSL se CHARGE dans cet environnement (module _pops compatible Kokkos).
     Faux sur un module SERIE local (les .so DSL referencent Kokkos non exporte par le module)."""
     try:
         d = tempfile.mkdtemp()
         cm = build_euler("euler_loadprobe").compile(os.path.join(d, "lp.so"), INCLUDE,
                                                     backend="production")
-        s = adc.System(n=8, periodic=True)
-        s.add_equation("g", cm, spatial=adc.FiniteVolume(limiter="minmod", riemann="hllc",
+        s = pops.System(n=8, periodic=True)
+        s.add_equation("g", cm, spatial=pops.FiniteVolume(limiter="minmod", riemann="hllc",
                                                          variables="primitive"))
         shutil.rmtree(d, ignore_errors=True)
         return True
@@ -214,9 +214,9 @@ def native_load_checks():
     """(3) Bout en bout : aot CHARGE puis production au MEME chemin -> add_native_block reussit.
 
     Reproduit le bug d'origine : sur le code d'avant le fix, dlopen ressert l'ancien handle aot au
-    chemin production (adc_native_abi_key absent). Auto-skip si le module ne charge pas les .so DSL."""
+    chemin production (pops_native_abi_key absent). Auto-skip si le module ne charge pas les .so DSL."""
     if not _native_load_probe():
-        print("skip  native_load_checks : module _adc ne charge pas les .so DSL ici (Kokkos serie ?)")
+        print("skip  native_load_checks : module _pops ne charge pas les .so DSL ici (Kokkos serie ?)")
         return
     n = 16
     d = tempfile.mkdtemp()
@@ -224,15 +224,15 @@ def native_load_checks():
 
     # charger l'artefact AOT au chemin so (peuple le cache de handles dlopen pour ce chemin)
     cm_aot = build_euler().compile(so, INCLUDE, backend="aot")
-    s_aot = adc.System(n=n, periodic=True)
-    s_aot.add_equation("gas", cm_aot, spatial=adc.FiniteVolume(limiter="minmod", riemann="hllc",
+    s_aot = pops.System(n=n, periodic=True)
+    s_aot.add_equation("gas", cm_aot, spatial=pops.FiniteVolume(limiter="minmod", riemann="hllc",
                                                               variables="primitive"))
 
     # recompiler PRODUCTION au MEME chemin, puis brancher via add_native_block : doit reussir
     cm_prod = build_euler().compile(so, INCLUDE, backend="production")
     try:
-        s_prod = adc.System(n=n, periodic=True)
-        s_prod.add_equation("gas", cm_prod, spatial=adc.FiniteVolume(limiter="minmod", riemann="hllc",
+        s_prod = pops.System(n=n, periodic=True)
+        s_prod.add_equation("gas", cm_prod, spatial=pops.FiniteVolume(limiter="minmod", riemann="hllc",
                                                                     variables="primitive"))
         s_prod.set_poisson(rhs="charge_density", solver="geometric_mg")
         s_prod.set_state("gas", initial_state(n))

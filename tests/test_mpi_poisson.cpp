@@ -5,18 +5,18 @@
 // l'arrondi (verification du residu, independante de la constante additive).
 // Resultat identique quel que soit N (Nx, Ny divisibles par N).
 
-#include <adc/numerics/elliptic/poisson/poisson_fft.hpp>
-#include <adc/parallel/comm.hpp>
+#include <pops/numerics/elliptic/poisson/poisson_fft.hpp>
+#include <pops/parallel/comm.hpp>
 
 #include <cmath>
 #include <cstdio>
 #include <vector>
 
-#ifdef ADC_HAS_MPI
+#ifdef POPS_HAS_MPI
 #include <mpi.h>
 #endif
 
-using namespace adc;
+using namespace pops;
 
 int main(int argc, char** argv) {
   comm_init(&argc, &argv);
@@ -46,7 +46,7 @@ int main(int argc, char** argv) {
   if (np == 1) {
     phi_full = phi_local;
   } else {
-#ifdef ADC_HAS_MPI
+#ifdef POPS_HAS_MPI
     if (me == 0)
       phi_full.resize(static_cast<std::size_t>(Ny) * Nx);
     MPI_Gather(phi_local.data(), nyl * Nx, MPI_DOUBLE, phi_full.data(), nyl * Nx, MPI_DOUBLE, 0,
@@ -75,7 +75,7 @@ int main(int argc, char** argv) {
       ++fails;
   }
 
-#ifdef ADC_HAS_MPI
+#ifdef POPS_HAS_MPI
   if (np > 1)
     MPI_Bcast(&fails, 1, MPI_LONG, 0, MPI_COMM_WORLD);
 #endif

@@ -5,33 +5,33 @@
 // masse totale (grossier average-down) est conservee a travers un pas AMR diffusif,
 // (2) la diffusion AGIT (le champ se lisse, le pic baisse).
 
-#include <adc/core/state/state.hpp>
-#include <adc/numerics/time/amr/reflux/amr_reflux_mf.hpp>  // AmrLevelMP, advance_amr, mf_average_down_mb
-#include <adc/mesh/index/box2d.hpp>
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/layout/distribution_mapping.hpp>
-#include <adc/mesh/geometry/geometry.hpp>
-#include <adc/mesh/storage/mf_arith.hpp>
-#include <adc/mesh/storage/multifab.hpp>
+#include <pops/core/state/state.hpp>
+#include <pops/numerics/time/amr/reflux/amr_reflux_mf.hpp>  // AmrLevelMP, advance_amr, mf_average_down_mb
+#include <pops/mesh/index/box2d.hpp>
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/layout/distribution_mapping.hpp>
+#include <pops/mesh/geometry/geometry.hpp>
+#include <pops/mesh/storage/mf_arith.hpp>
+#include <pops/mesh/storage/multifab.hpp>
 
 #include <cmath>
 #include <cstdio>
 #include <vector>
 
-using namespace adc;
+using namespace pops;
 
 // Scalaire purement diffusif : pas de flux hyperbolique, pas de source ; seule la
 // diffusivite agit (via le flux de face Fickien de compute_face_fluxes).
 struct DiffuseScalar {
   using State = StateVec<1>;
-  using Aux = adc::Aux;
+  using Aux = pops::Aux;
   static constexpr int n_vars = 1;
   Real nu = Real(0.1);
-  ADC_HD State flux(const State&, const Aux&, int) const { return State{}; }
-  ADC_HD Real max_wave_speed(const State&, const Aux&, int) const { return Real(0); }
-  ADC_HD State source(const State&, const Aux&) const { return State{}; }
-  ADC_HD Real elliptic_rhs(const State& u) const { return u[0]; }
-  ADC_HD Real diffusivity() const { return nu; }
+  POPS_HD State flux(const State&, const Aux&, int) const { return State{}; }
+  POPS_HD Real max_wave_speed(const State&, const Aux&, int) const { return Real(0); }
+  POPS_HD State source(const State&, const Aux&) const { return State{}; }
+  POPS_HD Real elliptic_rhs(const State& u) const { return u[0]; }
+  POPS_HD Real diffusivity() const { return nu; }
 };
 
 static_assert(DiffusiveModel<DiffuseScalar>);

@@ -33,8 +33,8 @@ import tempfile
 
 import numpy as np
 
-import adc
-from adc import dsl
+import pops
+from pops import dsl
 
 fails = 0
 INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "include"))
@@ -141,7 +141,7 @@ if not cxx:
     print("pas de compilateur C++ : tests (2)-(4)/(6) sautes")
     sys.exit(1 if fails else 0)
 
-tmp = tempfile.mkdtemp(prefix="adc_ws_nop_")
+tmp = tempfile.mkdtemp(prefix="pops_ws_nop_")
 
 print("== (2) compile aot sans 'p' : wave_speeds emis ==")
 compiled = toy_model().compile(os.path.join(tmp, "acoustic2.so"), INCLUDE, backend="aot")
@@ -152,10 +152,10 @@ dis = float(np.max(np.abs(expected_rhs(toy_state(n), n, "hll") - expected_rhs(to
 chk(dis > 1e-3, f"les references HLL et Rusanov DIFFERENT (dmax = {dis:.3e}) : le test discrimine")
 for label, riemann in (("(3) riemann='hll'", "hll"), ("(4) riemann='rusanov'", "rusanov")):
     print(f"== {label} : eval_rhs == reference numpy ==")
-    sim = adc.System(n=n, L=1.0, periodic=True)
+    sim = pops.System(n=n, L=1.0, periodic=True)
     sim.add_equation("toy", model=compiled,
-                     spatial=adc.FiniteVolume(limiter="none", riemann=riemann),
-                     time=adc.Explicit())
+                     spatial=pops.FiniteVolume(limiter="none", riemann=riemann),
+                     time=pops.Explicit())
     U = toy_state(n)
     sim.set_state("toy", U)
     rhs = np.array(sim.eval_rhs("toy"))
@@ -173,10 +173,10 @@ m_eig.primitive_vars(e1, e2)
 m_eig.conservative_from([e1, e2])
 c_eig = m_eig.compile(os.path.join(tmp, "eigonly.so"), INCLUDE, backend="aot")
 chk(not getattr(c_eig, "has_wave_speeds", True), "has_wave_speeds faux (eigenvalues sans 'p')")
-sim = adc.System(n=16, L=1.0, periodic=True)
+sim = pops.System(n=16, L=1.0, periodic=True)
 msg = err_msg(lambda: sim.add_equation(
-    "eig", model=c_eig, spatial=adc.FiniteVolume(limiter="none", riemann="hll"),
-    time=adc.Explicit()))
+    "eig", model=c_eig, spatial=pops.FiniteVolume(limiter="none", riemann="hll"),
+    time=pops.Explicit()))
 chk("wave_speeds" in msg,
     f"hll rejete par le gate C++ avec remede ({msg[:60]}...)")
 
@@ -194,10 +194,10 @@ m_p.primitive_vars(rho, u, v)
 m_p.conservative_from([rho, rho * u, rho * v])
 c_p = m_p.compile(os.path.join(tmp, "withp.so"), INCLUDE, backend="aot")
 chk(getattr(c_p, "has_wave_speeds", False), "has_wave_speeds vrai (chemin historique 'p' + eigenvalues)")
-sim = adc.System(n=16, L=1.0, periodic=True)
+sim = pops.System(n=16, L=1.0, periodic=True)
 msg = err_msg(lambda: sim.add_equation(
-    "gasp", model=c_p, spatial=adc.FiniteVolume(limiter="none", riemann="hll"),
-    time=adc.Explicit()))
+    "gasp", model=c_p, spatial=pops.FiniteVolume(limiter="none", riemann="hll"),
+    time=pops.Explicit()))
 chk(msg == "", f"hll accepte sur le modele avec 'p' (historique, message='{msg[:40]}')")
 
 print("== (7) briques hybrides : flag has_wave_speeds propage (sans compilateur machine) ==")

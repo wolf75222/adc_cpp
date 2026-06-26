@@ -2,7 +2,7 @@
 # Build Kokkos (CUDA + Serial, Hopper90) puis le harnais utilisant la brique generee, et execute
 # sur le GPU. Tout sur le noeud GPU (aarch64) ou nvcc s'execute.
 module load cuda/12.6
-cd "$HOME/adc_dsl_kk" || exit 3
+cd "$HOME/pops_dsl_kk" || exit 3
 echo "noeud=$(hostname) arch=$(uname -m)"
 NW="$PWD/kokkos/bin/nvcc_wrapper"
 

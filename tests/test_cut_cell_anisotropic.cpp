@@ -9,18 +9,18 @@
 // (A) eps_x=1.5, eps_y=0.7 (anisotrope) : cut-cell converge a l'ORDRE ~2 en L2 (Shortley-Weller).
 // (B) NON-REGRESSION : eps_x=eps_y=1 (anisotropie degeneree) == cut-cell SANS eps (operateur lap).
 
-#include <adc/numerics/elliptic/mg/geometric_mg.hpp>
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/geometry/geometry.hpp>
-#include <adc/mesh/storage/multifab.hpp>
-#include <adc/mesh/boundary/physical_bc.hpp>
+#include <pops/numerics/elliptic/mg/geometric_mg.hpp>
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/geometry/geometry.hpp>
+#include <pops/mesh/storage/multifab.hpp>
+#include <pops/mesh/boundary/physical_bc.hpp>
 
 #include <cmath>
 #include <cstdio>
 #include <functional>
 #include <vector>
 
-using namespace adc;
+using namespace pops;
 static constexpr double kCx = 0.5, kCy = 0.5, kR = 0.4;
 
 static GeometricMG make_mg(int nc) {

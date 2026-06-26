@@ -1,7 +1,7 @@
 #!/bin/bash -l
 # Build Kokkos (CUDA + Serial, Hopper90) si absent, puis le CAS COMPLET Euler, et execute sur GPU.
 module load cuda/12.6
-cd "$HOME/adc_dsl_kk" || exit 3
+cd "$HOME/pops_dsl_kk" || exit 3
 echo "noeud=$(hostname) arch=$(uname -m)"
 NW="$PWD/kokkos/bin/nvcc_wrapper"
 if ! ls kinstall/lib*/cmake/Kokkos/KokkosConfig.cmake >/dev/null 2>&1; then

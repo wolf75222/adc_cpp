@@ -1,4 +1,4 @@
-// pybind11 bindings of the adc_cpp LIB: compiles the `_adc` module. Exposes the
+// pybind11 bindings of the adc_cpp LIB: compiles the `_pops` module. Exposes the
 // runtime composition facade `System` (the tutor's "coupler / system") + its
 // config. Python composes WHAT to assemble (model + spatial scheme + temporal
 // treatment + per-block substeps, system Poisson); all the cell-by-cell compute
@@ -13,7 +13,7 @@
 
 #include "bindings_detail.hpp"
 
-PYBIND11_MODULE(_adc, m) {
+PYBIND11_MODULE(_pops, m) {
   init_core(m);
   init_system(m);
   init_amr(m);

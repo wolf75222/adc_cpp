@@ -16,11 +16,11 @@
 
 - **Phantom symbol: the "MC" limiter.** Documented twice (ALGORITHMS:97, ARCHITECTURE:288/509) but absent from `reconstruction.hpp` (only `NoSlope`/`Minmod`/`VanLeer`/`Weno5` exist). A user who follows the docs and passes `limiter='mc'` fails.
 
-- **Test counters: all stale and mutually inconsistent.** Real disk ~ 90-94 `adc_add_test` (non-MPI), ~51 MPI entries, 60-61 Python files. The docs say 71/84/103 (C++) and 26/55 (Python) depending on the file; ARCHITECTURE and BACKEND_COVERAGE contradict each other. All values are **conservative underestimates** (the suite is bigger than announced). To be regenerated programmatically, not hard-coded.
+- **Test counters: all stale and mutually inconsistent.** Real disk ~ 90-94 `pops_add_test` (non-MPI), ~51 MPI entries, 60-61 Python files. The docs say 71/84/103 (C++) and 26/55 (Python) depending on the file; ARCHITECTURE and BACKEND_COVERAGE contradict each other. All values are **conservative underestimates** (the suite is bigger than announced). To be regenerated programmatically, not hard-coded.
 
 - **Sphinx: dead gallery mechanism (CONFIRMED).** `_copy_tutorials.setup_gallery()` points to a deleted `tutorials/` (commit 194c63f, app layer moved to adc_cases) -> copies 0 files; and even when filled, `tutorials_index.md` is a stub without a toctree -> doubly orphaned. A clean `sphinx-build` produces an empty "Tutorials" section. Local `_build/`/`_generated/` are stale (May 30) but already gitignored/untracked.
 
-- **Honestly runnable locally (darwin/arm64, no CUDA):** C++ core Serial + ctest, MPI (OpenMPI 5.0.9), standalone OpenMP, Kokkos device=OpenMP, and the Python module -- **but only with the interpreter that compiled it** (`/opt/homebrew/anaconda3/bin/python3.12`, which has numpy). Confirmed footgun: the `.so` is `cpython-312`; under system `python3` (3.9.6) -> `ModuleNotFoundError: adc._adc`; under a 3.12 without numpy -> dies on `import numpy` in `dsl.py`.
+- **Honestly runnable locally (darwin/arm64, no CUDA):** C++ core Serial + ctest, MPI (OpenMPI 5.0.9), standalone OpenMP, Kokkos device=OpenMP, and the Python module -- **but only with the interpreter that compiled it** (`/opt/homebrew/anaconda3/bin/python3.12`, which has numpy). Confirmed footgun: the `.so` is `cpython-312`; under system `python3` (3.9.6) -> `ModuleNotFoundError: pops._pops`; under a 3.12 without numpy -> dies on `import numpy` in `dsl.py`.
 
 - **Requires ROMEO/GH200:** any CUDA path -- Kokkos Cuda single-GPU, MPI+Kokkos Cuda multi-GPU. CI **never** builds `Kokkos_ENABLE_CUDA=ON`. The `python/tests/gpu/*.cpp` harnesses are SLURM-only (`--constraint=armgpu`, nvcc_wrapper, Kokkos 4.4.01) and excluded from the CI glob (`-maxdepth 1`). Any "GPU-validated" mention must say "manually on ROMEO GH200".
 
@@ -39,7 +39,7 @@ Statuses: **active** (living normative), **historical** (spec/plan partially exe
 | File | Role | Audience | Status | Source of truth | Stale/False | Duplicates | Decision |
 |---|---|---|---|---|---|---|---|
 | README.md | Project portal (pitch, GIF, build, validation) | new user | active | ARCHITECTURE + GPU_RUNTIME_PORT + DSL_MODEL_DESIGN | "AmrSystem single-block" (l.130-132) FALSE; `potential()` :272 stale (real :332); 208 l. vs target 120-150 | ARCHITECTURE Sec. 6/Sec. 13, DSL Sec. 5, GPU_RUNTIME_PORT | **rewrite** |
-| docs/ARCHITECTURE.md | Canonical: 5 layers, concepts, module map, AMR Sec. 8, validation Sec. 11 | contributor | active | `include/adc/**` | `amr_coupler.hpp` (l.33) deleted; Sec. 8 single-block obsolete; Sec. 11 stale counters; MC limiter nonexistent | README module-map, COUPLER_HIERARCHY, GPU_RUNTIME_PORT | **rewrite** |
+| docs/ARCHITECTURE.md | Canonical: 5 layers, concepts, module map, AMR Sec. 8, validation Sec. 11 | contributor | active | `include/pops/**` | `amr_coupler.hpp` (l.33) deleted; Sec. 8 single-block obsolete; Sec. 11 stale counters; MC limiter nonexistent | README module-map, COUPLER_HIERARCHY, GPU_RUNTIME_PORT | **rewrite** |
 | docs/ALGORITHMS.md | Canonical: methods catalogue (formula/code/test x20) | contributor | active | `numerics/**` + `tests/` | MC limiter (l.97) nonexistent; the rest verified good | Sec. 18 DSL compose, Sec. 19 DSL Sec. 0/Sec. 7, Sec. 20 ARCH Sec. 4 | **keep** (purge MC) |
 | docs/BACKEND_COVERAGE.md | Self-declared SoT backends/tests matrix | contributor | active | `tests/CMakeLists.txt` + CI | Stale header totals (84/19/55 vs disk 90-94/31/60-61); per-test lines OK | replaces README "4 paths" + DSL Sec. 5 | **rewrite** (totals) |
 | docs/CHOICES.md | Canonical: rationale decisions D-1..D-7 | contributor | active | ARCHITECTURE + oracles | No false claims; only doc with accents (encoding inconsistency) | -- | **keep** |
@@ -48,7 +48,7 @@ Statuses: **active** (living normative), **historical** (spec/plan partially exe
 | docs/CONSERVATION_SUMMARY.md | Canonical: measured FV/Schur conservation vs Hoffart FE | contributor | active | `adc_cases/.../test_schur_conservation.py` (#207) | None internal; cross-repo authority not verifiable from adc_cpp | FULL_MODEL_VALIDATION PR2, HOFFART_FIDELITY | **keep** |
 | docs/BIBLIOGRAPHY.md | Canonical: references (Hoffart arXiv:2510.11808, etc.) | new user | active | external literature | None | citations anchored elsewhere | **keep** |
 | docs/HOFFART_FIDELITY.md | Cross-check hoffart case vs paper (per-aspect) | contributor | active | `adc_cases` model.py/run.py + engine | Cross-repo anchors not verifiable from adc_cpp; not_verified labels honest | CONSERVATION_SUMMARY, HOFFART_STEP_SEQUENCE | **keep** |
-| docs/CODEBASE_AUDIT.md | Per-file maintainability audit (2026-06-06) | internal-dev | active | `include/adc/**` + `python/*.cpp` | The most accurate inventory (correctly notes amr_coupler REMOVED); slightly behind on AmrSystem multi-block | COUPLING_SURFACE, ARCH module map | **keep** |
+| docs/CODEBASE_AUDIT.md | Per-file maintainability audit (2026-06-06) | internal-dev | active | `include/pops/**` + `python/*.cpp` | The most accurate inventory (correctly notes amr_coupler REMOVED); slightly behind on AmrSystem multi-block | COUPLING_SURFACE, ARCH module map | **keep** |
 | docs/DOC_CLEANUP_PLAN.md | Internal plan: overlaps + SoT per doc | internal-dev | active | self (meta) | "BACKEND_COVERAGE to create" exists; README says 373 l. (real 208); partially executed | indexes the others | **archive** |
 | docs/COUPLER_HIERARCHY.md | Reference: each coupler in `coupling/` | contributor | active | `coupling/*.hpp` | Sec. 4 describes DELETED `amr_coupler.hpp` as existing (l.152, table l.424) | ARCH Sec. 5/Sec. 8, COUPLING_SURFACE | **rewrite** |
 | docs/COUPLING_SURFACE.md | SoT PUBLIC/INTERNAL/DEPRECATED coupler classification | contributor | active | `coupling/*.hpp` | l.118 lists `amr_coupler.hpp` as kept-historical: FALSE (deleted) | COUPLER_HIERARCHY | **rewrite** |
@@ -83,7 +83,7 @@ Statuses: **active** (living normative), **historical** (spec/plan partially exe
 | docs/sphinx/_copy_tutorials.py | Gallery helper (copies tutorials/ -> _generated) | nobody | active | src `../../tutorials` (is_dir=False) | Entirely dead module (early-return 0) | -- | **delete** |
 | docs/sphinx/index.md | master_doc, 3 toctrees | new user | active | installation/quickstart/examples/api.md | Tutorials toctree = dead-end stub; flat nav vs target 7-sections | -- | **rewrite** |
 | docs/sphinx/tutorials_index.md | Stub "tutorials moved to adc_cases" | new user | active | git 194c63f~1 (old toctree) | Navigational dead-end, no toctree | examples.md | **merge** |
-| docs/sphinx/api.md | Python API reference (autodoc, 20 symbols) | new user | active | `build-py/python/adc/__init__.py` | None (20 symbols resolved) | -- | **keep** |
+| docs/sphinx/api.md | Python API reference (autodoc, 20 symbols) | new user | active | `build-py/python/pops/__init__.py` | None (20 symbols resolved) | -- | **keep** |
 | docs/sphinx/installation.md | C++/Python build + backends | new user | active | `CMakeLists.txt` | "71 ctests" (l.17) to recheck | BACKEND_COVERAGE (intro) | **keep** |
 | docs/sphinx/quickstart.md | Annotated Python recipes | new user | active | `adc/__init__.py` | Not executed (no local env); API plausible | installation, api | **keep** |
 | docs/sphinx/examples.md | Redirects to adc_cases | new user | active | repo (no examples/ or scripts/) | Cross-doc links = GitHub URLs, not Sphinx pages | tutorials_index | **merge** |
@@ -96,8 +96,8 @@ Statuses: **active** (living normative), **historical** (spec/plan partially exe
 
 | File | Role | Audience | Status | Source of truth | Stale/False | Duplicates | Decision |
 |---|---|---|---|---|---|---|---|
-| CMakeLists.txt | Build root (options, C++23/C++20 Kokkos) | contributor | active | self (authoritative options) | Does NOT declare `ADC_USE_EIGEN` despite README+CI | -- | **keep** |
-| python/CMakeLists.txt | pybind11 `_adc` module build | contributor | active | self + `python/tests/` | None | -- | **keep** |
+| CMakeLists.txt | Build root (options, C++23/C++20 Kokkos) | contributor | active | self (authoritative options) | Does NOT declare `POPS_USE_EIGEN` despite README+CI | -- | **keep** |
+| python/CMakeLists.txt | pybind11 `_pops` module build | contributor | active | self + `python/tests/` | None | -- | **keep** |
 
 ### adc_cases
 
@@ -108,7 +108,7 @@ Statuses: **active** (living normative), **historical** (spec/plan partially exe
 | diocotron/README.md | Reduced diocotron case (honest "normalization") | new user | active | run.py + NORMALIZATION.md | None (correct disclaimer) | manifest, NORMALIZATION | **keep** |
 | hoffart_euler_poisson_dsl/README.md | Full-model case (reproduction-candidate) | new user | active | run.py + results.py + measurement_record | Outputs section implies modes 3/4/5 (only mode_3 on disk) | HOFFART_FIDELITY | **keep** |
 | magnetic_isothermal_dsl/README.md | DSL case aux B_z (inter-backend parity) | new user | active | run.py | macOS platform caveat = aot only (honest) | -- | **keep** |
-| schur_magnetized_cartesian/README.md | Schur vs explicit timing case | new user | active | run.py | Docstring cites `adc.Split` but code = private hook `sim._s.set_source_stage` | -- | **rewrite** |
+| schur_magnetized_cartesian/README.md | Schur vs explicit timing case | new user | active | run.py | Docstring cites `pops.Split` but code = private hook `sim._s.set_source_stage` | -- | **rewrite** |
 
 > README coverage note: only **4/15** case folders have a README (diocotron, hoffart_euler_poisson_dsl, magnetic_isothermal_dsl, schur_magnetized_cartesian). The other 11 rely on module docstrings (detailed and accurate). Phase 2 decision to make: generate per-case READMEs or canonicalize docstrings + top-level table.
 
@@ -128,19 +128,19 @@ Merge of `claim_findings` + adversarial pass. Verdict column: inventory verdict;
 | `setup_gallery()` copies `tutorials/*.md` -> `_generated/tutorials/` | sphinx/_copy_tutorials.py (+conf.py:21) | **obsolete -- CONFIRMED (high)** | `tutorials/` deleted in commit 194c63f; `_copy_tutorials.py:21-22` early-return 0 (is_dir=False). Copies 0 files. Clean build -> empty gallery. |
 | Building the docs produces a populated tutorials gallery | sphinx/index.md | **false -- CONFIRMED (high)** | Consequence of the two above. `_build/` May 30 shows a gallery that no longer reflects the sources. (Adversarial correction: `_build/`/`_generated/` are NOT committed -- gitignored/untracked -- local artifacts only.) |
 | Reconstruction limiter "MC" (monotonized-central) exists | ALGORITHMS:97, ARCHITECTURE:288/509 | **false -- CONFIRMED (medium)** | `reconstruction.hpp` defines only `NoSlope:35`/`Minmod:46`/`VanLeer:61`/`Weno5:124`. `grep 'struct MC|MonotonizedCentral'` -> none. `limiter='mc'` would fail. |
-| `amr_coupler.hpp`/`AmrCoupler` = deprecated file kept | ARCHITECTURE:33, COUPLING_SURFACE:118, COUPLER_HIERARCHY Sec. 4 | **false -- CONFIRMED (medium)** | `ls include/adc/coupling/amr_coupler.hpp` -> absent (deleted #164). Only `AmrCouplerMP` exists. CODEBASE_AUDIT:210 records REMOVED; the 3 other docs over-describe a dead symbol. |
+| `amr_coupler.hpp`/`AmrCoupler` = deprecated file kept | ARCHITECTURE:33, COUPLING_SURFACE:118, COUPLER_HIERARCHY Sec. 4 | **false -- CONFIRMED (medium)** | `ls include/pops/coupling/amr_coupler.hpp` -> absent (deleted #164). Only `AmrCouplerMP` exists. CODEBASE_AUDIT:210 records REMOVED; the 3 other docs over-describe a dead symbol. |
 | `AmrSystem(n=128, max_level=2, periodic=True)` | DSL_API.md Sec. 3 (l.76) | **false -- CONFIRMED (medium)** | `AmrSystemConfig` has NO `max_level` field (`bindings.cpp:259-266`: n,L,regrid_every,periodic,distribute_coarse,coarse_max_grid). `setattr(config,'max_level',...)` fails. |
 | For backend='production'/target='amr_system' the Python AMR facade rejects HLLC/Roe/primitive (single-block) | DSL_API.md Sec. 3 (l.86-88) | **obsolete -- CONFIRMED (medium)** | `AmrSystem.add_equation` (`__init__.py:1321-1334`) wires `recon='primitive'` and roe/hllc flux via `dispatch_amr_compiled`; `test_amr_riemann_native.cpp` exists. |
-| CMake option `ADC_USE_EIGEN` (default ON, target `adc_eigen`) | README:167 (+ CI ci.yml:145, docs.yml:45) | **false -- CONFIRMED (medium)** | No `option(ADC_USE_EIGEN)`, no `adc_eigen` target, no `find_package(Eigen)`. `-DADC_USE_EIGEN` = silent no-op. |
-| `python -c "...import adc..."` (and python3 fallback) imports the module | (prompt command) | **false -- CONFIRMED (high)** | `python` not found; `python3`=3.9.6 -> `ModuleNotFoundError: adc._adc` (`.so` cpython-312). Imports cleanly with `/opt/homebrew/anaconda3/bin/python3.12` + numpy. |
-| ARCHITECTURE Sec. 11: 71 core ctests + 21 MPI + 26 Python | ARCHITECTURE:442-444 | **obsolete -- CONFIRMED (medium)** | Disk: ~90-94 `adc_add_test` (non-MPI, incl. elliptic_interface), ~51 MPI entries, 60 Python files. All underestimated. |
-| BACKEND_COVERAGE base: 84 `adc_add_test` + 19 `add_executable` + 55 Python | BACKEND_COVERAGE:322-324 | **partially true -- CONFIRMED (medium)** | Real: 90 `adc_add_test` + 19 runtime = 109 non-MPI; MPI block 12 add_executable -> ~51 entries; 60 Python. Stale header totals, per-test lines OK. |
+| CMake option `POPS_USE_EIGEN` (default ON, target `pops_eigen`) | README:167 (+ CI ci.yml:145, docs.yml:45) | **false -- CONFIRMED (medium)** | No `option(POPS_USE_EIGEN)`, no `pops_eigen` target, no `find_package(Eigen)`. `-DADC_USE_EIGEN` = silent no-op. |
+| `python -c "...import pops..."` (and python3 fallback) imports the module | (prompt command) | **false -- CONFIRMED (high)** | `python` not found; `python3`=3.9.6 -> `ModuleNotFoundError: pops._pops` (`.so` cpython-312). Imports cleanly with `/opt/homebrew/anaconda3/bin/python3.12` + numpy. |
+| ARCHITECTURE Sec. 11: 71 core ctests + 21 MPI + 26 Python | ARCHITECTURE:442-444 | **obsolete -- CONFIRMED (medium)** | Disk: ~90-94 `pops_add_test` (non-MPI, incl. elliptic_interface), ~51 MPI entries, 60 Python files. All underestimated. |
+| BACKEND_COVERAGE base: 84 `pops_add_test` + 19 `add_executable` + 55 Python | BACKEND_COVERAGE:322-324 | **partially true -- CONFIRMED (medium)** | Real: 90 `pops_add_test` + 19 runtime = 109 non-MPI; MPI block 12 add_executable -> ~51 entries; 60 Python. Stale header totals, per-test lines OK. |
 | FFT Poisson works under MPI | ARCHITECTURE Sec. 7 | **false -- CONFIRMED (medium)** | `test_mpi_system_fft.cpp` is a non-regression lock: the FFT path is REFUSED under MPI (n_ranks>1) with a collective error (SIGSEGV fix #93). FFT = single-rank by design. |
-| `schur_magnetized_cartesian` uses `adc.Split(Explicit, CondensedSchur)` | schur_magnetized_cartesian/run.py:130-146 | **obsolete -- CONFIRMED (medium)** | The code calls the PRIVATE hook `sim._s.set_source_stage(...)` (`run.py:142`) because the AOT ABI does not carry SSPRK3 (README:68-71). Same underlying `CondensedSchurSourceStepper` C++. |
+| `schur_magnetized_cartesian` uses `pops.Split(Explicit, CondensedSchur)` | schur_magnetized_cartesian/run.py:130-146 | **obsolete -- CONFIRMED (medium)** | The code calls the PRIVATE hook `sim._s.set_source_stage(...)` (`run.py:142`) because the AOT ABI does not carry SSPRK3 (README:68-71). Same underlying `CondensedSchurSourceStepper` C++. |
 | Python suite run under pytest | (implicit docs) | **false -- CONFIRMED (medium)** | `ci.yml:149`: `find python/tests -maxdepth 1 -name 'test_*.py' | xargs python3`. No pytest; tests = standalone scripts with assert+exit. |
 | adc_cases top-level README "The cases" = complete set | adc_cases/README.md:107-119 | **partially true -- CONFIRMED (medium)** | Table lists 10 cases, omits diocotron_dsl, two_species_dsl, magnetic_isothermal_dsl, dsl_euler, hoffart_euler_poisson_dsl, schur_magnetized_cartesian (present in manifest). |
 | diocotron figures "produced in diocotron/figures/" | diocotron/run.py:13, README:36 | **false -- CONFIRMED (high)** | `run.py:207` writes to `out/diocotron/` (gitignore); all savefig (`:246,257,276,286`) go there. No script writes `figures/`. The 4 committed figures are stale manual copies. |
-| Each run emits a record capturing adc_cpp SHA + adc_cases SHA | hoffart_euler_poisson_dsl/README:143 | **partially true -- CONFIRMED (high)** | `run.py:422-423` writes the SHAs, BUT the `metadata.json` on disk do NOT have the keys `adc_cpp_sha`/`adc_cases_sha` (artifacts of an earlier run); the 4 diocotron figures have no metadata. |
+| Each run emits a record capturing adc_cpp SHA + adc_cases SHA | hoffart_euler_poisson_dsl/README:143 | **partially true -- CONFIRMED (high)** | `run.py:422-423` writes the SHAs, BUT the `metadata.json` on disk do NOT have the keys `pops_cpp_sha`/`pops_cases_sha` (artifacts of an earlier run); the 4 diocotron figures have no metadata. |
 | "Reproduction of the Hoffart diocotron benchmark" (title) | diocotron/run.py:2-11 | **partially true -- CONFIRMED (low)** | The same docstring + README:8-10 qualifies "reduced ExB model, NOT a full Euler-Poisson reproduction". Reproduces the analytic oracle to 3 digits; FV rates under-predicted -22/-27/-5%. The word "Reproduction" is disambiguated everywhere. |
 | AOT two-fluid AP validated by a core test | tests/test_ap_limit.cpp | **partially true -- CONFIRMED (medium)** | `test_ap_limit.cpp`/`test_imex_ap.cpp` validate the AP PROPERTY on a scalar TOY model (du/dt=(u_eq-u)/eps), not the real two-fluid. The real integrator lives in `adc_cases/two_fluid_ap/` (scenario, not brick). |
 | CUDA single-GPU / multi-GPU validated by automatic test | BACKEND_COVERAGE | **partially true -- CONFIRMED (high)** | CI never builds `Kokkos_ENABLE_CUDA=ON`. Device validation = ROMEO-manual via `python/tests/gpu/*.cpp` (excluded from CI glob `-maxdepth 1`). Say "manually on GH200". |
@@ -153,7 +153,7 @@ Merge of `claim_findings` + adversarial pass. Verdict column: inventory verdict;
 
 ## 4. Real API to document (autodoc)
 
-Real public surface from `api_entries`. Python symbols = `python/adc/__init__.py` + `dsl.py` + `integrate.py`, bindings in `python/bindings/core/bindings.cpp` (the only `.def()` file -- `system.cpp`/`amr_system.cpp` are pure C++ without pybind). C++ concepts/classes = `include/adc/**`. `doc_status`: documented / wrong-docstring / unverified.
+Real public surface from `api_entries`. Python symbols = `python/pops/__init__.py` + `dsl.py` + `integrate.py`, bindings in `python/bindings/core/bindings.cpp` (the only `.def()` file -- `system.cpp`/`amr_system.cpp` are pure C++ without pybind). C++ concepts/classes = `include/pops/**`. `doc_status`: documented / wrong-docstring / unverified.
 
 ### C++ -- core concepts & classes (seed for C++ Reference / Doxygen)
 
@@ -182,7 +182,7 @@ Real public surface from `api_entries`. Python symbols = `python/adc/__init__.py
 | `ModelSpec`/`model_factory` (dispatch_model) | `runtime/model_factory.hpp` | documented | `python/tests/test_dsl_compose.py` |
 | Bricks `ExBVelocity`/`IsothermalFlux`/`PotentialForce`/`GravityForce`/`ChargeDensity`/`BackgroundDensity`/`NoSource` | `physics/{hyperbolic,source,elliptic}.hpp` | documented (ARCH says "ExB" instead of `ExBVelocity`) | `test_coupled_source.cpp` |
 
-### Python -- `adc.System` (single-level composition facade)
+### Python -- `pops.System` (single-level composition facade)
 
 | Symbol | Signature | doc_status | Test evidence |
 |---|---|---|---|
@@ -199,7 +199,7 @@ Real public surface from `api_entries`. Python symbols = `python/adc/__init__.py
 | `set_disc_domain` / `disc_mask` | disc domain | documented | `test_disc_domain_mask.py` |
 | `block_names`/`mass`/`density`/`potential`/`nx`/`ny`/`time`/`n_species`/`n_vars`/`variable_names`/`variable_roles`/`block_gamma`/`abi_key` | introspection | documented | `test_bindings.py`, `test_dsl_roles.py`, `test_dsl_abi_metadata.py` |
 
-### Python -- `adc.AmrSystem` (AMR facade; real multi-block)
+### Python -- `pops.AmrSystem` (AMR facade; real multi-block)
 
 | Symbol | doc_status | Test evidence |
 |---|---|---|
@@ -208,7 +208,7 @@ Real public surface from `api_entries`. Python symbols = `python/adc/__init__.py
 | `AmrSystemConfig` (n,L,regrid_every,periodic,distribute_coarse,coarse_max_grid -- **no max_level**) | documented | `test_amr_multiblock.py` |
 | `SystemConfig` (n,L,periodic,geometry,nr,ntheta,r_min,r_max) | documented | `test_polar_system.py` |
 
-### Python -- composition bricks (`adc.Model(...)`)
+### Python -- composition bricks (`pops.Model(...)`)
 
 | Symbol | doc_status | Test evidence |
 |---|---|---|
@@ -223,7 +223,7 @@ Real public surface from `api_entries`. Python symbols = `python/adc/__init__.py
 | EPM: `elliptic`/`div_eps_grad`/`charge_density`/`composite_rhs`/`electric_field_from_potential`, `EllipticSolver`/`EllipticModel`/`DivEpsGrad`/`CompositeRhs`/`ChargeDensitySource` | documented | `test_poisson_eps.py`, `test_poisson_composite.py` |
 | `PythonFlux` (interpreted host backend) | documented | `test_dsl.py` |
 
-### Python -- `adc.dsl` (symbolic DSL) & `adc.integrate`
+### Python -- `pops.dsl` (symbolic DSL) & `pops.integrate`
 
 | Symbol | doc_status | Test evidence |
 |---|---|---|
@@ -257,7 +257,7 @@ Real public surface from `api_entries`. Python symbols = `python/adc/__init__.py
 | **magnetic_isothermal_dsl** | **yes** | dsl magnetized isothermal (aux B_z index 3); **no native oracle** | Explicit SSPRK2, 40 steps | FiniteVolume(minmod, rusanov) | charge_density, geometric_mg periodic; set_magnetic_field | dsl production+aot (macOS=aot only); needs cxx | true / validation | out/*.so | Validated WITHOUT native oracle: inter-backend parity + analytic Lorentz oracle (dmax==0) |
 | multispecies | no | native (e- Euler 4-var + ions isothermal 3-var) coupled 1 Poisson | Explicit, dt=0.001 | minmod both | charge_density, geometric_mg periodic | adc compile | true / validation | none | Per-species mass conservation <1e-9 |
 | plasma | no | native recipe 3-species (e- HLLC+primitive, ions+neutrals isothermal) + ionization+collision | Explicit step_cfl(0.3) | vanleer/hllc/primitive + minmod | f=q_e n_e+q_i n_i | adc compile | true / validation | none | Honest: momentum/energy transfer of created particles = simplification |
-| **schur_magnetized_cartesian** | **yes** | dsl magnetized isothermal; local/schur variants (same equations as magnetic_isothermal) | transport SSPRK2; explicit source OR CondensedSchur via `sim._s.set_source_stage` (private hook) | FiniteVolume(minmod, rusanov, conservative) | charge_density, geometric_mg periodic; B_z=omega_c | dsl aot (production fails dlopen macOS arm64); needs cxx | false / **experimental** | out/dt_stable.csv | Timing study: explicit plateaus dt*omega_c~0.3, Schur 178-316 (562x/1000x gain). Uses private hook because `adc.Split` not wired on the AOT ABI |
+| **schur_magnetized_cartesian** | **yes** | dsl magnetized isothermal; local/schur variants (same equations as magnetic_isothermal) | transport SSPRK2; explicit source OR CondensedSchur via `sim._s.set_source_stage` (private hook) | FiniteVolume(minmod, rusanov, conservative) | charge_density, geometric_mg periodic; B_z=omega_c | dsl aot (production fails dlopen macOS arm64); needs cxx | false / **experimental** | out/dt_stable.csv | Timing study: explicit plateaus dt*omega_c~0.3, Schur 178-316 (562x/1000x gain). Uses private hook because `pops.Split` not wired on the AOT ABI |
 | two_euler | no | native euler x2 independent gases (NOT coupled) | multirate step_adaptive(0.4) | vanleer/hllc/primitive | f=0 (just for solve_fields) | adc compile | true / validation | none | "2 Euler same code"; independent blocks |
 | two_fluid_ap | no | **bespoke C++** (two_fluid_ap.hpp) isothermal AP; NOT a composable brick | IMEX/AP (stiff implicit term) | FV continuity, in the JIT | elliptic AP reformulated in the C++ scenario | JIT .so via ctypes (build_shared); needs cxx C++20 | true / validation (needs cxx) | out/.../_two_fluid_ap.{so,dylib} | Replaces the `_TwoFluidAP` escape hatch removed from the core; lives in adc_cases |
 | two_species_dsl | no | dsl x2 (e- Euler 4-var + ions isothermal 3-var) + electrostatic source, 1 Poisson | Explicit SSPRK2 (== native) | FiniteVolume(minmod, rusanov) | charge_density, geometric_mg periodic | dsl production->aot; needs cxx | true / validation (needs cxx) | out/*.so | Ions bit-identical; e- differ ~machine-eps (<1e-24, float reassociation in shared Poisson RHS, documented) |
@@ -303,7 +303,7 @@ All image assets live under adc_cases. The adc_cpp submodule is NOT present on d
 | diocotron/figures/snapshots.png | run.py:286 (-> out/) | keep | 1690x442; no provenance |
 | diocotron/figures/diocotron.gif | run.py:276 (-> out/) | keep | 420x420 ~512KB; manual copy |
 
-**Phase 5 provenance decisions:** (1) repoint the `savefig` of `run.py` to `figures/` OR explicitly document the copy step; (2) regenerate with the current `run.py` to populate `adc_cpp_sha`/`adc_cases_sha` then freeze; (3) decide which hoffart figures are promoted (committed) vs left ephemeral; (4) freeze the exact modes (3/4/5) + n + dt + engine + SHA; (5) add references by filename or an asset manifest so renames are detected by a link-check.
+**Phase 5 provenance decisions:** (1) repoint the `savefig` of `run.py` to `figures/` OR explicitly document the copy step; (2) regenerate with the current `run.py` to populate `pops_cpp_sha`/`pops_cases_sha` then freeze; (3) decide which hoffart figures are promoted (committed) vs left ephemeral; (4) freeze the exact modes (3/4/5) + n + dt + engine + SHA; (5) add references by filename or an asset manifest so renames are detected by a link-check.
 
 ---
 
@@ -321,8 +321,8 @@ Execution legend: **[L]** entirely doable locally on darwin/arm64; **[ROMEO]** r
 - **PR-03 (adc_cpp)** -- *Purge "AmrSystem single-block".* README:130-132, ARCHITECTURE:26/379-382/547, DSL_MODEL_DESIGN Sec. 0bis/Sec. 5/Phase D, DSL_API Sec. 3 l.86-88; also fix the stale comment in the `amr_system.hpp:28-31` header. depends-on: none (can parallelize PR-02). **[L]**. Risk #1.
 - **PR-04 (adc_cpp)** -- *Remove dead file/symbol.* Remove `amr_coupler.hpp`/`AmrCoupler` from ARCHITECTURE:33, COUPLING_SURFACE:118, COUPLER_HIERARCHY Sec. 4; remove the phantom "MC" limiter from ALGORITHMS:97 and ARCHITECTURE:288/509; fix "ExB"->`ExBVelocity` and `wave_speeds` outside the concept (ARCH:102). depends-on: none. **[L]**.
 - **PR-05 (adc_cpp)** -- *Rewrite DSL_API.md + source docstring.* Regenerate the 4 false snippets (conservative_vars/aux, set_poisson(solver=), no max_level, runtime params work); **fix the `dsl.py:1623/1627` docstring** (false NotImplementedError) so autodoc does not propagate; adjust compile default (`aot`), flux tokens ('hll' invalid), GPU production cap=False. depends-on: none. **[L]**.
-- **PR-06 (adc_cpp)** -- *Regenerate test counters programmatically.* Script that counts from `tests/CMakeLists.txt` + glob `python/tests/test_*.py`, injects into BACKEND_COVERAGE (SoT); ARCHITECTURE Sec. 11 and installation.md reference instead of hard-coding; fix `ADC_USE_EIGEN` (README:167 + CI) -- remove the phantom line. Remove the local Finder-copy artifacts (`test_polar_system 2.py`, `test_polar_system_step 2.cpp`). depends-on: none. **[L]**.
-- **PR-07 (adc_cases)** -- *Reconcile top-level README with the manifest.* Add the 6 missing DSL cases to the "The cases" table; fix `schur_magnetized_cartesian` docstring (private hook `sim._s.set_source_stage`, not `adc.Split`). depends-on: none. **[L]**.
+- **PR-06 (adc_cpp)** -- *Regenerate test counters programmatically.* Script that counts from `tests/CMakeLists.txt` + glob `python/tests/test_*.py`, injects into BACKEND_COVERAGE (SoT); ARCHITECTURE Sec. 11 and installation.md reference instead of hard-coding; fix `POPS_USE_EIGEN` (README:167 + CI) -- remove the phantom line. Remove the local Finder-copy artifacts (`test_polar_system 2.py`, `test_polar_system_step 2.cpp`). depends-on: none. **[L]**.
+- **PR-07 (adc_cases)** -- *Reconcile top-level README with the manifest.* Add the 6 missing DSL cases to the "The cases" table; fix `schur_magnetized_cartesian` docstring (private hook `sim._s.set_source_stage`, not `pops.Split`). depends-on: none. **[L]**.
 
 ### Phase 4 -- Autodoc & Reference
 
@@ -364,7 +364,7 @@ Execution legend: **[L]** entirely doable locally on darwin/arm64; **[ROMEO]** r
 - **No code executed for quickstart.md / the Python recipes** (no numpy+py3.12 env in the inventory pass): plausible but unexercised API surface.
 - **All perf and fidelity numbers** (PERFORMANCE M1, PROFILE_RESULTS, hoffart -82/-95% table, Schur gains) are measured and not reproducible locally (M1/GH200); not re-confirmed.
 - **DSL Phase F status "merged June 2026" (memory)** not verified in the inventory; to confirm before removing any "unmerged branch" mention.
-- **Exact counters** (90 vs 94 `adc_add_test`, 60 vs 61 Python) diverge slightly between the two inventory agents depending on how duplicated macros/lines are handled: regenerate canonically before publishing a figure.
+- **Exact counters** (90 vs 94 `pops_add_test`, 60 vs 61 Python) diverge slightly between the two inventory agents depending on how duplicated macros/lines are handled: regenerate canonically before publishing a figure.
 ---
 
 ## 9. Coordinator corrections (post-synthesis)

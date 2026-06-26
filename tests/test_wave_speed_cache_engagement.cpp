@@ -6,17 +6,17 @@
 //   (2) engagement      : le chemin cache appelle wave_speeds UNE fois par cellule (pre-passe) au lieu
 //       de par face -> calls_on < calls_off STRICTEMENT. Si le wiring ws_cache ou la garde HLLFlux
 //       cassait (cache -> no-op), calls_on == calls_off et CE test echoue (le test Python, lui, non).
-// Header-only (adc::adc seul), aucun modele physique : le compteur vit dans une Kokkos::View
+// Header-only (pops::pops seul), aucun modele physique : le compteur vit dans une Kokkos::View
 // device-accessible (atomic), portable Serial / OpenMP / Cuda.
 
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/layout/distribution_mapping.hpp>
-#include <adc/mesh/execution/for_each.hpp>
-#include <adc/mesh/geometry/geometry.hpp>
-#include <adc/mesh/storage/multifab.hpp>
-#include <adc/mesh/boundary/physical_bc.hpp>
-#include <adc/numerics/spatial_operator.hpp>
-#include <adc/runtime/builders/block/block_builder.hpp>
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/layout/distribution_mapping.hpp>
+#include <pops/mesh/execution/for_each.hpp>
+#include <pops/mesh/geometry/geometry.hpp>
+#include <pops/mesh/storage/multifab.hpp>
+#include <pops/mesh/boundary/physical_bc.hpp>
+#include <pops/numerics/spatial_operator.hpp>
+#include <pops/runtime/builders/block/block_builder.hpp>
 
 #include <Kokkos_Core.hpp>  // Kokkos::View / atomic_add / deep_copy (compteur d'appels device-accessible)
 
@@ -25,7 +25,7 @@
 #include <cstdio>
 #include <cstring>
 
-using namespace adc;
+using namespace pops;
 static constexpr double kPi = 3.14159265358979323846;
 
 // Compteur d'appels a wave_speeds : Kokkos::View<long long> (memoire de l'espace d'execution par
@@ -38,12 +38,12 @@ using Counter = Kokkos::View<long long>;
 struct CountingIsothermal {
   static constexpr int n_vars = 3;
   using State = StateVec<3>;
-  using Aux = adc::Aux;
+  using Aux = pops::Aux;
   Real c0 = Real(1);
   int busy = 0;
   Counter calls;  // handle capture par valeur dans le kernel (donnees partagees)
 
-  ADC_HD State flux(const State& u, const Aux&, int dir) const {
+  POPS_HD State flux(const State& u, const Aux&, int dir) const {
     const Real rho = u[0];
     const Real vx = u[1] / rho, vy = u[2] / rho;
     const Real p = c0 * c0 * rho;
@@ -59,12 +59,12 @@ struct CountingIsothermal {
     }
     return F;
   }
-  ADC_HD Real max_wave_speed(const State& u, const Aux&, int dir) const {
+  POPS_HD Real max_wave_speed(const State& u, const Aux&, int dir) const {
     const Real v = (dir == 0 ? u[1] : u[2]) / u[0];
     const Real av = v < 0 ? -v : v;
     return av + c0;
   }
-  ADC_HD void wave_speeds(const State& u, const Aux&, int dir, Real& lo, Real& hi) const {
+  POPS_HD void wave_speeds(const State& u, const Aux&, int dir, Real& lo, Real& hi) const {
     Kokkos::atomic_add(&calls(), 1LL);
     const Real v = (dir == 0 ? u[1] : u[2]) / u[0];
     Real acc = Real(0);
@@ -74,7 +74,7 @@ struct CountingIsothermal {
     lo = v - c;
     hi = v + c;
   }
-  ADC_HD State source(const State&, const Aux&) const { return State{}; }
+  POPS_HD State source(const State&, const Aux&) const { return State{}; }
 };
 
 static void init_state(MultiFab& U, const Geometry& geom, const Box2D& dom) {

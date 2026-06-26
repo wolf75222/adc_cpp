@@ -8,8 +8,8 @@ import time
 
 import numpy as np
 
-import adc
-from adc import dsl
+import pops
+from pops import dsl
 
 GAMMA = 1.4
 
@@ -60,17 +60,17 @@ def dsl_model():
 
 def build_bricks(n, U):
     t0 = time.perf_counter()
-    sim = adc.System(n=n, L=1.0, periodic=True)
-    spec = adc.Model(
-        state=adc.FluidState("compressible", gamma=GAMMA),
-        transport=adc.CompressibleFlux(),
-        source=adc.NoSource(),
-        elliptic=adc.BackgroundDensity(alpha=0.0, n0=0.0),
+    sim = pops.System(n=n, L=1.0, periodic=True)
+    spec = pops.Model(
+        state=pops.FluidState("compressible", gamma=GAMMA),
+        transport=pops.CompressibleFlux(),
+        source=pops.NoSource(),
+        elliptic=pops.BackgroundDensity(alpha=0.0, n0=0.0),
     )
     sim.add_equation(
         "gas",
         spec,
-        spatial=adc.FiniteVolume(limiter="minmod", riemann="rusanov"),
+        spatial=pops.FiniteVolume(limiter="minmod", riemann="rusanov"),
     )
     sim.set_poisson(rhs="charge_density", solver="fft")
     sim.set_state("gas", U.reshape(-1))
@@ -78,8 +78,8 @@ def build_bricks(n, U):
 
 
 def build_dsl(n, U, cache_dir):
-    old = os.environ.get("ADC_CACHE_DIR")
-    os.environ["ADC_CACHE_DIR"] = cache_dir
+    old = os.environ.get("POPS_CACHE_DIR")
+    os.environ["POPS_CACHE_DIR"] = cache_dir
     try:
         m = dsl_model()
         c0 = time.perf_counter()
@@ -88,11 +88,11 @@ def build_dsl(n, U, cache_dir):
         if cm.backend != "production" or cm.adder != "add_native_block":
             raise RuntimeError("bad DSL backend/adder: %s %s" % (cm.backend, cm.adder))
         t0 = time.perf_counter()
-        sim = adc.System(n=n, L=1.0, periodic=True)
+        sim = pops.System(n=n, L=1.0, periodic=True)
         sim.add_equation(
             "gas",
             cm,
-            spatial=adc.FiniteVolume(limiter="minmod", riemann="rusanov"),
+            spatial=pops.FiniteVolume(limiter="minmod", riemann="rusanov"),
         )
         sim.set_poisson(rhs="charge_density", solver="fft")
         sim.set_state("gas", U.reshape(-1))
@@ -100,9 +100,9 @@ def build_dsl(n, U, cache_dir):
         return sim, setup_ms, compile_ms
     finally:
         if old is None:
-            os.environ.pop("ADC_CACHE_DIR", None)
+            os.environ.pop("POPS_CACHE_DIR", None)
         else:
-            os.environ["ADC_CACHE_DIR"] = old
+            os.environ["POPS_CACHE_DIR"] = old
 
 
 def time_sim(sim, dt, steps, warmup):
@@ -184,7 +184,7 @@ def main():
         "threads=%s mass=%.17e" % (thr, mass),
     )
 
-    cache = tempfile.mkdtemp(prefix="adc_dsl_cache_")
+    cache = tempfile.mkdtemp(prefix="pops_dsl_cache_")
     try:
         shutil.rmtree(cache, ignore_errors=True)
         os.makedirs(cache, exist_ok=True)

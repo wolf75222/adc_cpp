@@ -18,7 +18,7 @@ Most contracts hold exactly. The step-ordering invariant
 promised under "Limitations" all exist and throw clear errors: FFT refused under
 MPI on all ranks; polar Poisson single-rank/single-box; FFT incompatible with
 wall/eps/anisotropy/kappa; no AMR global Schur. The model-agnostic guarantee
-holds: `include/adc/**` carries no scenario-keyed branch -- scenario names
+holds: `include/pops/**` carries no scenario-keyed branch -- scenario names
 ("diocotron", "Hoffart") appear only in explanatory comments and doc cross-refs,
 not in logic. `dsl.py` error handling is careful (explicit RuntimeErrors with
 remedies, ABI-mismatch pre-dlopen guards).
@@ -29,8 +29,8 @@ Two genuine spec<->code divergences were found.
 
 | Sev | Where | Issue |
 |-----|-------|-------|
-| Medium | python/bindings/amr/amr_system.cpp:438-442; include/adc/runtime/amr_runtime.hpp:84; include/adc/runtime/amr_system.hpp (contract comment); docs/ARCHITECTURE.md:220; docs/ALGORITHMS.md:1936 | Design docs and header contracts still claim multi-block AMR + `regrid_every>0` is REFUSED, but it is implemented and tested. |
-| Medium | include/adc/numerics/elliptic/geometric_mg.hpp:378-391 (solve), 429-457 (solve_robust); include/adc/runtime/system_field_solver.hpp:385-397 (ell_solve calls the void solve()); include/adc/runtime/amr_runtime.hpp:504 (mg_.solve()) | Elliptic Poisson non-convergence is a silent failure: solve() returns best-effort, every caller discards the status, no facade reporting. |
+| Medium | python/bindings/amr/amr_system.cpp:438-442; include/pops/runtime/amr_runtime.hpp:84; include/pops/runtime/amr_system.hpp (contract comment); docs/ARCHITECTURE.md:220; docs/ALGORITHMS.md:1936 | Design docs and header contracts still claim multi-block AMR + `regrid_every>0` is REFUSED, but it is implemented and tested. |
+| Medium | include/pops/numerics/elliptic/geometric_mg.hpp:378-391 (solve), 429-457 (solve_robust); include/pops/runtime/system_field_solver.hpp:385-397 (ell_solve calls the void solve()); include/pops/runtime/amr_runtime.hpp:504 (mg_.solve()) | Elliptic Poisson non-convergence is a silent failure: solve() returns best-effort, every caller discards the status, no facade reporting. |
 
 ### F1 -- stale multi-block + regrid_every refusal claim
 

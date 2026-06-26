@@ -60,7 +60,7 @@ jobs:
         run: python docs/check_docs.py --freshness-warn-only
 
       # INFORMATIF : build Sphinx pour attraper les references CASSEES (toctree, labels, xref)
-      # avant le merge, sans bloquer. Le module `adc` n'est PAS construit ici : les avertissements
+      # avant le merge, sans bloquer. Le module `pops` n'est PAS construit ici : les avertissements
       # autodoc (import du module absent) sont filtres ; on ne remonte que les classes de
       # references cassees. La lane lourde (cron / dispatch) garde le build complet avec le module.
       - name: Sphinx build (references cassees, informatif)
@@ -68,7 +68,7 @@ jobs:
         run: |
           pip install -r docs/sphinx/requirements.txt
           python -m sphinx -b html --keep-going docs/sphinx "$RUNNER_TEMP/site_pr" 2> "$RUNNER_TEMP/sphinx.log" || true
-          broken=$(grep -iE 'nonexisting document|undefined label|toctree contains reference|cross-reference target not found|may not end with a transition|duplicate (label|object)' "$RUNNER_TEMP/sphinx.log" | grep -ivE 'autodoc|mock|import adc|module adc|failed to import' || true)
+          broken=$(grep -iE 'nonexisting document|undefined label|toctree contains reference|cross-reference target not found|may not end with a transition|duplicate (label|object)' "$RUNNER_TEMP/sphinx.log" | grep -ivE 'autodoc|mock|import pops|module pops|failed to import' || true)
           if [ -n "$broken" ]; then
             { echo "### Sphinx: possible broken references"; echo '```'; echo "$broken"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
             echo "$broken" | while IFS= read -r l; do [ -n "$l" ] && echo "::warning::sphinx: $l"; done

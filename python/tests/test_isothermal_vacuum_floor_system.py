@@ -16,7 +16,7 @@ import sys
 import numpy as np
 
 try:
-    import adc
+    import pops
 except ImportError as e:
     print("skip  module adc absent (PYTHONPATH ?) : %s" % e)
     sys.exit(0)
@@ -30,19 +30,19 @@ def chk(cond, label):
 
 def run(n, L, vacuum_floor, rho_scale, nsteps, dt):
     """One short isothermal transport run; returns the conservative state (3, n, n)."""
-    sim = adc.System(n=n, L=L, periodic=False)
+    sim = pops.System(n=n, L=L, periodic=False)
     sim.set_poisson(bc="dirichlet")
     sim.set_magnetic_field(np.ones((n, n)))
     sim.add_equation(
         "ions",
-        model=adc.Model(
-            state=adc.FluidState(kind="isothermal", cs2=1.0, vacuum_floor=vacuum_floor),
-            transport=adc.IsothermalFlux(),
-            source=adc.NoSource(),
-            elliptic=adc.BackgroundDensity(alpha=1.0, n0=0.0),
+        model=pops.Model(
+            state=pops.FluidState(kind="isothermal", cs2=1.0, vacuum_floor=vacuum_floor),
+            transport=pops.IsothermalFlux(),
+            source=pops.NoSource(),
+            elliptic=pops.BackgroundDensity(alpha=1.0, n0=0.0),
         ),
-        spatial=adc.FiniteVolume(limiter="minmod", riemann="rusanov", variables="conservative"),
-        time=adc.Explicit(),
+        spatial=pops.FiniteVolume(limiter="minmod", riemann="rusanov", variables="conservative"),
+        time=pops.Explicit(),
     )
     x = (np.arange(n) + 0.5) * (L / n)
     X, Y = np.meshgrid(x, x, indexing="ij")
@@ -81,7 +81,7 @@ def main():
 
     # (3) validation at the python boundary.
     try:
-        adc.FluidState(kind="isothermal", cs2=1.0, vacuum_floor=-1.0)
+        pops.FluidState(kind="isothermal", cs2=1.0, vacuum_floor=-1.0)
         chk(False, "(3) vacuum_floor < 0 rejected")
     except ValueError:
         chk(True, "(3) vacuum_floor < 0 rejected")

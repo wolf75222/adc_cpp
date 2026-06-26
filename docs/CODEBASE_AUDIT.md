@@ -5,7 +5,7 @@
 Date: 2026-06-06.  
 Base reviewed: `origin/master` / `9ba36f5` after PRs #118-#142, #135 and #141.
 Open PR impacting the audit: #140 (AMR stride cadence).
-Scope read: `include/adc/**/*.hpp`, `python/*.cpp`, `python/adc/*.py`, main architecture
+Scope read: `include/pops/**/*.hpp`, `python/*.cpp`, `python/pops/*.py`, main architecture
 docs. The GPU tests under `python/tests/gpu/` are classified as validation harness, not
 as a production API.
 
@@ -54,7 +54,7 @@ Recent status integrated into this audit:
 
 - Schur is now a complete C++ stack on the uniform side: full tensor operator, brick
   `LorentzEliminator`, condensation builder, Krylov BiCGStab solver, stage
-  `CondensedSchurSourceStepper`, Python binding `adc.Split` / `adc.CondensedSchur`.
+  `CondensedSchurSourceStepper`, Python binding `pops.Split` / `pops.CondensedSchur`.
 - `System` gained per-block stride, `SourceImplicit`, mask `implicit_vars` / `implicit_roles`,
   set/get in primitive variables, explicit coupled DSL source, and an API that rejects several
   misleading paths instead of silently ignoring them.
@@ -106,11 +106,11 @@ These invariants are the "rites" of the code: if a file breaks them, it becomes 
 | `coupling/` | Historical header-only and AMR coupling engines, coupled sources, Schur. | Most redundant zone. To classify public/internal/deprecated. |
 | `runtime/` | C++ facades used by Python, DSL ABI, loaders. | Strong direction, but many paths. Needs strict naming. |
 | `python/*.cpp` | Bindings and offline runtime implementation. | `python/bindings/system/base/system.cpp` is too big. |
-| `python/adc/*.py` | Python user API and DSL. | Some docstrings remain old. |
+| `python/pops/*.py` | Python user API and DSL. | Some docstrings remain old. |
 
 ## 4. Audit by file
 
-### `include/adc/core`
+### `include/pops/core`
 
 | File | Classes / objects | Meaning | Boundary | Audit |
 |---|---|---|---|---|
@@ -123,7 +123,7 @@ These invariants are the "rites" of the code: if a file breaks them, it becomes 
 | `allocator.hpp` | `ManagedArena`, `ManagedAllocator` | Unified/device memory abstraction. | Hide the fences in the accessor. | Useful but to watch with Kokkos/CUDA. |
 | `kokkos_env.hpp` | Kokkos init/finalize | Backend environment management. | Carry numerics. | OK. |
 
-### `include/adc/physics`
+### `include/pops/physics`
 
 | File | Classes / objects | Meaning | Boundary | Audit |
 |---|---|---|---|---|
@@ -137,7 +137,7 @@ These invariants are the "rites" of the code: if a file breaks them, it becomes 
 | `two_fluid_isothermal.hpp` | `TwoFluidLinear` | Two-fluid isothermal IMEX kernel. | -- | TEST/VALIDATION brick (not used by adc_cases); same situation as LangmuirMode. Marked in the doc-comment. |
 | `bricks.hpp` | aggregator include | Convenience header. | Carry logic. | OK. |
 
-### `include/adc/numerics`
+### `include/pops/numerics`
 
 | File | Classes / objects | Meaning | Boundary | Audit |
 |---|---|---|---|---|
@@ -148,7 +148,7 @@ These invariants are the "rites" of the code: if a file breaks them, it becomes 
 | `spatial_operator_polar.hpp` | `assemble_rhs_polar`, polar kernels | Polar FV divergence. | Be wired silently into `System`. | OK as Phase 1. An explicit runtime path is needed before user use. |
 | `lorentz_eliminator.hpp` | `LorentzEliminator` | Local brick for Schur: analytic `B^{-1}`. | Solve the elliptic. | Good: small class with a clear responsibility. |
 
-### `include/adc/numerics/elliptic`
+### `include/pops/numerics/elliptic`
 
 | File | Classes / objects | Meaning | Boundary | Audit |
 |---|---|---|---|---|
@@ -161,7 +161,7 @@ These invariants are the "rites" of the code: if a file breaks them, it becomes 
 | `poisson_fft.hpp` | `PoissonFFT` direct | Low-level single-rank FFT solver. | Pretend to be MPI `System`. | OK if the single-rank guard stays clear. |
 | `poisson_fft_solver.hpp` | `PoissonFFTSolver`, `DistributedFFTSolver` | FFT wrappers for `MultiFab`. | Hide a layout incompatibility. | Clean MPI guard added. `DistributedFFTSolver` not routed in `System`. |
 
-### `include/adc/numerics/time`
+### `include/pops/numerics/time`
 
 | File | Classes / objects | Meaning | Boundary | Audit |
 |---|---|---|---|---|
@@ -176,7 +176,7 @@ These invariants are the "rites" of the code: if a file breaks them, it becomes 
 | `amr_reflux.hpp` | AMR Fab2D 2 levels | Pedagogical/low-level reflux. | Coexist as the main API. | Probably legacy. |
 | `amr_reflux_mf.hpp` | `AmrLevelMF`, `AmrLevelMP`, `PatchRange`, `FluxRegister`, `CoverageMask`, `SubcyclingSchedule`, `CoarseFineInterface`, `advance_amr`, local IMEX source | Multipatch MultiFab AMR engine. | Stay a catch-all 1000-line file. | Biggest factoring point. Gap2 local IMEX merged, but file to split. |
 
-### `include/adc/mesh`
+### `include/pops/mesh`
 
 | File | Classes / objects | Meaning | Boundary | Audit |
 |---|---|---|---|---|
@@ -193,7 +193,7 @@ These invariants are the "rites" of the code: if a file breaks them, it becomes 
 | `refinement.hpp` | refinement/coarsen helpers | Coarse/fine indices. | Orchestrate a full AMR step. | OK, but check remaining device lambdas. |
 | `box_hash.hpp` | `BoxHash` | Box lookup acceleration. | Carry AMR logic. | OK. |
 
-### `include/adc/amr`
+### `include/pops/amr`
 
 | File | Classes / objects | Meaning | Boundary | Audit |
 |---|---|---|---|---|
@@ -202,7 +202,7 @@ These invariants are the "rites" of the code: if a file breaks them, it becomes 
 | `regrid.hpp` | `RegridParams`, `regrid_level` | Abstract regridding. | Manage Poisson/coupling. | OK. |
 | `amr_hierarchy.hpp` | `AmrHierarchy` | Hierarchy of levels. | Duplicate `AmrSystem`. | OK but to relate clearly to the main engine. |
 
-### `include/adc/coupling`
+### `include/pops/coupling`
 
 | File | Classes / objects | Meaning | Boundary | Audit |
 |---|---|---|---|---|
@@ -223,7 +223,7 @@ These invariants are the "rites" of the code: if a file breaks them, it becomes 
 | `condensed_schur_source_stepper.hpp` | `CondensedSchurSourceStepper` | Schur-condensed source stage. | Be a local `model.source`. | C++ uniform merged; GPU validation to track explicitly after #135. |
 | `spectral_coupler.hpp` | mono-model FFT coupler | Spectral variant. | Be an MPI path without guard. | Probably secondary API. |
 
-### `include/adc/runtime`
+### `include/pops/runtime`
 
 | File | Classes / objects | Meaning | Boundary | Audit |
 |---|---|---|---|---|
@@ -245,11 +245,11 @@ These invariants are the "rites" of the code: if a file breaks them, it becomes 
 
 | File | Classes / objects | Meaning | Boundary | Audit |
 |---|---|---|---|---|
-| `bindings.cpp` | pybind11 module `_adc` | Expose `System`, `AmrSystem`, configs. | Implement the simulation. | OK. |
+| `bindings.cpp` | pybind11 module `_pops` | Expose `System`, `AmrSystem`, configs. | Implement the simulation. | OK. |
 | `amr_system.cpp` | `AmrSystem::Impl` | Offline AMR runtime. | Becoming multi-block without explicit registry. | Reasonable size. Still refuses the 2nd block; the capstone must add a type-erased registry, not just remove the throw. |
 | `system.cpp` | `System::Impl`, loaders, Poisson, couplings, I/O, stride, Schur stage | Main multi-block runtime. | Stay a god class. | Biggest maintainability risk on the runtime side; the recent additions reinforce the need for extraction. |
 
-### `python/adc/*.py`
+### `python/pops/*.py`
 
 | File | Meaning | Audit |
 |---|---|---|
@@ -291,7 +291,7 @@ dependency.
      - `SystemStepper`: `step`, `step_cfl`, stride/substeps.
    - Gain: make each future feature localized.
 
-2. **`include/adc/numerics/time/amr_reflux_mf.hpp`**
+2. **`include/pops/numerics/time/amr_reflux_mf.hpp`**
    - Problem: 1016 lines, contains several abstraction levels.
    - Target split:
      - `amr_level.hpp`: `AmrLevelMF`, `AmrLevelMP`, `LevelHierarchy`.
@@ -310,12 +310,12 @@ dependency.
 ### P1 - Harden the contracts
 
 4. **DSL and docstrings**
-   - `python/adc/dsl.py` starts with an obsolete description of a CPU prototype without compiled codegen.
+   - `python/pops/dsl.py` starts with an obsolete description of a CPU prototype without compiled codegen.
    - Action: align the header with the current status: `prototype`, `aot`, `production`, cache, GPU/MPI.
 
 5. **Implicit time: local source vs global Schur**
    - `SourceImplicit` is now the right name for the local implicit source.
-   - `adc.Split` / `adc.CondensedSchur` introduce the real non-local stage by Schur.
+   - `pops.Split` / `pops.CondensedSchur` introduce the real non-local stage by Schur.
    - Action: keep this separation in all examples: do not present
      `SourceImplicit` as "total implicit", and do not hide Schur behind a local source.
 
@@ -397,12 +397,12 @@ In the repo, "MPI" and "Kokkos" are two different axes:
 
 | Short name | Build | What it validates |
 |---|---|---|
-| MPI CPU | `ADC_USE_MPI=ON`, device Kokkos Serial/OpenMP | rank/process decomposition, halos, reductions, ranks without data. |
-| Kokkos CPU Serial | `ADC_USE_KOKKOS=ON` with Serial device | only on-node backend in mono-thread; reference and CI guard. |
-| Kokkos CPU OpenMP | `ADC_USE_KOKKOS=ON` with OpenMP device | local multi-thread CPU parallelism via Kokkos. |
-| Kokkos GPU | `ADC_USE_KOKKOS=ON` with Cuda/HIP device | cell kernels on GPU, often `np=1`. |
-| MPI + Kokkos CPU | `ADC_USE_MPI=ON`, `ADC_USE_KOKKOS=ON`, device Serial/OpenMP | MPI between ranks + local Kokkos CPU execution. |
-| MPI + Kokkos GPU | `ADC_USE_MPI=ON`, `ADC_USE_KOKKOS=ON`, device Cuda/HIP | distributed production target: MPI between ranks/nodes, Kokkos on local GPU. |
+| MPI CPU | `POPS_USE_MPI=ON`, device Kokkos Serial/OpenMP | rank/process decomposition, halos, reductions, ranks without data. |
+| Kokkos CPU Serial | `POPS_USE_KOKKOS=ON` with Serial device | only on-node backend in mono-thread; reference and CI guard. |
+| Kokkos CPU OpenMP | `POPS_USE_KOKKOS=ON` with OpenMP device | local multi-thread CPU parallelism via Kokkos. |
+| Kokkos GPU | `POPS_USE_KOKKOS=ON` with Cuda/HIP device | cell kernels on GPU, often `np=1`. |
+| MPI + Kokkos CPU | `POPS_USE_MPI=ON`, `POPS_USE_KOKKOS=ON`, device Serial/OpenMP | MPI between ranks + local Kokkos CPU execution. |
+| MPI + Kokkos GPU | `POPS_USE_MPI=ON`, `POPS_USE_KOKKOS=ON`, device Cuda/HIP | distributed production target: MPI between ranks/nodes, Kokkos on local GPU. |
 
 Language rule: do not write "MPI validated" if the proof is only CPU. Write
 explicitly `MPI CPU`, `Kokkos Cuda np=1`, or `MPI + Kokkos Cuda np=1/2/4`.
@@ -420,7 +420,7 @@ rang MPI 1 -> kernels Kokkos sur CPU/GPU local
 
 What seems already in place:
 
-- optional MPI axis (`ADC_USE_MPI`) and required on-node Kokkos axis (`ADC_USE_KOKKOS` ON by
+- optional MPI axis (`POPS_USE_MPI`) and required on-node Kokkos axis (`POPS_USE_KOKKOS` ON by
   default; configuring with OFF is a fatal CMake error);
 - `for_each_cell` / Kokkos reductions for the local loops;
 - `comm.hpp` for ranks, barriers, all-reduce;
@@ -468,7 +468,7 @@ What remains to make systematic:
    - Compare to the Kokkos Serial results with numerical tolerance, not necessarily bit-identical.
 
 3. **MPI + Kokkos CPU**
-   - Combined build `ADC_USE_MPI=ON` + `ADC_USE_KOKKOS=ON` with Serial then OpenMP device.
+   - Combined build `POPS_USE_MPI=ON` + `POPS_USE_KOKKOS=ON` with Serial then OpenMP device.
    - Verify that the collectives stay called by all ranks even when a rank has no
      local fab.
    - Priority tests: `fill_boundary`, `solve_fields`, `mf_arith::dot`, AMR reflux, Schur.
@@ -637,7 +637,7 @@ To avoid the divergences:
 
 ### Lot A - Documentation and API truth
 
-1. Fix the header docstring of `python/adc/dsl.py`.
+1. Fix the header docstring of `python/pops/dsl.py`.
 2. Add in `ARCHITECTURE.md` a "current API / internal / legacy" table.
 3. Add a note: `SourceImplicit` = local implicit source, `CondensedSchur` = global stage.
 4. Neutralize the application mentions in the comments of generic headers

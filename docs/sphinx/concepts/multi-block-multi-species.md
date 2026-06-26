@@ -9,8 +9,8 @@ the coupling between species reduces to a summed right-hand side.
 
 A block is a named carrier for one model on the mesh. You add it with `add_block`
 (native bricks) or `add_equation` (a compiled DSL, domain-specific language, model),
-once per species. The same call exists on `adc.System` (single level) and on
-`adc.AmrSystem` (refined); the multi-block facade is identical on both.
+once per species. The same call exists on `pops.System` (single level) and on
+`pops.AmrSystem` (refined); the multi-block facade is identical on both.
 
 Each block keeps its own numerics. A block fixes its spatial scheme (limiter, flux,
 reconstruction), its time treatment (`explicit` or `imex`), and its multirate
@@ -29,7 +29,7 @@ hierarchy carrying several fields, not a hierarchy per block. A construction gua
 verifies that every block has exactly the same layout, because that identical layout
 is the precondition for the single auxiliary channel and the single Poisson solve.
 
-The blocks also share one auxiliary channel: the `adc::Aux` fields, the potential
+The blocks also share one auxiliary channel: the `pops::Aux` fields, the potential
 `phi` and its gradient (`grad_x`, `grad_y`), plus optional extended fields such as
 `B_z` or `T_e`. Each model reads `aux` where it needs the external state. A drift
 transport reads `aux` in its flux; a self-gravitating fluid reads it in its source.

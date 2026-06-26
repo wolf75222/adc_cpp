@@ -1,4 +1,4 @@
-> **STATUS: IMPLEMENTED.** This document is the original design spec. The condensed Schur source stage is delivered (`CondensedSchur`, `schur_condensation.hpp`, exposed in Python as `adc.CondensedSchur`; tests test_schur_via_system / test_schur_conservation). Read this file as design history, not as current state.
+> **STATUS: IMPLEMENTED.** This document is the original design spec. The condensed Schur source stage is delivered (`CondensedSchur`, `schur_condensation.hpp`, exposed in Python as `pops.CondensedSchur`; tests test_schur_via_system / test_schur_conservation). Read this file as design history, not as current state.
 
 # Design: implicit source condensed by Schur (reproduction of arXiv:2510.11808)
 
@@ -18,9 +18,9 @@ The document relies on the architecture already in place (sources read):
 - `docs/DSL_MODEL_DESIGN.md` (`dsl.Model` facade, physical roles, `add_native_block`);
 - `docs/GPU_RUNTIME_PORT.md` (device-clean harness: named functors, no extended lambda);
 - the MERGED polar Phase 1 (#116, commit `004efca`): the MESH abstraction
-  (`adc.CartesianMesh` / `adc.PolarMesh` -> `System(mesh=)`), with `adc.FiniteVolume` = recon +
+  (`pops.CartesianMesh` / `pops.PolarMesh` -> `System(mesh=)`), with `pops.FiniteVolume` = recon +
   Riemann + variables ONLY (no geometry argument);
-- `include/adc/core/state/variables.hpp` (`VariableRole`: `Density`, `MomentumX`, `MomentumY`,
+- `include/pops/core/state/variables.hpp` (`VariableRole`: `Density`, `MomentumX`, `MomentumY`,
   `MomentumZ`, `Energy`, ...);
 - `docs/BIBLIOGRAPHY.md` section 3 (Hoffart entry).
 
@@ -232,7 +232,7 @@ PR3 before any facade wiring.
 
 The LOCAL core: per cell, build `B = I - theta dt [Omega]_x` (the 2x2 matrix of implicit
 rotation) and its inverse `B^{-1}` in closed form (no solve, no allocation). Device-callable
-(`ADC_HD`), NAMED functor (no extended lambda, cf. `docs/GPU_RUNTIME_PORT.md`: the nvcc limit
+(`POPS_HD`), NAMED functor (no extended lambda, cf. `docs/GPU_RUNTIME_PORT.md`: the nvcc limit
 on cross-TU first-instantiated extended lambdas is worked around by named functors, harness
 already validated on GH200 for transport #64 and elliptic #97). It serves two places: (a) assemble
 the coefficient `A = rho B^{-1}` of level 1, (b) reconstruct `v^{n+theta}` at level 4. No
@@ -280,9 +280,9 @@ integrator and a condensed source stage:
 sim.add_equation(
     "ions",
     model=model,                       # briques natives OU CompiledModel DSL, roles requis
-    time=adc.Split(
-        hyperbolic=adc.Explicit(ssprk3=True),
-        source=adc.CondensedSchur(
+    time=pops.Split(
+        hyperbolic=pops.Explicit(ssprk3=True),
+        source=pops.CondensedSchur(
             kind="electrostatic_lorentz",
             theta=0.5,
             density="rho",             # role Density
@@ -296,23 +296,23 @@ sim.add_equation(
 ```
 
 Principles of this API:
-- `adc.Split(hyperbolic=, source=)` is a new integrator of the time layer: it plays the
+- `pops.Split(hyperbolic=, source=)` is a new integrator of the time layer: it plays the
   explicit hyperbolic stage then the `CondensedSchur` source stage (IMEX in the layer-5 sense).
-- `adc.CondensedSchur(kind=, theta=, ...)` NAMES the algorithm and MAPS the fields onto the roles.
+- `pops.CondensedSchur(kind=, theta=, ...)` NAMES the algorithm and MAPS the fields onto the roles.
   `kind="electrostatic_lorentz"` selects `ElectrostaticLorentzCondensation` (level 4-3);
   other `kind` will be able to be added without touching the facade.
-- **The default path is UNCHANGED.** Nothing breaks: `adc.Explicit`, `adc.IMEX`,
-  `adc.Implicit`, `add_block`, `add_equation` continue to work identically. A model
-  that does not use `adc.Split(... source=adc.CondensedSchur ...)` never sees the new stage.
+- **The default path is UNCHANGED.** Nothing breaks: `pops.Explicit`, `pops.IMEX`,
+  `pops.Implicit`, `add_block`, `add_equation` continue to work identically. A model
+  that does not use `pops.Split(... source=pops.CondensedSchur ...)` never sees the new stage.
   The selection is OPT-IN, like the polar grid (#116, Cartesian default bit-identical).
 
-BOX -- `adc.SourceImplicit` (LOCAL) vs `adc.CondensedSchur` (GLOBAL). Two distinct mechanisms
+BOX -- `pops.SourceImplicit` (LOCAL) vs `pops.CondensedSchur` (GLOBAL). Two distinct mechanisms
 treat a stiff source implicitly; do not confuse them.
-- `adc.SourceImplicit` (= IMEX source-only) is LOCAL: the implicit couples only the components
+- `pops.SourceImplicit` (= IMEX source-only) is LOCAL: the implicit couples only the components
   of the SAME cell (backward-Euler solved by Newton at the cell), NO spatial coupling.
   It is the right choice for purely local stiff terms (relaxation, reactions, friction):
   no elliptic solve, so much cheaper.
-- `adc.CondensedSchur` (via `adc.Split`, cf. sections 2 to 5) is GLOBAL: it assembles the condensed
+- `pops.CondensedSchur` (via `pops.Split`, cf. sections 2 to 5) is GLOBAL: it assembles the condensed
   tensorial elliptic operator and solves it by Krylov (BiCGStab), coupling the WHOLE domain.
   It is the right choice ONLY for a nonlocal stiff coupling (Lorentz / electrostatic, e.g.
   the magnetized Euler-Poisson of Hoffart). A local stiff source does not need Schur.
@@ -322,9 +322,9 @@ treat a stiff source implicitly; do not confuse them.
 
 STRUCTURAL CONSTRAINT, already laid by the MERGED polar Phase 1 (#116, commit `004efca`). The
 CHOICE of geometry lives in a MESH object, never in the scheme:
-- `adc.CartesianMesh(...)` / `adc.PolarMesh(...)` -> `adc.System(mesh=...)` carry the geometry
+- `pops.CartesianMesh(...)` / `pops.PolarMesh(...)` -> `pops.System(mesh=...)` carry the geometry
   (`SystemConfig` carries `geometry`, `nr`, `ntheta`, `r_min`, `r_max`).
-- `adc.FiniteVolume(limiter=, riemann=, variables=)` stays reconstruction + numerical flux +
+- `pops.FiniteVolume(limiter=, riemann=, variables=)` stays reconstruction + numerical flux +
   variables ONLY. It HAS NO geometry argument, and never will.
 
 For the Schur condensation, this requires that the `TensorEllipticOperator` (level 1) and its
@@ -381,7 +381,7 @@ orthogonal and remains open).
   GMRES/BiCGStab + MG preconditioner on the symmetric part, or block Jacobi). Research
   PR: we measure the iterations and the robustness in `theta dt |Omega|` before freezing the
   choice. Highest risk of the sequence.
-- **PR4**: `CondensedSchurSourceStepper` (level 4) + `adc.Split` / `adc.CondensedSchur` (Python
+- **PR4**: `CondensedSchurSourceStepper` (level 4) + `pops.Split` / `pops.CondensedSchur` (Python
   API, section 6), native `add_native_block` path. Default unchanged. Validation: a manufactured
   case (MMS on the source subsystem alone, transport frozen); NOT yet the diocotron.
 - **PR5**: GPU port (named functors already in place; validate Serial vs Cuda parity on GH200,

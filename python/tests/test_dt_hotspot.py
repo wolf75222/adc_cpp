@@ -21,7 +21,7 @@ import sys
 
 import numpy as np
 
-import adc
+import pops
 
 fails = 0
 
@@ -44,14 +44,14 @@ CS2 = 0.5
 
 
 def make_sim(n=32):
-    sim = adc.System(n=n, L=1.0, periodic=True)
+    sim = pops.System(n=n, L=1.0, periodic=True)
     sim.add_block("ions",
-                  adc.Model(state=adc.FluidState("isothermal", cs2=CS2),
-                            transport=adc.IsothermalFlux(),
-                            source=adc.NoSource(),
-                            elliptic=adc.BackgroundDensity(alpha=1.0, n0=0.0)),
-                  spatial=adc.FiniteVolume(limiter="none", riemann="rusanov"),
-                  time=adc.Explicit())
+                  pops.Model(state=pops.FluidState("isothermal", cs2=CS2),
+                            transport=pops.IsothermalFlux(),
+                            source=pops.NoSource(),
+                            elliptic=pops.BackgroundDensity(alpha=1.0, n0=0.0)),
+                  spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                  time=pops.Explicit())
     return sim
 
 

@@ -2,22 +2,22 @@
 // (criterion 20, ADC-463). Exercises macro registration, lookup of a registered/unknown id, the
 // id listing, and the manifest fields a registered brick carries -- no Program/codegen needed.
 
-#include <adc/runtime/program/external_brick.hpp>
+#include <pops/runtime/program/external_brick.hpp>
 
-#include "test_harness.hpp"  // adc::test::Checker
+#include "test_harness.hpp"  // pops::test::Checker
 
 #include <string>
 
-using adc::runtime::program::BrickManifestEntry;
-using adc::runtime::program::BrickRegistry;
+using pops::runtime::program::BrickManifestEntry;
+using pops::runtime::program::BrickRegistry;
 
 // Register two bricks at static-init time via the macro. The third argument is the
 // requirements/capabilities CSV the manifest surfaces (a host-only string).
-ADC_REGISTER_BRICK("test_hllc", "riemann", "pressure,wave_speeds");
-ADC_REGISTER_BRICK("test_precond", "preconditioner", "");
+POPS_REGISTER_BRICK("test_hllc", "riemann", "pressure,wave_speeds");
+POPS_REGISTER_BRICK("test_precond", "preconditioner", "");
 
 int main() {
-  adc::test::Checker chk;
+  pops::test::Checker chk;
 
   const BrickRegistry& reg = BrickRegistry::instance();
 

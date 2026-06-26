@@ -1,4 +1,4 @@
-// Registre UNIQUE des tags de schema spatial (include/adc/runtime/dispatch_tags.hpp) : source de
+// Registre UNIQUE des tags de schema spatial (include/pops/runtime/dispatch_tags.hpp) : source de
 // verite partagee par tous les dispatchs (System make_block, AMR dispatch_amr_*, polaire). Ce test
 // est VOLONTAIREMENT LEGER (il n'inclut QUE dispatch_tags.hpp, aucun System / modele) : il verrouille
 //   (1) la MATRICE d'acceptation/rejet de validate_limiter / validate_riemann (cartesien ET polaire),
@@ -9,13 +9,13 @@
 // Aucune capabilite modele n'est testee ici (hll/hllc/roe sur un transport sans onde / sans pression)
 // : ces gardes sont des `if constexpr` PAR MODELE au call-site, hors perimetre du registry.
 
-#include <adc/runtime/config/dispatch_tags.hpp>
+#include <pops/runtime/config/dispatch_tags.hpp>
 
 #include <cstdio>
 #include <stdexcept>
 #include <string>
 
-using namespace adc;
+using namespace pops;
 
 namespace {
 

@@ -8,7 +8,7 @@ instantiated several times (`fluid_A`, `fluid_B`, ...).
 ## Spaces and instances
 
 ```python
-import adc.model as model
+import pops.model as model
 e = model.StateSpace("electron_state", ["ne", "mex", "mey"],
                      roles={"ne": "Density", "mex": "MomentumX", "mey": "MomentumY"})
 i = model.StateSpace("ion_state", ["ni", "mix", "miy"])
@@ -18,7 +18,7 @@ n = model.StateSpace("neutral_state", ["nn", "mnx", "mny"])
 ## Arbitrary-arity operators and typed multi-output
 
 An operator takes an arbitrary number of states (1, 2, 3, N) and may return several typed
-outputs. `adc.model.RateBundle` is the typed multi-output of a coupling: one
+outputs. `pops.model.RateBundle` is the typed multi-output of a coupling: one
 `Rate(StateSpace)` per participating block, of arbitrary arity. It is typed, so a wrong rate
 on a wrong state is rejected:
 
@@ -39,7 +39,7 @@ A Program references several blocks, solves coupled fields from their stage stat
 commits them atomically (no operator observes a partially committed coupled group):
 
 ```python
-import adc.time as adctime
+import pops.time as adctime
 P = adctime.Program("three_fluids_step")
 dt = P.dt
 e_n, i_n, n_n = P.state("electrons"), P.state("ions"), P.state("neutrals")
@@ -49,7 +49,7 @@ e1 = P.linear_combine("e1", e_n + dt * P.rhs(name="Re", state=e_n, fields=fields
 P.commit_many({"electrons": e1, "ions": i1, "neutrals": n1})          # atomic
 ```
 
-`adc.time.StageStateSet` (built by `P.state_set`) packages a coherent set of stage states so
+`pops.time.StageStateSet` (built by `P.state_set`) packages a coherent set of stage states so
 a field solve reads an unambiguous version of each block (see
 `examples/spec3/stage_state_set_field_solve.py`).
 
@@ -63,7 +63,7 @@ arbitrary arity; `m.solve_fields_from_species(...)` is a multi-input field opera
 for the rate formulas.
 
 ```python
-import adc.physics as physics
+import pops.physics as physics
 m = physics.Model("three_fluid")
 e = m.species("electrons", state=["ne", "mex", "mey"],
               roles={"ne": "density", "mex": "momentum_x", "mey": "momentum_y"})
@@ -77,7 +77,7 @@ m.solve_fields_from_species("fields", inputs=[e, i, n],
                             outputs={"phi": None}, solver="geometric_mg")
 ```
 
-`m.module` is then the same `adc.model.Module` a hand-written operator-first model builds: a
+`m.module` is then the same `pops.model.Module` a hand-written operator-first model builds: a
 two-fluid board model and its hand-written counterpart share a `module_hash` and emit
 byte-identical C++. A wrong-species rate in an affine combine is rejected (typed multi-output).
 The single-species board path is byte-identical to `m.state`.

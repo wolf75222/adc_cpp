@@ -23,32 +23,32 @@
 // AVANT le fix : segfault / UB a np=2/4 sur les rangs sans box locale (rhs_into / advance /
 // max_speed dereferencaient fab(0) inexistant). APRES : np=1/2/4 verts, resultats identiques.
 
-#include <adc/physics/composition/composite.hpp>
-#include <adc/physics/bricks/hyperbolic.hpp>  // ExBVelocity (scalaire 1 var)
-#include <adc/physics/bricks/source.hpp>      // NoSource
-#include <adc/runtime/builders/compiled/dsl_block.hpp>   // add_compiled_model
-#include <adc/runtime/system.hpp>
+#include <pops/physics/composition/composite.hpp>
+#include <pops/physics/bricks/hyperbolic.hpp>  // ExBVelocity (scalaire 1 var)
+#include <pops/physics/bricks/source.hpp>      // NoSource
+#include <pops/runtime/builders/compiled/dsl_block.hpp>   // add_compiled_model
+#include <pops/runtime/system.hpp>
 
-#include <adc/parallel/comm.hpp>
+#include <pops/parallel/comm.hpp>
 
 #include <cmath>
 #include <cstdio>
 #include <vector>
 
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
 #include <Kokkos_Core.hpp>
 #endif
-#ifdef ADC_HAS_MPI
+#ifdef POPS_HAS_MPI
 #include <mpi.h>
 #endif
 
-using namespace adc;
+using namespace pops;
 
 // Brique elliptique nulle : Poisson avec second membre nul -> phi=0 -> pas de derive.
 // On teste l'avance en temps, pas la physique ; la densite reste uniforme.
 struct NoEll {
   template <class State>
-  ADC_HD Real rhs(const State&) const {
+  POPS_HD Real rhs(const State&) const {
     return Real(0);
   }
 };
@@ -57,7 +57,7 @@ using ScalarModel = CompositeModel<ExBVelocity, NoSource, NoEll>;
 
 int main(int argc, char** argv) {
   comm_init(&argc, &argv);
-#if defined(ADC_HAS_KOKKOS)
+#if defined(POPS_HAS_KOKKOS)
   Kokkos::ScopeGuard guard(argc, argv);
 #endif
   const int me = my_rank(), np = n_ranks();
@@ -149,7 +149,7 @@ int main(int argc, char** argv) {
   chk(std::isfinite(mtot), "masse_finie");
   chk(std::fabs(mtot - rho0 * static_cast<double>(nn)) < 1e-9, "masse_conservee");
 
-#ifdef ADC_HAS_MPI
+#ifdef POPS_HAS_MPI
   if (np > 1) {
     long g = 0;
     MPI_Allreduce(&fails, &g, 1, MPI_LONG, MPI_SUM, MPI_COMM_WORLD);

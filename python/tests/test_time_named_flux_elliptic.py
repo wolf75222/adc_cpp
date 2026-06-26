@@ -20,15 +20,15 @@ Section B (gated, self-skip): a compiled program using NAMED fluxes that split t
 two pieces summing to the default -> stepping it equals stepping a single-named-flux ('whole') program
 to ~1e-14 (the named fluxes sum to the same -div F).
 
-Skips cleanly (exit 0) without numpy / _adc / a compiler / a visible Kokkos -- never fakes the engine.
+Skips cleanly (exit 0) without numpy / _pops / a compiler / a visible Kokkos -- never fakes the engine.
 """
 import sys
 
 
 def _adc_mods():
     try:
-        from adc import dsl
-        from adc import time as adctime
+        from pops import dsl
+        from pops import time as adctime
     except Exception as exc:  # adc not importable here -> skip, never fake
         print("skip test_time_named_flux_elliptic (adc unavailable: %s)" % exc)
         sys.exit(0)
@@ -199,8 +199,8 @@ def _norm_ids(src):
     """Strip the program NAME / HASH literals (they differ by construction) so two bodies compare by
     their lowered ALGORITHM, not their identity strings."""
     import re
-    src = re.sub(r'adc_program_name\(\) \{ return "[^"]*"', 'adc_program_name() { return "<n>"', src)
-    src = re.sub(r'adc_program_hash\(\) \{ return "[^"]*"', 'adc_program_hash() { return "<h>"', src)
+    src = re.sub(r'pops_program_name\(\) \{ return "[^"]*"', 'pops_program_name() { return "<n>"', src)
+    src = re.sub(r'pops_program_hash\(\) \{ return "[^"]*"', 'pops_program_hash() { return "<h>"', src)
     return src
 
 
@@ -215,7 +215,7 @@ chk(src_none == src_default,
 # A NAMED flux lowers the new path (per-cell flux kernel + neg_div_flux_into), NOT rhs_into.
 src_named = _fe_program("nf_named", ["whole"]).emit_cpp_program(model=mdl)
 chk("ctx.neg_div_flux_into(" in src_named, "a named-flux rhs lowers via ctx.neg_div_flux_into")
-chk("adc::for_each_cell(" in src_named, "the named flux is evaluated by a per-cell kernel")
+chk("pops::for_each_cell(" in src_named, "the named flux is evaluated by a per-cell kernel")
 chk("ctx.rhs_into(0, " not in src_named, "a named-flux rhs does NOT call rhs_into (distinct stencil)")
 
 # Validation: unknown flux name -> clear error; mixing default + named -> clear error; named flux
@@ -277,26 +277,26 @@ def _skipB(msg):
 try:
     import numpy as np
 
-    import adc
+    import pops
 except Exception as exc:  # noqa: BLE001
-    _skipB("numpy/_adc unavailable: %s" % exc)
+    _skipB("numpy/_pops unavailable: %s" % exc)
 
-if not hasattr(adc.System(n=8, L=1.0, periodic=True), "install_program"):
-    _skipB("_adc lacks the install_program binding (rebuild _adc)")
+if not hasattr(pops.System(n=8, L=1.0, periodic=True), "install_program"):
+    _skipB("_pops lacks the install_program binding (rebuild _pops)")
 
 N = 16
 DT = 0.01
 
 
 def make_sim(model):
-    sim = adc.System(n=N, L=1.0, periodic=True)
+    sim = pops.System(n=N, L=1.0, periodic=True)
     try:
         compiled = model.compile(backend="production")
     except RuntimeError as exc:
         _skipB("model compile could not build the .so: %s" % str(exc)[:160])
     sim.add_equation("plasma", compiled,
-                     spatial=adc.FiniteVolume(limiter="none", riemann="rusanov"),
-                     time=adc.Explicit(method="euler"))
+                     spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                     time=pops.Explicit(method="euler"))
     x = (np.arange(N) + 0.5) / N
     X, Y = np.meshgrid(x, x, indexing="ij")
     rho = 1.0 + 0.3 * np.sin(2 * np.pi * X) * np.cos(2 * np.pi * Y)
@@ -319,9 +319,9 @@ def _flux_fe_program(name, fluxes):
 # to it. Both go through the SAME centered-FV neg_div_flux_into, so -div(conv)+-div(press) ==
 # -div(whole) exactly (linearity) -> the stepped states must match to round-off.
 try:
-    compiled_whole = adc.compile_problem(model=whole_flux_model("nf_whole_prog"),
+    compiled_whole = pops.compile_problem(model=whole_flux_model("nf_whole_prog"),
                                          time=_flux_fe_program("nf_whole_fe", ["whole"]))
-    compiled_split = adc.compile_problem(model=split_flux_model("nf_split_prog2"),
+    compiled_split = pops.compile_problem(model=split_flux_model("nf_split_prog2"),
                                          time=_flux_fe_program("nf_split_fe", ["conv", "press"]))
 except RuntimeError as exc:
     _skipB("compile_problem could not build the .so: %s" % str(exc)[:160])

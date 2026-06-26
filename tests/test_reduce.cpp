@@ -14,18 +14,18 @@
 //   - norm_inf est EXACT partout (max et fabs sans arrondi, max associatif et
 //     commutatif en IEEE754) : egalite stricte avec la reference hote.
 
-#include <adc/mesh/index/box2d.hpp>
-#include <adc/mesh/layout/box_array.hpp>
-#include <adc/mesh/layout/distribution_mapping.hpp>
-#include <adc/mesh/execution/for_each.hpp>
-#include <adc/mesh/storage/mf_arith.hpp>
-#include <adc/mesh/storage/multifab.hpp>
+#include <pops/mesh/index/box2d.hpp>
+#include <pops/mesh/layout/box_array.hpp>
+#include <pops/mesh/layout/distribution_mapping.hpp>
+#include <pops/mesh/execution/for_each.hpp>
+#include <pops/mesh/storage/mf_arith.hpp>
+#include <pops/mesh/storage/multifab.hpp>
 
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
 
-using namespace adc;
+using namespace pops;
 
 // Reference hote sequentielle, lecture directe des fabs locaux (ordre
 // lexicographique fixe), sans passer par for_each_cell_reduce_*.
@@ -83,7 +83,7 @@ int main() {
     MultiFab mf(ba, dm, 1, 0);
     for (int li = 0; li < mf.local_size(); ++li) {
       Array4 a = mf.fab(li).array();
-      for_each_cell(mf.box(li), [a] ADC_HD(int i, int j) { a(i, j, 0) = i + 100.0 * j; });
+      for_each_cell(mf.box(li), [a] POPS_HD(int i, int j) { a(i, j, 0) = i + 100.0 * j; });
     }
     device_fence();
     const double ref = host_sum(mf, 0);
@@ -99,7 +99,7 @@ int main() {
     MultiFab mf(ba, dm, 1, 0);
     for (int li = 0; li < mf.local_size(); ++li) {
       Array4 a = mf.fab(li).array();
-      for_each_cell(mf.box(li), [a] ADC_HD(int i, int j) {
+      for_each_cell(mf.box(li), [a] POPS_HD(int i, int j) {
         const Real v = i + 100.0 * j;
         a(i, j, 0) = ((i + j) & 1) ? -v : v;
       });
@@ -114,7 +114,7 @@ int main() {
     MultiFab mf(ba, dm, 1, 0);
     for (int li = 0; li < mf.local_size(); ++li) {
       Array4 a = mf.fab(li).array();
-      for_each_cell(mf.box(li), [a] ADC_HD(int i, int j) {
+      for_each_cell(mf.box(li), [a] POPS_HD(int i, int j) {
         const Real v = i + 100.0 * j;
         a(i, j, 0) = ((i + j) & 1) ? -v : v;
       });
@@ -133,7 +133,7 @@ int main() {
     MultiFab mf(ba, dm, 1, 0);
     for (int li = 0; li < mf.local_size(); ++li) {
       Array4 a = mf.fab(li).array();
-      for_each_cell(mf.box(li), [a] ADC_HD(int i, int j) {
+      for_each_cell(mf.box(li), [a] POPS_HD(int i, int j) {
         a(i, j, 0) = std::sin(0.1 * i) + std::cos(0.07 * j);
       });
     }

@@ -1,11 +1,11 @@
 # Write a hybrid native plus DSL model
 
-Mix one native brick and one symbolic DSL brick inside a single `adc.CompositeModel`, then
-attach it to an `adc.System` and run.
+Mix one native brick and one symbolic DSL brick inside a single `pops.CompositeModel`, then
+attach it to an `pops.System` and run.
 
-A native brick is a generic piece of physics already compiled into the core (`adc.ExB`,
-`adc.PotentialForce`, `adc.ChargeDensity`...). A symbolic DSL brick is physics you write as
-formulas with `adc.dsl` and compile into a `.so`. A hybrid model fills the middle ground: you
+A native brick is a generic piece of physics already compiled into the core (`pops.ExB`,
+`pops.PotentialForce`, `pops.ChargeDensity`...). A symbolic DSL brick is physics you write as
+formulas with `pops.dsl` and compile into a `.so`. A hybrid model fills the middle ground: you
 reuse a native brick for one slot and write the other slot as formulas. Use it when part of the
 physics already exists as a native brick and part is best expressed symbolically.
 
@@ -21,10 +21,10 @@ physics already exists as a native brick and part is best expressed symbolically
 
 ## How a CompositeModel is built
 
-`adc.CompositeModel(transport, source, elliptic)` takes three slots. Each slot accepts either a
-native brick or a partial compiled DSL brick (`adc.dsl.HyperbolicBrick`, `adc.dsl.SourceBrick`,
-`adc.dsl.EllipticBrick`, each followed by `.compile()`). At least one slot must be a DSL brick. An
-all-native composition is written with `adc.Model(...)` instead; otherwise `CompositeModel` raises
+`pops.CompositeModel(transport, source, elliptic)` takes three slots. Each slot accepts either a
+native brick or a partial compiled DSL brick (`pops.dsl.HyperbolicBrick`, `pops.dsl.SourceBrick`,
+`pops.dsl.EllipticBrick`, each followed by `.compile()`). At least one slot must be a DSL brick. An
+all-native composition is written with `pops.Model(...)` instead; otherwise `CompositeModel` raises
 a `ValueError`.
 
 The transport slot fixes the layout: the number of conservative variables `n_vars`, their names,
@@ -42,14 +42,14 @@ force, and `Q` with the charge of the elliptic coupling.
 1. Import `adc` and the DSL, and fix the physical constants.
 
    ```python
-   import adc
-   from adc import dsl
+   import pops
+   from pops import dsl
 
    CS2, QOM, Q = 0.7, -1.0, -1.0
    ```
 
-2. Write the transport as a DSL hyperbolic brick. `adc.dsl.HyperbolicBrick` replicates
-   `adc::IsothermalFlux{cs2}` over three conservative variables: it declares the conservatives, the
+2. Write the transport as a DSL hyperbolic brick. `pops.dsl.HyperbolicBrick` replicates
+   `pops::IsothermalFlux{cs2}` over three conservative variables: it declares the conservatives, the
    primitives, the physical flux, the eigenvalues, the primitive layout, and the inverse
    `conservative_from`.
 
@@ -69,13 +69,13 @@ force, and `Q` with the charge of the elliptic coupling.
    ```
 
 3. Compose the model: the DSL transport (compiled) in the transport slot, a native
-   `adc.PotentialForce` in the source slot, and a native `adc.ChargeDensity` in the elliptic slot.
+   `pops.PotentialForce` in the source slot, and a native `pops.ChargeDensity` in the elliptic slot.
 
    ```python
-   m = adc.CompositeModel(
+   m = pops.CompositeModel(
        transport=build_iso_transport(CS2).compile(),
-       source=adc.PotentialForce(charge=QOM),
-       elliptic=adc.ChargeDensity(charge=Q),
+       source=pops.PotentialForce(charge=QOM),
+       elliptic=pops.ChargeDensity(charge=Q),
    )
    ```
 
@@ -91,9 +91,9 @@ force, and `Q` with the charge of the elliptic coupling.
    `conservative_vars` in step 2.
 
    ```python
-   sim = adc.System(n=48, L=1.0, periodic=True)
+   sim = pops.System(n=48, L=1.0, periodic=True)
    sim.add_equation("gas", compiled,
-                    spatial=adc.FiniteVolume(limiter="minmod", riemann="rusanov"),
+                    spatial=pops.FiniteVolume(limiter="minmod", riemann="rusanov"),
                     names=["rho", "rho_u", "rho_v"])
    ```
 
@@ -110,7 +110,7 @@ transport and a DSL source or elliptic brick.
 ## Common pitfalls
 
 - At least one slot must be a DSL brick. An all-native composition raises a `ValueError`; write it
-  with `adc.Model(...)` instead.
+  with `pops.Model(...)` instead.
 - A DSL source or elliptic brick must declare the same `n_vars` as the transport slot, which fixes
   the layout.
 - The hybrid path targets the `aot` backend. For the backend matrix (CPU, MPI, AMR) and the

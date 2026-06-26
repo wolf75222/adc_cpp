@@ -5,7 +5,7 @@ Pour chaque script unique reference par un tested_by, lance :
 
     <python> <script> --quick --outdir <tmp> avec MPLBACKEND=Agg, cwd = racine du depot
 
-Le module `adc` est localise par la variable ADC_PYMOD si elle est posee, sinon par balayage des
+Le module `adc` est localise par la variable POPS_PYMOD si elle est posee, sinon par balayage des
 emplacements de build usuels (build-py/python, build-py-kokkos/python, build/python,
 build-master/python) relatifs a la racine. Le chemin trouve prefixe PYTHONPATH.
 
@@ -39,19 +39,19 @@ MODULE_CANDIDATES = ("build-py/python", "build-py-kokkos/python", "build/python"
 
 def locate_module() -> pathlib.Path:
     """Renvoie le dossier contenant le paquet `adc` (a prefixer a PYTHONPATH)."""
-    env = os.environ.get("ADC_PYMOD")
+    env = os.environ.get("POPS_PYMOD")
     if env:
         cand = pathlib.Path(env).resolve()
         if (cand / "adc" / "__init__.py").exists():
             return cand
-        print(f"ERREUR : ADC_PYMOD={env} ne contient pas adc/__init__.py.", file=sys.stderr)
+        print(f"ERREUR : POPS_PYMOD={env} ne contient pas adc/__init__.py.", file=sys.stderr)
         sys.exit(1)
     for rel in MODULE_CANDIDATES:
         cand = (ROOT / rel).resolve()
         if (cand / "adc" / "__init__.py").exists():
             return cand
     print("ERREUR : module `adc` introuvable. Construire le module (preset python) ou poser "
-          "ADC_PYMOD vers le dossier contenant adc/__init__.py.\n"
+          "POPS_PYMOD vers le dossier contenant adc/__init__.py.\n"
           f"  emplacements balayes : {', '.join(MODULE_CANDIDATES)} (relatifs a {ROOT}).",
           file=sys.stderr)
     sys.exit(1)
