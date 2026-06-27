@@ -7,11 +7,19 @@ descriptors. The conservation-invariant descriptors are catalogued separately in
 Spec 5 (sec.4 / sec.5.13) homes diagnostics in the top-level ``pops.diagnostics``
 package (formerly ``pops.lib.diagnostics``). The reduction macros stay inert
 descriptors; nothing here computes in Python.
+
+Spec 5 sec.5.13 / 14.2.7 also names a diagnostic with a TYPED object (a
+:class:`~pops.diagnostics.measures.Norm` / :class:`~pops.diagnostics.measures.Integral` /
+:class:`~pops.diagnostics.measures.MinMax` / :class:`~pops.diagnostics.measures.ConservationCheck`
+descriptor) rather than ``diagnostics.norm(kind="l2")``. Those typed measures live in
+:mod:`pops.diagnostics.measures` and lower to the SAME native reduction schemes the factory
+functions here already name. The legacy factories stay for now.
 """
 from types import SimpleNamespace
 
 from pops.descriptors import BrickDescriptor
 from .invariants import invariants
+from .measures import ConservationCheck, Integral, MinMax, Norm
 
 
 def _diag(_dname, **o):
@@ -39,4 +47,6 @@ invariant_error = diagnostics.invariant_error
 residual = diagnostics.residual
 
 __all__ = ["diagnostics", "invariants", "integral", "norm", "mass", "momentum",
-           "energy", "invariant_error", "residual"]
+           "energy", "invariant_error", "residual",
+           # Spec 5 typed measure descriptors (pops.diagnostics.measures).
+           "Norm", "Integral", "MinMax", "ConservationCheck"]

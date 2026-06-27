@@ -10,7 +10,8 @@ The sub-packages form a directed acyclic dependency stack:
     numerics  -> (nothing)                       (Spec 5: discretisation descriptors)
     linalg    -> (nothing)                       (Spec 5: abstract algebra descriptors)
     moments   -> ir                              (Spec 5: moment-model toolkit)
-    diagnostics / params / output / external -> (nothing)   (Spec 5: inert descriptors)
+    diagnostics -> linalg                        (Spec 5: Norm takes a typed norm kind)
+    params / output / external -> (nothing)      (Spec 5: inert descriptors)
     lib       -> ir, model, time, physics, moments
     codegen   -> ir, model, physics, time, lib   (lowering, no _pops at module scope)
     runtime   -> everything, and is the ONLY layer allowed to import _pops
@@ -48,7 +49,9 @@ ALLOWED = {
     # (in-function import), so it adds no module-scope mesh edge -> ALLOWED stays empty.
     "fields": set(),
     "moments": {"ir"},
-    "diagnostics": set(),
+    # Spec 5 sec.5.13: pops.diagnostics.measures.Norm takes a typed pops.linalg.norms kind
+    # (L1 / L2 / LInf), so diagnostics imports linalg (acyclic: linalg imports nothing).
+    "diagnostics": {"linalg"},
     "params": set(),
     "output": set(),
     "external": set(),

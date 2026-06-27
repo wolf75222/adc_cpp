@@ -30,12 +30,37 @@ from pops.descriptors import (  # noqa: E402
 from pops.numerics.riemann import HLL  # noqa: E402
 from pops.mesh import CartesianMesh  # noqa: E402
 import pops.mesh._descriptor as mesh_descriptor  # noqa: E402
+from pops import moments  # noqa: E402
 
 # The semantic members the DescriptorProtocol documents (Spec 5 sec.6).
 PROTOCOL_MEMBERS = (
     "name", "category", "native_id",
     "requirements", "capabilities", "options",
     "available", "validate", "lower", "inspect",
+)
+
+# Spec 5 sec.6 (ADC-498): the route-CHOOSING objects of pops.moments are descriptors -- they
+# pick a math algorithm (wave-speed strategy / realizability floor / magnetic source binding /
+# closure variant). Each must honour the same DescriptorProtocol. Paired with its category so
+# the loop also pins the declared category string.
+MOMENTS_ROUTE_CHOOSERS = (
+    (moments.ExactSpeeds(moments.ExactSpeeds.ROE_DISSIPATION), "wave_speed"),
+    (moments.RealizabilityProjection(eps_m00=1e-10, robust=False), "realizability"),
+    (moments.MagneticMomentSource(q_over_m="my_q", b_field="my_b"), "moment_source"),
+    (moments.HyQMOM15Closure(variant="levermore"), "closure"),
+)
+
+# The builders / handles of pops.moments do NOT choose a route, so they stay lightweight and
+# must NOT be descriptors (Spec 5 sec.6: only algorithm-choosing objects are descriptors).
+# MomentOrdering has a single forced layout (no choice), so it is a handle, not a descriptor.
+MOMENTS_HANDLES = (
+    moments.MomentOrdering(),
+    moments.MomentBasis(order=2),
+    moments.CenteredTransform(order=2),
+    moments.StandardizedTransform(order=2),
+    moments.CartesianVelocityMoments(order=2),
+    moments.CartesianVelocityMoments(order=2).hierarchy(),
+    moments.VlasovSources,
 )
 
 
@@ -54,6 +79,51 @@ def test_brick_descriptor_satisfies_protocol():
     for member in PROTOCOL_MEMBERS:
         assert hasattr(brick, member), "BrickDescriptor missing protocol member %r" % member
     assert isinstance(brick, DescriptorProtocol)
+
+
+def test_moments_route_choosers_satisfy_protocol():
+    # ADC-498: every route-choosing pops.moments object honours the full protocol surface,
+    # exposes its declared category, and returns an inert inspect() dict that validate()s.
+    for descriptor, category in MOMENTS_ROUTE_CHOOSERS:
+        assert isinstance(descriptor, Descriptor), (
+            "%s should be a pops.descriptors.Descriptor" % type(descriptor).__name__)
+        assert isinstance(descriptor, DescriptorProtocol), (
+            "%s does not satisfy DescriptorProtocol" % type(descriptor).__name__)
+        for member in PROTOCOL_MEMBERS:
+            assert hasattr(descriptor, member), (
+                "%s missing protocol member %r" % (type(descriptor).__name__, member))
+        assert descriptor.category == category
+        record = descriptor.inspect()
+        assert isinstance(record, dict)
+        assert record["name"] == descriptor.name
+        assert record["category"] == category
+        assert isinstance(record["options"], dict) and record["options"]
+        assert isinstance(record["requirements"], dict)
+        assert isinstance(record["capabilities"], dict)
+        # available() is an explainable Availability and validate() does not raise.
+        assert isinstance(descriptor.available(), Availability)
+        assert descriptor.validate() is True
+        # lower() is inert metadata, never a numeric loop.
+        assert descriptor.lower()["category"] == category
+
+
+def test_moments_handles_are_not_descriptors():
+    # ADC-498: the builders / handles (MomentModel, MomentBasis, transforms, ordering, ...)
+    # are NOT route choosers, so they stay lightweight and must not be descriptors.
+    for handle in MOMENTS_HANDLES:
+        name = getattr(handle, "__name__", type(handle).__name__)
+        assert not isinstance(handle, Descriptor), (
+            "%s is a builder/handle, not a route chooser; it must not be a Descriptor" % name)
+
+
+def test_hyqmom15_closure_is_still_a_callable_closure():
+    # ADC-498: making HyQMOM15Closure a descriptor must not break its closure-callable role.
+    closure = moments.HyQMOM15Closure()
+    standardized = {"S11": 0.25, "S20": 1.0, "S02": 1.0, "S30": 0.0, "S21": 0.0,
+                    "S12": 0.0, "S03": 0.0, "S40": 3.0, "S31": 0.0, "S22": 1.0,
+                    "S13": 0.0, "S04": 3.0}
+    out = closure(standardized)
+    assert set(out) == {"S%d%d" % (p, 5 - p) for p in range(6)}
 
 
 def test_available_returns_availability_not_bool():
