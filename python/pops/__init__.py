@@ -31,6 +31,7 @@ from pops.runtime.threading import set_threads, has_kokkos, parallel_info  # noq
 from pops.runtime.doctor import doctor, capabilities  # noqa: F401
 from pops.runtime.mesh import CartesianMesh, PolarMesh, AuxHalo  # noqa: F401
 from pops.runtime.python_flux import PythonFlux  # noqa: F401
+from pops.runtime.profile import Profile, PerformanceSummary  # noqa: F401
 from pops.runtime.bricks import (  # noqa: F401
     Scalar, FluidState, ExB, CompressibleFlux, IsothermalFlux,
     NoSource, PotentialForce, GravityForce, MagneticLorentzForce, PotentialMagneticForce,
@@ -58,7 +59,8 @@ __all__ = [
     "elliptic", "div_eps_grad", "charge_density", "composite_rhs",
     "electric_field_from_potential", "EllipticSolver", "EllipticModel",
     "Ionization", "Collision", "ThermalExchange",
-    "PythonFlux", "time", "model", "math", "physics", "lib", "mesh",
+    "PythonFlux", "Profile", "PerformanceSummary",
+    "time", "model", "math", "physics", "lib", "mesh",
     "params", "output", "external", "fields", "linalg", "solvers",
     "abi_key", "capabilities", "inspect_capabilities", "inspect_amr",
     "set_threads", "has_kokkos", "parallel_info", "doctor",
