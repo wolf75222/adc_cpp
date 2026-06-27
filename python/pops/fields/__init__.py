@@ -15,13 +15,15 @@ shortcuts :class:`PoissonProblem` / :class:`ScreenedPoissonProblem` /
 Everything is inert; the runtime materialises and solves after validation. This is the
 top-level authoring package and is DISTINCT from the ``pops.lib.fields`` preset catalog.
 """
-from .problem import FieldProblem
+from .problem import FieldProblem, SolveCadence
 from .poisson import (PoissonProblem, ScreenedPoissonProblem,
                       AnisotropicPoissonProblem)
-from . import bcs, rhs, coefficients, nullspace, aux
+from .policies import FieldSolvePolicy, HoldPrevious, Recompute
+from . import bcs, rhs, coefficients, nullspace, aux, policies
 
 __all__ = [
-    "FieldProblem", "PoissonProblem", "ScreenedPoissonProblem",
+    "FieldProblem", "SolveCadence", "PoissonProblem", "ScreenedPoissonProblem",
     "AnisotropicPoissonProblem",
-    "bcs", "rhs", "coefficients", "nullspace", "aux",
+    "FieldSolvePolicy", "HoldPrevious", "Recompute",
+    "bcs", "rhs", "coefficients", "nullspace", "aux", "policies",
 ]

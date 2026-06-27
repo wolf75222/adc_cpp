@@ -7,9 +7,11 @@ compute nothing in Python. For the principle behind them (Python describes, C++ 
 string algorithm selectors) see {doc}`../concepts/typed-api`.
 
 ```{note}
-`pops.solvers` and `pops.linalg` are forthcoming; the linear solvers and preconditioners still
-live under `pops.lib` (see {doc}`typed-bricks` and {doc}`custom-solvers`) pending their
-relocation.
+`pops.linalg` (the abstract algebra) and `pops.solvers` (the concrete C++ solver descriptors:
+`elliptic.GeometricMG` / `FFT`, `krylov.CG` / `GMRES` / ..., `nonlinear.Newton`, `schur`, and
+`preconditioners`) both exist. The linear solvers and preconditioners now live under
+`pops.solvers`; `pops.lib.solvers` is a thin back-compat shim that re-exports them, and the
+custom-solver authoring DSL (see {doc}`custom-solvers`) stays under `pops.lib.solvers`.
 ```
 
 ## `pops.numerics`: fluxes, reconstruction, limiters

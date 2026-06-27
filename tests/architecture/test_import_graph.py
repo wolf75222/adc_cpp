@@ -9,10 +9,11 @@ The sub-packages form a directed acyclic dependency stack:
     mesh      -> (nothing)                       (Spec 5: pure mesh/layout/AMR descriptors)
     numerics  -> (nothing)                       (Spec 5: discretisation descriptors)
     linalg    -> (nothing)                       (Spec 5: abstract algebra descriptors)
+    solvers   -> (nothing)                       (Spec 5: linear/nonlinear/elliptic solvers)
     moments   -> ir                              (Spec 5: moment-model toolkit)
     diagnostics -> linalg                        (Spec 5: Norm takes a typed norm kind)
     params / output / external -> (nothing)      (Spec 5: inert descriptors)
-    lib       -> ir, model, time, physics, moments
+    lib       -> ir, model, time, physics, moments, solvers
     codegen   -> ir, model, physics, time, lib   (lowering, no _pops at module scope)
     runtime   -> everything, and is the ONLY layer allowed to import _pops
 
@@ -44,6 +45,11 @@ ALLOWED = {
     # Spec 5 sec.5.6: pops.linalg names the algebra (A x = b, operators, norms, reductions).
     # It imports only the flat pops.descriptors module (not a tracked layer) -> no edges.
     "linalg": set(),
+    # Spec 5 sec.5.7: pops.solvers is the linear / nonlinear / Schur / elliptic solver +
+    # preconditioner catalog. Every module imports only the flat pops.descriptors module (not a
+    # tracked layer) and its own sub-packages (same layer, not an edge) -> no edges. The
+    # custom-solver authoring DSL stays in pops.lib.solvers, so pops.solvers never imports lib.
+    "solvers": set(),
     # Spec 5 Phase E: pops.fields authoring imports only pops.descriptors + pops.math at
     # module scope. fields.aux re-exports pops.mesh.aux.AuxHalo via a LAZY module __getattr__
     # (in-function import), so it adds no module-scope mesh edge -> ALLOWED stays empty.
@@ -55,7 +61,8 @@ ALLOWED = {
     "params": set(),
     "output": set(),
     "external": set(),
-    "lib": {"ir", "model", "time", "physics", "moments"},  # lib.models wraps pops.moments
+    # lib.models wraps pops.moments; the lib.solvers shim re-exports pops.solvers (downward edge).
+    "lib": {"ir", "model", "time", "physics", "moments", "solvers"},
     "codegen": {"ir", "model", "physics", "time", "lib"},
     "runtime": {"ir", "model", "physics", "time", "lib", "mesh", "codegen"},
 }

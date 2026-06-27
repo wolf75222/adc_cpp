@@ -13,18 +13,19 @@ The relocated central catalogs now live in:
 * moments tools -> :mod:`pops.moments`
 * diagnostics -> :mod:`pops.diagnostics`
 * the brick descriptor -> :mod:`pops.descriptors`
+* linear / nonlinear / Schur / elliptic solvers + preconditioners -> :mod:`pops.solvers`
 
-TRANSITIONAL (Spec 5 Phase A2): ``spatial`` / ``fields`` / ``solvers`` /
-``preconditioners`` are still re-exported here until they move to
-:mod:`pops.numerics` / :mod:`pops.fields` / :mod:`pops.solvers` / :mod:`pops.linalg`
-(held back so the in-flight unified-install path is not disturbed). New code should
-not rely on these ``pops.lib`` names.
+The ``solvers`` / ``preconditioners`` names are re-exported here from :mod:`pops.solvers`
+via the :mod:`pops.lib.solvers` shim (the custom-solver authoring DSL still lives there).
+
+TRANSITIONAL (Spec 5 Phase A2): ``spatial`` / ``fields`` are still re-exported here until
+they move to :mod:`pops.numerics` / :mod:`pops.fields` (held back so the in-flight
+unified-install path is not disturbed). New code should not rely on these ``pops.lib`` names.
 """
 from .spatial import spatial
 from .fields import fields
 from .solvers import (solvers, solver, SolverContext, SolverIR,
-                      build_solver_ir, generate_solver_cpp)
-from .solvers.preconditioners import preconditioners
+                      build_solver_ir, generate_solver_cpp, preconditioners)
 from . import time
 from . import models
 

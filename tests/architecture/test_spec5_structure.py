@@ -20,6 +20,7 @@ CENTRAL_PACKAGES = (
     "external",      # compiled-brick references
     "fields",        # typed elliptic field-problem authoring (Spec 5 Phase E)
     "linalg",        # abstract algebra: names A x = b (Spec 5 sec.5.6)
+    "solvers",       # linear / nonlinear / Schur / elliptic solver catalog (Spec 5 sec.5.7)
 )
 
 # Catalogs Spec 5 moves OUT of pops.lib (no longer their own modules under lib/).
