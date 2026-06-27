@@ -36,6 +36,7 @@ custom-solvers
 moment-models
 cpp-api
 backend-matrix
+environment-variables
 known-limitations
 bibliography
 ```
