@@ -13,9 +13,10 @@ with ``P.solve_linear`` (BiCGStab) -- mirroring the native ``CondensedSchurSourc
       div(flux) structure of the condensed Poisson operator on the WIDE-stencil Laplacian), checked
       against an offline NumPy CG on the SAME discrete operator (like divergence_solve.py);
   (b) shows ``pops.lib.time.condensed_schur(P, "blk", alpha=1.0, theta=1.0)`` lowering the full
-      assemble / solve / reconstruct chain, and ``theta != 1`` (ADC-427) lowering it too. The
-      end-to-end parity vs an offline reference is in ``python/tests/test_time_condensed_schur.py``; the
-      native ``pops.CondensedSchur`` source stepper stays fully supported.
+      assemble / solve / reconstruct chain, ``theta != 1`` adding the n+1 extrapolation (ADC-427), and a
+      theta outside ``(0, 1]`` being rejected. The end-to-end parity vs an offline reference is in
+      ``python/tests/test_time_condensed_schur.py``; the native ``pops.CondensedSchur`` source stepper
+      stays fully supported.
 
 The wide-stencil centered div(grad) is the Laplacian (x(i+2) - 2 x(i) + x(i-2))/(4 h^2); A is a
 well-posed SPD Helmholtz operator on it. Run::
@@ -116,22 +117,37 @@ def offline_cg(apply, b, tol=1e-10, max_iter=2000):
 
 def show_macro():
     """(b) condensed_schur (ADC-421) lowers the condensed-Schur source stage to the full anisotropic
-    assemble / solve / reconstruct chain, at theta == 1 and (ADC-427) at theta != 1."""
+    assemble / solve / reconstruct chain; theta != 1 adds the n+1 extrapolation (ADC-427), and a theta
+    outside (0, 1] is rejected."""
+    chain = ("ctx.assemble_schur_coeffs", "ctx.assemble_schur_rhs",
+             "ctx.apply_laplacian_coeff", "ctx.schur_reconstruct")
+
     P = adctime.Program("condensed_schur_macro")
     libtime.condensed_schur(P, "blk", alpha=1.0, theta=1.0)
-    src = P.emit_cpp_program()
-    have_chain = all(frag in src for frag in ("ctx.assemble_schur_coeffs", "ctx.assemble_schur_rhs",
-                                              "ctx.apply_laplacian_coeff", "ctx.schur_reconstruct"))
+    have_chain = all(frag in P.emit_cpp_program() for frag in chain)
     print("condensed_schur(theta=1) lowers the full coeff/RHS/solve/reconstruct chain:",
           "yes" if have_chain else "NO")
-    # theta != 1 is supported (ADC-427): it lowers the same chain (the n+1 extrapolation is wired).
-    Q = adctime.Program("condensed_schur_theta")
-    libtime.condensed_schur(Q, "blk", alpha=1.0, theta=0.5)
-    have_theta = all(frag in Q.emit_cpp_program()
-                     for frag in ("ctx.assemble_schur_coeffs", "ctx.schur_reconstruct"))
-    print("condensed_schur(theta=0.5) lowers too (theta != 1 supported, ADC-427):",
-          "yes" if have_theta else "NO")
-    return have_chain and have_theta
+
+    # theta != 1 (ADC-427) lowers the same chain plus the n+1 extrapolation (the schur_extrap affine).
+    Ph = adctime.Program("condensed_schur_macro_theta")
+    libtime.condensed_schur(Ph, "blk", alpha=1.0, theta=0.5)
+    src_half = Ph.emit_cpp_program()
+    have_extrap = all(frag in src_half for frag in chain) and "schur_extrap" in src_half
+    print("condensed_schur(theta=0.5) lowers the chain plus the n+1 extrapolation:",
+          "yes" if have_extrap else "NO")
+
+    # theta outside (0, 1] is rejected (a ValueError now, not the old deferred NotImplementedError).
+    try:
+        libtime.condensed_schur(adctime.Program("p"), "blk", alpha=1.0, theta=1.5)
+    except ValueError as exc:
+        rejects = True
+        print("condensed_schur(theta=1.5) raises ValueError (theta out of (0, 1]):")
+        print("  %s" % str(exc)[:160])
+    else:
+        rejects = False
+        print("UNEXPECTED: condensed_schur(theta=1.5) did not raise")
+
+    return have_chain and have_extrap and rejects
 
 
 def main():
