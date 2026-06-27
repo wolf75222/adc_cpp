@@ -69,6 +69,10 @@ def test_amr_layout_report_levels_ratio_and_policies():
     names = {p["slot"]: p["name"] for p in d["policies"]}
     assert names["regrid"] == "RegridEvery"
     assert names["refine"] == "TagUnion"
+    # The expanded criterion rows name each tagged subject (not just the union count).
+    crit_subjects = " ".join(
+        str(p["options"]) for p in d["policies"] if p["slot"] == "refine.criterion")
+    assert "rho" in crit_subjects and "phi" in crit_subjects
 
 
 def test_amr_report_print_is_short_and_deterministic():
