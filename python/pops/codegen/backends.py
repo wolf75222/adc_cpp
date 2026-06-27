@@ -145,15 +145,18 @@ def lower_backend(backend):
         backend: A backend string OR a typed backend descriptor (``Production`` / ``AOT`` / ``JIT``).
 
     Returns:
-        The canonical backend string the ``_BACKENDS`` table keys on.
+        The canonical backend string the ``_BACKENDS`` table keys on; a typed descriptor is
+        lowered, and any other value (string, ``None``, ...) is returned UNCHANGED so the compile
+        entry point's existing ``backend not in _BACKENDS`` guard raises the same ``ValueError`` it
+        always has for an unknown/None backend (transparent coercion -- it never introduces a new
+        rejection of its own).
     """
-    if isinstance(backend, str):
-        return backend
     if isinstance(backend, _Backend):
         return backend.lower()
-    raise TypeError(
-        "backend must be a string (\"production\"/\"aot\"/\"prototype\"/\"auto\") or a typed "
-        "pops.codegen backend descriptor (Production()/AOT()/JIT()); got %r" % (backend,))
+    # str / None / anything else: pass through untouched. The downstream _BACKENDS validation in
+    # compile_model / compile_problem is the single source of the "unknown backend" ValueError, so
+    # the legacy string + None error paths stay byte-identical to before this coercion was added.
+    return backend
 
 
 __all__ = ["Production", "AOT", "JIT", "lower_backend", "BACKEND_DESCRIPTORS"]

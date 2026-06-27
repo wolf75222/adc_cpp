@@ -5,8 +5,9 @@ These checks pin the typed backend/platform surface added under epic ADC-479:
   - the backend descriptors (Production / AOT / JIT) lower to the legacy backend string
     ("production" / "aot" / "prototype") the compile drivers already key on, and expose the same
     token via ``.scheme``;
-  - ``lower_backend`` is ADDITIVE: a plain string passes through unchanged (existing consumers keep
-    working) while a typed descriptor lowers to its string; a bad type raises a clear TypeError;
+  - ``lower_backend`` is ADDITIVE and TRANSPARENT: a typed descriptor lowers to its string, while a
+    plain string / None / any other value passes through unchanged so the compile driver's existing
+    ``backend not in _BACKENDS`` guard stays the single source of the unknown-backend ValueError;
   - the consumer (``compile_problem`` / ``compile_model``) accepts BOTH a string and a typed
     backend -- a typed AOT() hits the SAME production-only guard as the string "aot", proving the
     lowering runs before the guard;
@@ -79,11 +80,15 @@ def test_lower_backend_lowers_typed():
     assert lower_backend(JIT()) == "prototype"
 
 
-def test_lower_backend_rejects_bad_type():
-    with pytest.raises(TypeError, match="backend must be a string"):
-        lower_backend(123)
-    with pytest.raises(TypeError, match="backend must be a string"):
-        lower_backend(None)
+def test_lower_backend_passes_non_descriptor_through():
+    # lower_backend is a TRANSPARENT coercion: it lowers a typed descriptor and returns anything
+    # else (None, a wrong type, an unknown string) UNCHANGED, so the compile entry point's existing
+    # `backend not in _BACKENDS` guard stays the single source of the unknown-backend ValueError.
+    # A guardrail such as test_dsl_compile_facade passes backend=None expecting that ValueError, so
+    # lower_backend must NOT pre-empt it with a TypeError of its own.
+    assert lower_backend(None) is None
+    assert lower_backend(123) == 123
+    assert lower_backend("nope") == "nope"
 
 
 # --- the consumer accepts BOTH a string and a typed backend -----------------------------------
