@@ -19,6 +19,7 @@ CENTRAL_PACKAGES = (
     "output",        # output/checkpoint policies
     "external",      # compiled-brick references
     "fields",        # typed elliptic field-problem authoring (Spec 5 Phase E)
+    "linalg",        # abstract algebra: names A x = b (Spec 5 sec.5.6)
 )
 
 # Catalogs Spec 5 moves OUT of pops.lib (no longer their own modules under lib/).

@@ -8,6 +8,7 @@ The sub-packages form a directed acyclic dependency stack:
     time      -> ir, model
     mesh      -> (nothing)                       (Spec 5: pure mesh/layout/AMR descriptors)
     numerics  -> (nothing)                       (Spec 5: discretisation descriptors)
+    linalg    -> (nothing)                       (Spec 5: abstract algebra descriptors)
     moments   -> ir                              (Spec 5: moment-model toolkit)
     diagnostics / params / output / external -> (nothing)   (Spec 5: inert descriptors)
     lib       -> ir, model, time, physics, moments
@@ -39,6 +40,9 @@ ALLOWED = {
     # external/fields import only the flat pops.descriptors / pops.math modules (not tracked
     # layers); moments imports the symbolic pops.ir. None import the runtime.
     "numerics": set(),
+    # Spec 5 sec.5.6: pops.linalg names the algebra (A x = b, operators, norms, reductions).
+    # It imports only the flat pops.descriptors module (not a tracked layer) -> no edges.
+    "linalg": set(),
     # Spec 5 Phase E: pops.fields authoring imports only pops.descriptors + pops.math at
     # module scope. fields.aux re-exports pops.mesh.aux.AuxHalo via a LAZY module __getattr__
     # (in-function import), so it adds no module-scope mesh edge -> ALLOWED stays empty.
