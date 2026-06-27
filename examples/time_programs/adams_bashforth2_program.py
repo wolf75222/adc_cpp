@@ -79,22 +79,24 @@ def main():
         return 0
     try:
         compiled = pops.compile_problem(model=source_model("ab2_prog"), time=ab2_program())
-        block_model = source_model("ab2_block").compile(backend="production")
     except RuntimeError as exc:
         print("skip adams_bashforth2_program (compile_problem could not build the .so: %s)"
               % str(exc)[:160])
         return 0
 
-    sim = pops.System(n=n, L=1.0, periodic=True)
-    sim.add_equation("blk", block_model,
-                     spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
-                     time=pops.Explicit(method="euler"))
     x = (np.arange(n) + 0.5) / n
     X, Y = np.meshgrid(x, x, indexing="ij")
     rho0 = 1.0 + 0.3 * np.sin(2 * np.pi * X) * np.cos(2 * np.pi * Y)
-    sim.set_state("blk", np.stack([rho0]))
 
-    sim.install_program(compiled.so_path)
+    # Compiled path via the unified headline entry: install() pre-resolves the board Model (compiling
+    # it to the block), wires its initial state, then installs the compiled time Program -- in one call.
+    # The block carries no Poisson coupling (zero flux + a linear source), so no solvers= is needed.
+    sim = pops.System(n=n, L=1.0, periodic=True)
+    sim.install(compiled,
+                instances={"blk": {"model": source_model("ab2_block"),
+                                   "spatial": pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                                   "time": pops.Explicit(method="euler"),
+                                   "initial": np.stack([rho0])}})
     dt = 0.01
     nsteps = 5
     for _ in range(nsteps):

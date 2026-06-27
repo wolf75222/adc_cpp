@@ -104,9 +104,17 @@ def predictor_corrector_program(name="predictor_corrector_poisson_lorentz"):
     return P
 
 
+def initial_state():
+    x = (np.arange(N) + 0.5) / N
+    X, Y = np.meshgrid(x, x, indexing="ij")
+    rho = 1.0 + 0.3 * np.sin(2 * np.pi * X) * np.cos(2 * np.pi * Y)
+    return np.stack([rho, 0.4 * rho, -0.2 * rho])
+
+
 def make_sim(model):
-    """A System carrying ONE block (the given DSL model, production backend) + shared Poisson + B_z.
-    Returns (sim, U0) with U0 the initial conservative state (n_vars, N, N)."""
+    """The native reference System carrying ONE block (the given DSL model, production backend) +
+    shared Poisson + B_z, via the lower-level add_equation path. Returns (sim, U0) with U0 the initial
+    conservative state (n_vars, N, N)."""
     sim = pops.System(n=N, L=1.0, periodic=True)
     compiled = model.compile(backend="production")
     sim.add_equation("plasma", compiled,
@@ -114,10 +122,7 @@ def make_sim(model):
                      time=pops.Explicit(method="euler"))
     sim.set_poisson("charge_density", "geometric_mg")
     sim.set_magnetic_field(BZ * np.ones(N * N))  # constant B_z over the grid
-    x = (np.arange(N) + 0.5) / N
-    X, Y = np.meshgrid(x, x, indexing="ij")
-    rho = 1.0 + 0.3 * np.sin(2 * np.pi * X) * np.cos(2 * np.pi * Y)
-    U0 = np.stack([rho, 0.4 * rho, -0.2 * rho])
+    U0 = initial_state()
     sim.set_state("plasma", U0)
     return sim, U0
 
@@ -152,14 +157,24 @@ def main():
     try:
         compiled = pops.compile_problem(model=named_source_model("pc_prog"),
                                        time=predictor_corrector_program())
-        sim, U0 = make_sim(named_source_model("pc_block"))
         ref = make_sim(default_source_model("pc_ref_block"))[0]
     except RuntimeError as exc:
         print("skip predictor_corrector_poisson_lorentz (compile_problem could not build the .so: %s)"
               % str(exc)[:160])
         return 0
 
-    sim.install_program(compiled.so_path)
+    U0 = initial_state()
+    # Compiled path via the unified headline entry: install() pre-resolves the board Model, wires its
+    # initial state, the B_z aux field and the Poisson solver, then installs the compiled time Program.
+    sim = pops.System(n=N, L=1.0, periodic=True)
+    sim.install(compiled,
+                instances={"plasma": {"model": named_source_model("pc_block"),
+                                      "spatial": pops.FiniteVolume(limiter="none",
+                                                                   riemann="rusanov"),
+                                      "time": pops.Explicit(method="euler"),
+                                      "initial": U0}},
+                aux={"B_z": BZ * np.ones(N * N)},
+                solvers={"phi": pops.lib.fields.GeometricMG()})
     sim.step(DT)
     U_pc = np.array(sim.get_state("plasma"))
 

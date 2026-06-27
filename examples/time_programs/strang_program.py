@@ -63,17 +63,24 @@ def strang_program(name="strang_example", block="ions"):
     return P
 
 
+N = 24
+
+
+def initial_state():
+    x = (np.arange(N) + 0.5) / N
+    X, Y = np.meshgrid(x, x, indexing="ij")
+    rho = 1.0 + 0.3 * np.sin(2 * np.pi * X) * np.cos(2 * np.pi * Y)
+    return np.stack([rho, 0.4 * rho, -0.2 * rho])
+
+
 def make_sim():
-    n = 24
-    sim = pops.System(n=n, L=1.0, periodic=True)
+    """The native reference System (lower-level add_block path); driven by set_time_scheme('strang')."""
+    sim = pops.System(n=N, L=1.0, periodic=True)
     sim.add_block("ions", transport_model(),
                   spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
                   time=pops.Explicit(method="euler"))
     sim.set_poisson("charge_density", "geometric_mg")  # inert: BackgroundDensity n0=0, flux reads no phi
-    x = (np.arange(n) + 0.5) / n
-    X, Y = np.meshgrid(x, x, indexing="ij")
-    rho = 1.0 + 0.3 * np.sin(2 * np.pi * X) * np.cos(2 * np.pi * Y)
-    sim.set_state("ions", np.stack([rho, 0.4 * rho, -0.2 * rho]))
+    sim.set_state("ions", initial_state())
     return sim
 
 
@@ -95,9 +102,15 @@ def main():
     native = make_sim()
     native._s.set_time_scheme("strang")
 
-    # Compiled Strang program: installed, driven by sim.step(dt).
-    prog = make_sim()
-    prog.install_program(compiled.so_path)
+    # Compiled Strang program via the unified headline entry: install() wires the block instance, its
+    # initial state and the (inert) Poisson solver, then installs the compiled time Program.
+    prog = pops.System(n=N, L=1.0, periodic=True)
+    prog.install(compiled,
+                 instances={"ions": {"model": transport_model(),
+                                     "spatial": pops.FiniteVolume(limiter="none",
+                                                                  riemann="rusanov"),
+                                     "initial": initial_state()}},
+                 solvers={"phi": pops.lib.fields.GeometricMG()})
 
     for _ in range(nstep):
         native.step(dt)

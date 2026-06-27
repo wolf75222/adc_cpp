@@ -101,7 +101,15 @@ def default_source_model(name="opfirst_ref"):
     return m
 
 
+def initial_state():
+    x = (np.arange(N) + 0.5) / N
+    xx, yy = np.meshgrid(x, x, indexing="ij")
+    rho = 1.0 + 0.3 * np.sin(2 * np.pi * xx) * np.cos(2 * np.pi * yy)
+    return np.stack([rho, 0.4 * rho, -0.2 * rho])
+
+
 def make_sim(block_model):
+    """The native reference System (lower-level add_equation path) + shared Poisson + B_z."""
     sim = pops.System(n=N, L=1.0, periodic=True)
     compiled = block_model.compile(backend="production")
     sim.add_equation("plasma", compiled,
@@ -109,10 +117,7 @@ def make_sim(block_model):
                      time=pops.Explicit(method="euler"))
     sim.set_poisson("charge_density", "geometric_mg")
     sim.set_magnetic_field(BZ * np.ones(N * N))
-    x = (np.arange(N) + 0.5) / N
-    xx, yy = np.meshgrid(x, x, indexing="ij")
-    rho = 1.0 + 0.3 * np.sin(2 * np.pi * xx) * np.cos(2 * np.pi * yy)
-    u0 = np.stack([rho, 0.4 * rho, -0.2 * rho])
+    u0 = initial_state()
     sim.set_state("plasma", u0)
     return sim, u0
 
@@ -142,14 +147,25 @@ def main():
     try:
         mod = operator_module()
         compiled = pops.compile_problem(model=mod, time=operator_first_program(mod))
-        sim, u0 = make_sim(mod.to_dsl())                  # the Module IS the block model
         ref = make_sim(default_source_model())[0]
     except RuntimeError as exc:
         print("skip predictor_corrector_operator_first (compile_problem could not build the .so: %s)"
               % str(exc)[:160])
         return 0
 
-    sim.install_program(compiled.so_path)
+    u0 = initial_state()
+    # Compiled path via the unified headline entry: install() pre-resolves the Module (lowered to its
+    # dsl block model via to_dsl), wires its initial state, the B_z aux and the Poisson solver, then
+    # installs the compiled time Program. The Module IS the block model.
+    sim = pops.System(n=N, L=1.0, periodic=True)
+    sim.install(compiled,
+                instances={"plasma": {"model": mod.to_dsl(),
+                                      "spatial": pops.FiniteVolume(limiter="none",
+                                                                   riemann="rusanov"),
+                                      "time": pops.Explicit(method="euler"),
+                                      "initial": u0}},
+                aux={"B_z": BZ * np.ones(N * N)},
+                solvers={"phi": pops.lib.fields.GeometricMG()})
     sim.step(DT)
     u_pc = np.array(sim.get_state("plasma"))
 

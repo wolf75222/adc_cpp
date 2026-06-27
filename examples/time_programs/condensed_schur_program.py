@@ -13,7 +13,7 @@ with ``P.solve_linear`` (BiCGStab) -- mirroring the native ``CondensedSchurSourc
       div(flux) structure of the condensed Poisson operator on the WIDE-stencil Laplacian), checked
       against an offline NumPy CG on the SAME discrete operator (like divergence_solve.py);
   (b) shows ``pops.lib.time.condensed_schur(P, "blk", alpha=1.0, theta=1.0)`` lowering the full
-      assemble / solve / reconstruct chain, and the deferred ``theta != 1`` extrapolation raising. The
+      assemble / solve / reconstruct chain, and ``theta != 1`` (ADC-427) lowering it too. The
       end-to-end parity vs an offline reference is in ``python/tests/test_time_condensed_schur.py``; the
       native ``pops.CondensedSchur`` source stepper stays fully supported.
 
@@ -115,23 +115,23 @@ def offline_cg(apply, b, tol=1e-10, max_iter=2000):
 
 
 def show_macro():
-    """(b) std.condensed_schur (ADC-421) lowers the theta == 1 condensed-Schur source stage to the full
-    anisotropic assemble / solve / reconstruct chain; the deferred theta != 1 extrapolation raises."""
+    """(b) condensed_schur (ADC-421) lowers the condensed-Schur source stage to the full anisotropic
+    assemble / solve / reconstruct chain, at theta == 1 and (ADC-427) at theta != 1."""
     P = adctime.Program("condensed_schur_macro")
     libtime.condensed_schur(P, "blk", alpha=1.0, theta=1.0)
     src = P.emit_cpp_program()
     have_chain = all(frag in src for frag in ("ctx.assemble_schur_coeffs", "ctx.assemble_schur_rhs",
                                               "ctx.apply_laplacian_coeff", "ctx.schur_reconstruct"))
-    print("std.condensed_schur(theta=1) lowers the full coeff/RHS/solve/reconstruct chain:",
+    print("condensed_schur(theta=1) lowers the full coeff/RHS/solve/reconstruct chain:",
           "yes" if have_chain else "NO")
-    try:
-        libtime.condensed_schur(adctime.Program("p"), "blk", alpha=1.0, theta=0.5)
-    except NotImplementedError as exc:
-        print("std.condensed_schur(theta != 1) raises (deferred n+1 extrapolation):")
-        print("  %s" % str(exc)[:160])
-        return have_chain
-    print("UNEXPECTED: std.condensed_schur(theta != 1) did not raise")
-    return False
+    # theta != 1 is supported (ADC-427): it lowers the same chain (the n+1 extrapolation is wired).
+    Q = adctime.Program("condensed_schur_theta")
+    libtime.condensed_schur(Q, "blk", alpha=1.0, theta=0.5)
+    have_theta = all(frag in Q.emit_cpp_program()
+                     for frag in ("ctx.assemble_schur_coeffs", "ctx.schur_reconstruct"))
+    print("condensed_schur(theta=0.5) lowers too (theta != 1 supported, ADC-427):",
+          "yes" if have_theta else "NO")
+    return have_chain and have_theta
 
 
 def main():
@@ -146,22 +146,24 @@ def main():
     # (a) the available primitives: a matrix-free Schur-like solve.
     try:
         compiled = pops.compile_problem(model=passive_model("cs_prog"), time=schur_like_program())
-        block_model = passive_model("cs_blk").compile(backend="production")
     except RuntimeError as exc:  # no compiler / no Kokkos visible / compile failed
         print("skip condensed_schur_program (compile_problem could not build the .so: %s)"
               % str(exc)[:160])
         return 0
 
-    sim = pops.System(n=n, L=1.0, periodic=True)
-    sim.add_equation("blk", block_model,
-                     spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
-                     time=pops.Explicit(method="euler"))
     x = (np.arange(n) + 0.5) / n
     X, Y = np.meshgrid(x, x, indexing="ij")
     b = 1.0 + 0.3 * np.sin(2 * np.pi * X) * np.cos(2 * np.pi * Y)  # the right-hand side (= U)
-    sim.set_state("blk", np.stack([b]))
 
-    sim.install_program(compiled.so_path)
+    # Compiled path via the unified headline entry: install() pre-resolves the board Model (compiling
+    # it to the block), wires its initial state, then installs the compiled time Program -- in one call.
+    # The passive block carries no Poisson coupling, so no solvers= is needed.
+    sim = pops.System(n=n, L=1.0, periodic=True)
+    sim.install(compiled,
+                instances={"blk": {"model": passive_model("cs_blk"),
+                                   "spatial": pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                                   "time": pops.Explicit(method="euler"),
+                                   "initial": np.stack([b])}})
     sim.step(0.01)  # dt is irrelevant -- the program is a pure solve
     phi_prog = np.array(sim.get_state("blk"))[0]
 

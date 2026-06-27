@@ -34,17 +34,24 @@ def gas_model():
                      elliptic=pops.BackgroundDensity(alpha=1.0, n0=0.0))
 
 
+N = 48
+
+
+def initial_state():
+    x = (np.arange(N) + 0.5) / N
+    X, Y = np.meshgrid(x, x, indexing="ij")
+    rho = 1.0 + 0.3 * np.sin(2 * np.pi * X) * np.cos(2 * np.pi * Y)
+    return np.stack([rho, 0.4 * rho, -0.2 * rho])
+
+
 def build_system(method="ssprk3"):
-    n = 48
-    sim = pops.System(n=n, L=1.0, periodic=True)
+    """The native reference System (lower-level add_block path), stepped natively for comparison."""
+    sim = pops.System(n=N, L=1.0, periodic=True)
     sim.add_block("plasma", gas_model(),
                   spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
                   time=pops.Explicit(method=method))
     sim.set_poisson("charge_density", "geometric_mg")
-    x = (np.arange(n) + 0.5) / n
-    X, Y = np.meshgrid(x, x, indexing="ij")
-    rho = 1.0 + 0.3 * np.sin(2 * np.pi * X) * np.cos(2 * np.pi * Y)
-    sim.set_state("plasma", np.stack([rho, 0.4 * rho, -0.2 * rho]))
+    sim.set_state("plasma", initial_state())
     return sim
 
 
@@ -67,8 +74,15 @@ def main():
         print("skip ssprk3_program (compile_problem could not build the .so: %s)" % str(exc)[:160])
         return 0
 
-    sim = build_system()
-    sim.install_program(compiled.so_path)
+    # Compiled path via the unified headline entry: install() wires the block instance, its initial
+    # state and the Poisson solver, then installs the compiled time Program -- in one call.
+    sim = pops.System(n=N, L=1.0, periodic=True)
+    sim.install(compiled,
+                instances={"plasma": {"model": gas_model(),
+                                      "spatial": pops.FiniteVolume(limiter="none",
+                                                                   riemann="rusanov"),
+                                      "initial": initial_state()}},
+                solvers={"phi": pops.lib.fields.GeometricMG()})
     sim.step(dt)
     U_prog = np.array(sim.get_state("plasma"))
 

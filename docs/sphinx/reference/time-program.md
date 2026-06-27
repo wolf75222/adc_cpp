@@ -92,10 +92,18 @@ m = pops.physics.facade.Model(...)                       # the physical model
 compiled = pops.compile_problem(model=m, time=P, backend="production", target="system")
 
 sim = pops.System(n=128, L=1.0, periodic=True)
-sim.add_block("plasma", m, spatial=pops.FiniteVolume(...), time=pops.Explicit(method="euler"))
-sim.install_program(compiled.so_path)        # dlopen + ABI-key check + install the program
-sim.step(dt)                                  # the compiled program drives the step, C++-side
+sim.install(compiled,                          # the unified headline entry (Spec 4 s23)
+            instances={"plasma": {"model": m,
+                                  "spatial": pops.FiniteVolume(...),
+                                  "initial": U0}},
+            solvers={"phi": pops.lib.fields.GeometricMG()})
+sim.step(dt)                                   # the compiled program drives the step, C++-side
 ```
+
+`sim.install` is the single entry that wires each named instance's initial state + spatial brick, the
+aux fields and the field solvers and installs the compiled program in one call, lowering to the
+lower-layer calls (`add_block`/`add_equation`, `set_poisson`, `set_magnetic_field`, `set_state`,
+`install_program`), which all stay available as the documented building blocks.
 
 `compile_problem` lowers the IR (`Program.emit_cpp_program`), compiles it against the pops headers
 with the **same Kokkos toolchain** as the loaded `_pops` module (so the `.so` is ABI-compatible and
