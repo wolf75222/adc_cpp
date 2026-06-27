@@ -202,3 +202,88 @@ from pops.codegen.math_options import StrictMath
 opt = Optimization(math=StrictMath())            # typed math mode
 opt = Optimization(cse=True, fuse_local_ops=True, math=StrictMath())
 ```
+
+## `pops.codegen` backends and `pops.runtime.platforms`: typed routes (sec.8.15)
+
+The compile backend and the execution platform are typed descriptors, not strings. The three
+backends `pops.codegen.Production()` (native zero-copy loader, MPI + AMR capable, the only
+`target="amr_system"` path), `pops.codegen.AOT()` (host-marshalled production path, the one that
+materializes runtime block params), and `pops.codegen.JIT()` (virtual-dispatch host prototyping)
+each `lower()` to the backend string the drivers already understand (`"production"` / `"aot"` /
+`"prototype"`). `pops.compile(problem, backend=...)` accepts EITHER a string or a typed descriptor
+(additive coercion via `pops.codegen.lower_backend`), so existing string callers keep working.
+
+The execution platform is a separate route: `pops.runtime.platforms.KokkosSerial` /
+`KokkosOpenMP` / `KokkosCuda` / `KokkosHIP` / `MPI`. Each is inert (it initializes no device, opens
+no communicator) and answers `available()` against the compiled `_pops` build flags, explaining the
+missing build flag when the device is absent (e.g. a Serial-only build cannot offer the OpenMP
+device). A backend records its target platform with `Production(platform=KokkosOpenMP())`; the
+platform does not change the lowered backend token (the device is chosen at build / run time).
+
+```python
+import pops
+from pops.codegen import Production, AOT, JIT
+from pops.runtime.platforms import KokkosSerial, KokkosOpenMP, MPI
+
+Production().lower()                             # 'production'
+AOT().lower()                                    # 'aot'
+JIT().lower()                                    # 'prototype'
+
+KokkosSerial().available().ok                    # True (host single-thread always present)
+MPI().available()                                # Availability.no(...) on a non-MPI build,
+                                                 # naming missing=['-DPOPS_USE_MPI=ON']
+
+backend = Production(platform=KokkosOpenMP())     # typed device, not platform="openmp"
+```
+
+For the build matrix and per-backend test coverage see {doc}`backend-matrix`; for the build flags
+themselves see {doc}`environment-variables`.
+
+## `pops.runtime.profile`: typed profiling (sec.12.5)
+
+`Profile` is a typed profiling LEVEL, not `profile="advanced"`: `pops.Profile.Basic()` (coarse
+phase timings + step / kernel counters) or `pops.Profile.Advanced()` (also the per-program-node
+timings and the scheduler / memory counters). It is inert: it carries no timers and declares only
+which native counters a level wants surfaced. `sim.profile(...)` is the context manager front door;
+profiling is OFF by default (a plain run enables nothing), and `sim.profile()` with no argument
+reads the level from the `POPS_PROFILE` environment variable (unset / `off` -> `Basic()`).
+
+`prof.summary()` returns a `pops.PerformanceSummary`: a printable wrapper over the native profile
+report with typed views (`by_program_node` / `by_native_brick` / `by_solver` / `by_memory`). The
+heavy per-brick / scheduler / memory counters are Kokkos-gated and only populate under a compiled
+`.so` step; a view the current build does not surface declares itself unavailable rather than
+faking a zero.
+
+```python
+import pops
+
+sim = pops.System(n=64, L=1.0, periodic=True)
+# ... add_block, set_poisson, set_density ...
+with sim.profile(pops.Profile.Basic()) as prof:
+    sim.run(0.1)
+print(prof.summary())                            # PerformanceSummary, off by default
+```
+
+## `print()` on the headline objects (sec.12.1)
+
+The headline objects carry a short, array-free `__str__` summary so `print(obj)` reports the shape,
+never a field-data dump: `pops.Spatial` (its limiter / flux / recon), `pops.time.Program` (its name,
+op count, and blocks), and `pops.System` / `pops.AmrSystem` (their installed block names).
+
+```python
+import pops
+import pops.time as T
+
+print(pops.Spatial())                            # Spatial(limiter=minmod, flux=rusanov, recon=conservative)
+print(T.Program("euler"))                        # Program(name='euler', ops=0, blocks=[])
+print(pops.System(n=64, L=1.0, periodic=True))   # System(blocks=[])
+print(pops.AmrSystem(n=64, L=1.0))               # AmrSystem(blocks=[])
+```
+
+## Typed native-brick constructors (sec.14.2.5)
+
+The native composition bricks expose typed constructors that name a `kind` with a type instead of
+a magic string, additively (the string form keeps working): `pops.FluidState.compressible()` /
+`pops.FluidState.isothermal()`, the Poisson boundary tokens `pops.Dirichlet()` / `pops.Neumann()` /
+`pops.Periodic()`, and `pops.ElectrostaticLorentzSchur(...)` for the (currently unique) condensed
+Schur kind. These are documented per brick in {doc}`native-bricks`; this page only points at them.
