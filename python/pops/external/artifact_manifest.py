@@ -237,6 +237,65 @@ def build_compiled_manifest(compiled):
         native_entrypoints=[], **caps_flags)
 
 
+# The NativeManifest fields the .so's ``pops_compiled_manifest()`` emits AUTHORITATIVELY (Spec 5
+# sec.13.12, #36): each comes from the model traits at the .so's OWN compile time, so it supersedes
+# the honest-None / caps-derived value when a real artifact is on disk. ``n_aux`` / ``n_params`` /
+# ``n_vars`` are surfaced via the related manifest fields (variables length, params split, aux list)
+# but the booleans + ghost_depth + roles + entrypoints below are the ones the .so adjudicates.
+_NATIVE_BOOL_FIELDS = ("supports_stride", "supports_partial_imex_mask", "supports_named_fields")
+
+
+def apply_native_manifest(manifest, native):
+    """Overlay a .so's authoritative ``pops_compiled_manifest()`` dict onto @p manifest (sec.13.12).
+
+    Replaces the honest-``None`` / Python-derived fields with the AUTHORITATIVE values the artifact
+    computed at its OWN compile time (the booleans ``supports_stride`` / ``supports_partial_imex_mask``
+    / ``supports_named_fields``, the ``abi_version``, ``ghost_depth``, ``roles`` and
+    ``native_entrypoints``). A field ABSENT from @p native is left untouched (an old / partial
+    manifest never erases a known value). @p native of ``None`` (an old .so without the symbol) is a
+    no-op: the manifest keeps its honest-None set -- graceful fallback, never fabricated. Mutates and
+    returns @p manifest."""
+    if not native:
+        return manifest
+    if "abi_version" in native:
+        manifest.abi_version = native["abi_version"]
+    if "ghost_depth" in native and manifest.ghost_depth is None:
+        manifest.ghost_depth = native["ghost_depth"]
+    for field in _NATIVE_BOOL_FIELDS:
+        if field in native:
+            setattr(manifest, field, bool(native[field]))
+    roles = native.get("roles")
+    if roles and manifest.roles is None:
+        manifest.roles = list(roles)
+    entrypoints = native.get("native_entrypoints")
+    if entrypoints:
+        manifest.native_entrypoints = list(entrypoints)
+    return manifest
+
+
+def load_native_manifest(so_path):
+    """The authoritative ``pops_compiled_manifest()`` dict of the .so at @p so_path (or ``None``).
+
+    A thin wrapper over :func:`pops.descriptors.load_compiled_manifest` (dlopens the ``.so``, reads
+    the exported C symbol). Imported function-locally so the ``external`` layer stays import-graph
+    clean and pulls in ``ctypes`` only on demand. Returns ``None`` for an old ``.so`` that does not
+    export the symbol (graceful fallback)."""
+    from pops.descriptors import load_compiled_manifest  # lazy: keep external's module scope clean
+    return load_compiled_manifest(so_path)
+
+
+def build_compiled_manifest_from_so(compiled, so_path):
+    """Build the rich manifest of @p compiled, then overlay the .so's authoritative facts (sec.13.12).
+
+    Combines :func:`build_compiled_manifest` (the metadata the handle carries) with
+    :func:`apply_native_manifest` (the artifact's own ``pops_compiled_manifest()``), so the fields the
+    C++ codegen now emits become REAL rather than honest-None. When @p so_path is an old ``.so``
+    without the symbol the manifest is identical to :func:`build_compiled_manifest` (graceful
+    fallback)."""
+    manifest = build_compiled_manifest(compiled)
+    return apply_native_manifest(manifest, load_native_manifest(so_path))
+
+
 # Spec 5 sec.13.12 maps each layout kind to the capability flag a compiled artifact must support
 # to bind under it. ``"amr"`` -> supports_amr, ``"uniform"`` -> supports_uniform.
 _LAYOUT_SUPPORT_FLAG = {"amr": "supports_amr", "uniform": "supports_uniform",
@@ -273,4 +332,5 @@ def check_layout_supported(manifest, layout_kind):
     return Availability.yes("%s=true" % flag_name)
 
 
-__all__ = ["CompiledArtifactManifest", "build_compiled_manifest", "check_layout_supported"]
+__all__ = ["CompiledArtifactManifest", "build_compiled_manifest", "check_layout_supported",
+           "apply_native_manifest", "load_native_manifest", "build_compiled_manifest_from_so"]

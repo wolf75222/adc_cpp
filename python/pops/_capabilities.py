@@ -17,23 +17,27 @@ class CapabilityEntry:
     """One row of the capability matrix: a catalogued descriptor's declared metadata.
 
     A plain value -- name / category / native_id / available (an ``Availability`` status string)
-    / requirements -- read from an inert descriptor. It computes nothing.
+    / requirements / source -- read from an inert descriptor. It computes nothing. ``source`` is
+    ``"descriptor"`` for a row read from the Python catalog and ``"native"`` for a row sourced
+    from the C++ ``_pops.module_capabilities()`` authoritative facts (Spec 5 sec.13.12).
     """
 
-    def __init__(self, name, category, native_id, available, requirements):
+    def __init__(self, name, category, native_id, available, requirements, source="descriptor"):
         self.name = name
         self.category = category
         self.native_id = native_id
         self.available = available
         self.requirements = dict(requirements or {})
+        self.source = source
 
     def to_dict(self):
         return {"name": self.name, "category": self.category, "native_id": self.native_id,
-                "available": self.available, "requirements": self.requirements}
+                "available": self.available, "requirements": self.requirements,
+                "source": self.source}
 
     def __repr__(self):
-        return ("CapabilityEntry(name=%r, category=%r, native_id=%r, available=%r)"
-                % (self.name, self.category, self.native_id, self.available))
+        return ("CapabilityEntry(name=%r, category=%r, native_id=%r, available=%r, source=%r)"
+                % (self.name, self.category, self.native_id, self.available, self.source))
 
 
 class CapabilityMatrix:
@@ -74,8 +78,8 @@ class CapabilityMatrix:
             lines.append("  [%s]" % category)
             for entry in self.by_category(category):
                 native = entry.native_id or "-"
-                lines.append("    %-18s available=%-7s native_id=%s"
-                             % (entry.name, entry.available, native))
+                lines.append("    %-18s available=%-7s source=%-10s native_id=%s"
+                             % (entry.name, entry.available, entry.source, native))
         return "\n".join(lines)
 
 
@@ -123,12 +127,97 @@ def _walk_class_catalog(category, classes):
         yield CapabilityEntry(cls.__name__, category, native, "context", {})
 
 
-def inspect_capabilities():
-    """Return the descriptor-sourced :class:`CapabilityMatrix` (Spec 5 sec.6).
+# Spec 5 sec.13.12: the descriptor layout entries whose availability the C++ source ADJUDICATES.
+# A native ``supports_uniform`` / ``supports_amr`` of ``False`` would make a layout descriptor that
+# reports itself available a SILENT lie; the cross-check forbids that. Keyed by descriptor name.
+_LAYOUT_NATIVE_FLAG = {"Uniform": "supports_uniform", "AMR": "supports_amr"}
 
-    Walks the available descriptor catalogs and reports one row per catalogued entry. PURE: it
-    imports only the inert authoring packages and instantiates each descriptor to read its
-    declared metadata; it NEVER imports ``_pops`` or runs a numeric loop.
+
+class CapabilityMismatchError(RuntimeError):
+    """A descriptor's declared availability disagrees with the C++ authoritative source (#36/#37).
+
+    Raised by :func:`inspect_capabilities` when the native ``_pops.module_capabilities()`` reports a
+    transport as UNAVAILABLE while the Python descriptor catalog still advertises it available. It
+    closes the Spec 5 sec.13.12 "Python-derived, not authoritative" gap: a descriptor can no longer
+    silently claim a capability the built module does not provide.
+    """
+
+
+def _module_capabilities():
+    """The C++ authoritative capability dict (``_pops.module_capabilities()``) or ``None``.
+
+    Lazily imports ``_pops`` (top-level then ``pops._pops``, mirroring the codegen toolchain) so the
+    module import graph stays acyclic and the catalog walk works with no compiled module present.
+    Returns ``None`` when ``_pops`` is unavailable or predates ``module_capabilities`` (old build):
+    the descriptor walk then proceeds WITHOUT the cross-check rather than failing -- a missing native
+    source is a graceful degradation, never a fabricated capability.
+    """
+    try:
+        import _pops as mod  # noqa: PLC0415 -- lazy: keeps this module's import graph acyclic
+    except Exception:
+        try:
+            from pops import _pops as mod  # noqa: PLC0415
+        except Exception:
+            return None
+    fn = getattr(mod, "module_capabilities", None)
+    if fn is None:  # an _pops built before this work: no authoritative source to cross-check against.
+        return None
+    try:
+        return dict(fn())
+    except Exception:
+        return None
+
+
+def _native_rows(native_caps):
+    """Native-sourced :class:`CapabilityEntry` rows from the C++ ``module_capabilities()`` dict.
+
+    One ``transport`` row per ``supports_*`` flag, ``source="native"``, ``available`` = ``"yes"`` /
+    ``"no"`` straight from the C++ boolean (no Python computation). These are the AUTHORITATIVE facts
+    the descriptor walk is checked against.
+    """
+    rows = []
+    for key in sorted(native_caps):
+        if not key.startswith("supports_"):
+            continue
+        status = "yes" if native_caps[key] else "no"
+        rows.append(CapabilityEntry(key, "transport", None, status, {}, source="native"))
+    return rows
+
+
+def _cross_check(entries, native_caps):
+    """Raise :class:`CapabilityMismatchError` if a descriptor disagrees with the C++ source (#36).
+
+    For each descriptor whose capability the native facts adjudicate (the layout entries, via
+    :data:`_LAYOUT_NATIVE_FLAG`), a descriptor that reports itself available while the C++ flag is
+    ``False`` is a silent lie -- FAIL LOUD. A descriptor reported unavailable / context-dependent is
+    never escalated (the no-false-positive discipline): the C++ source can only DEMOTE, never promote.
+    """
+    for entry in entries:
+        flag = _LAYOUT_NATIVE_FLAG.get(entry.name)
+        if flag is None or flag not in native_caps:
+            continue
+        descriptor_claims_available = entry.available in ("yes", "context")
+        if descriptor_claims_available and not native_caps[flag]:
+            raise CapabilityMismatchError(
+                "descriptor %r (category %r) reports available=%r but the C++ source "
+                "%s=False; the built module does not provide it (Spec 5 sec.13.12)"
+                % (entry.name, entry.category, entry.available, flag))
+
+
+def inspect_capabilities():
+    """Return the capability :class:`CapabilityMatrix`, cross-checked against the C++ source (sec.6).
+
+    Walks the available descriptor catalogs and reports one row per catalogued entry (``source =
+    "descriptor"``), THEN cross-checks the route-deciding entries against the authoritative C++
+    ``_pops.module_capabilities()`` facts and APPENDS those as ``source="native"`` rows (Spec 5
+    sec.13.12, #36): the capability VALUES now come from the C++ core, not a Python walk. A descriptor
+    that declares itself available while the C++ source reports the transport unavailable raises a
+    :class:`CapabilityMismatchError` (closing the silent-default-fallback gap).
+
+    The descriptor walk is PURE (only the inert authoring packages, no numeric loop). ``_pops`` is
+    imported LAZILY (inside the function) and ONLY for the cross-check, so the module import graph
+    stays acyclic; when ``_pops`` is absent or predates ``module_capabilities`` the walk proceeds
+    WITHOUT the native rows / cross-check rather than failing (graceful degradation).
     """
     from pops.numerics.riemann import riemann
     from pops.numerics.reconstruction import reconstruction
@@ -152,6 +241,11 @@ def inspect_capabilities():
         entries.extend(_walk_brick_catalog(fields))
     except ImportError:
         pass
+
+    native_caps = _module_capabilities()
+    if native_caps is not None:
+        _cross_check(entries, native_caps)
+        entries.extend(_native_rows(native_caps))
 
     return CapabilityMatrix(entries)
 
@@ -294,4 +388,4 @@ def inspect_amr(layout_or_context=None):
 
 
 __all__ = ["inspect_capabilities", "CapabilityMatrix", "CapabilityEntry",
-           "inspect_amr", "AmrReport"]
+           "CapabilityMismatchError", "inspect_amr", "AmrReport"]

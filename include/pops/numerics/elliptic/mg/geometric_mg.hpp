@@ -40,6 +40,7 @@
 #include <pops/mesh/layout/refinement.hpp>
 #include <pops/parallel/comm.hpp>
 
+#include <chrono>   // last_bottom_seconds(): self-time the coarsest (bottom) GS solve (Spec 5, ADC-479)
 #include <cstdio>   // POPS_TRACE_SOLVE_FIELDS: device diagnostic trace (#93), inert by default
 #include <cstdlib>  // getenv
 #include <functional>
@@ -222,6 +223,22 @@ class GeometricMG {
   const Geometry& geom() const { return lev_[0].geom; }
   int num_levels() const { return static_cast<int>(lev_.size()); }
 
+  // --- PER-SOLVE PROFILING STATS (Spec 5 sec.13.11.1, ADC-479 criteria 42/43) -------------------
+  // Cached by the most recent solve(rel_tol, max_cycles, abs_tol) call (the no-argument concept-level
+  // solve() funnels through it). The System reads these back at the field_solve seam to populate the
+  // elliptic-solver native counters WITHOUT threading a profiler into the deep numerics: chrono-only
+  // here, no profiler / Kokkos dependency. Additive accessors -- no existing path reads them, the
+  // default behavior is unchanged.
+  //   last_cycles():         V-cycles performed by the last solve (the value solve() returns).
+  //   last_residual():       final residual (infinity norm) reached by the last solve.
+  //   last_bottom_seconds(): wall-clock self-time of the coarsest-grid (bottom) Gauss-Seidel solves
+  //                          summed over the V-cycles of the last solve (steady_clock; host serial /
+  //                          per-rank; on a device backend a fence would be needed for an exact bottom
+  //                          time, deferred -- the counter stays an honest host-side measurement).
+  int last_cycles() const { return last_cycles_; }
+  Real last_residual() const { return last_residual_; }
+  double last_bottom_seconds() const { return last_bottom_seconds_; }
+
   // Activates VARIABLE permittivity eps(x): the operator goes from lap(phi)=f to
   // div(eps grad phi)=f. eps is a CELL-CENTERED field, evaluated by the
   // analytic function provided on EACH level of the hierarchy (like the mask
@@ -370,6 +387,12 @@ class GeometricMG {
   }
 
   void vcycle() { vcycle_rec(0, bc_); }
+  // ROMEO-ONLY (deferred): a Kokkos::Profiling::pushRegion("mg:vcycle")/popRegion() pair (with a
+  // Kokkos::fence() before popRegion) around this V-cycle would let Nsight attribute the GPU time on
+  // ROMEO. It is intentionally NOT added here: it needs a Kokkos include in a header the profiling
+  // design keeps Kokkos-free (chrono only, last_bottom_seconds()), and the host build (Serial-only
+  // conda Kokkos) gains nothing. Add it at the System/ProgramContext seam if Nsight attribution is
+  // wanted, not in this numerics header.
 
   // V-cycles until the residual is under the mixed floor (or max_cycles). Returns the number
   // of cycles performed. phi is kept between calls (warm start).
@@ -383,19 +406,29 @@ class GeometricMG {
   // typical of an OFF-STEP solve on an unchanged state): early-exit without cycling if r0 is below abs_tol.
   int solve(Real rel_tol, int max_cycles, Real abs_tol = Real(0)) {
     detail::mg_trace_mark("solve: before initial current_residual");
+    last_bottom_seconds_ = 0.0;  // reset the per-solve bottom self-time (accumulated by vcycle_rec)
     const Real r0 = current_residual();
     detail::mg_trace_mark("solve: after initial current_residual");
-    if (r0 <= abs_tol)
-      return 0;  // already under the floor (or zero); abs_tol=0 -> old test r0<=0
+    if (r0 <= abs_tol) {
+      last_cycles_ = 0;  // already under the floor (or zero); abs_tol=0 -> old test r0<=0
+      last_residual_ = r0;
+      return 0;
+    }
     const Real stop =
         (rel_tol * r0 > abs_tol) ? rel_tol * r0 : abs_tol;  // max(rel_tol*r0, abs_tol)
     for (int c = 1; c <= max_cycles; ++c) {
       detail::mg_trace_mark("solve: before vcycle");
       vcycle();
       detail::mg_trace_mark("solve: after vcycle");
-      if (current_residual() <= stop)
+      const Real r = current_residual();
+      if (r <= stop) {
+        last_cycles_ = c;
+        last_residual_ = r;
         return c;
+      }
     }
+    last_cycles_ = max_cycles;
+    last_residual_ = current_residual();
     return max_cycles;
   }
 
@@ -629,7 +662,15 @@ class GeometricMG {
       detail::mg_trace_mark("vcycle_rec(0): after gs_smooth(nu1)");
 
     if (l + 1 == static_cast<int>(lev_.size())) {
+      // BOTTOM solve = long Gauss-Seidel smoothing on the coarsest grid. Self-time it (chrono only,
+      // no profiler dependency here) and accumulate into the per-solve last_bottom_seconds_ (reset at
+      // the top of solve()): the System reads it back to attribute the coarsest-grid cost (Spec 5
+      // sec.13.11.1, ADC-479). Host serial / per-rank; the device-fence for an exact GPU bottom time is
+      // deferred (counter stays an honest host-side measurement).
+      const auto bottom_t0 = std::chrono::steady_clock::now();
       gs_smooth(L.phi, L.rhs, L.geom, bc, nbottom_, mk, ck, ep, kp, ey);  // bottom solve
+      const auto bottom_t1 = std::chrono::steady_clock::now();
+      last_bottom_seconds_ += std::chrono::duration<double>(bottom_t1 - bottom_t0).count();
       if (mk)
         zero_conductor(L.phi, L.mask);
       return;
@@ -671,6 +712,12 @@ class GeometricMG {
   bool has_cross_ = false;  // off-diagonal Axy/Ayx coefficients (FULL tensor) active
   Real abs_tol_ =
       Real(0);  // absolute floor of the no-argument solve() (0 = relative criterion only)
+  // PER-SOLVE PROFILING STATS (read back at the System field_solve seam, ADC-479 criteria 42/43).
+  // last_cycles_/last_residual_ are set by solve(); last_bottom_seconds_ is reset at the top of solve()
+  // and accumulated by vcycle_rec's bottom branch. 0 until the first solve (no cycle recorded yet).
+  int last_cycles_ = 0;
+  Real last_residual_ = Real(0);
+  double last_bottom_seconds_ = 0.0;
   std::function<Real(Real, Real)> levelset_;
   std::vector<MGLevel> lev_;
 };

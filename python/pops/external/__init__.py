@@ -11,8 +11,9 @@ from .bricks import CompiledBrickRef, ExternalBrick
 from .manifests import (register, register_manifest_file, read_manifest,
                         CompiledManifest)
 from .artifact_manifest import (CompiledArtifactManifest, build_compiled_manifest,
-                                 check_layout_supported)
-from pops.descriptors import load_cpp_library, external
+                                 check_layout_supported, apply_native_manifest,
+                                 load_native_manifest, build_compiled_manifest_from_so)
+from pops.descriptors import load_cpp_library, load_compiled_manifest, external
 
 from . import bricks, manifests, artifact_manifest
 
@@ -20,6 +21,7 @@ __all__ = [
     "CompiledBrickRef", "ExternalBrick",
     "register", "register_manifest_file", "read_manifest", "CompiledManifest",
     "CompiledArtifactManifest", "build_compiled_manifest", "check_layout_supported",
-    "load_cpp_library", "external",
+    "apply_native_manifest", "load_native_manifest", "build_compiled_manifest_from_so",
+    "load_cpp_library", "load_compiled_manifest", "external",
     "bricks", "manifests", "artifact_manifest",
 ]

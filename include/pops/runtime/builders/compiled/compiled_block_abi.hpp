@@ -11,7 +11,9 @@
 #include <pops/mesh/boundary/physical_bc.hpp>
 
 #include <pops/core/model/physical_model.hpp>  // aux_comps<Model>: aux channel width of the generated model
+#include <pops/core/state/variables.hpp>  // roles_meta<Model>: conservative/primitive role CSV (manifest)
 #include <pops/runtime/config/runtime_params.hpp>  // RuntimeParams: RUNTIME params (P7-b) carried by the ABI
+#include <pops/runtime/module_capabilities.hpp>  // kAbiVersion: per-artifact ABI revision (manifest)
 
 #include <string>
 #include <type_traits>
@@ -385,6 +387,89 @@ void poisson_rhs(const double* U, double* rhs_out, int n, const double* pvals = 
       rhs_out[static_cast<std::size_t>(j) * n + i] = r(i, j, 0);
 }
 
+/// A JSON array literal ``["a","b",...]`` from a comma-separated CSV (empty CSV -> ``[]``). The tokens
+/// are model role / entrypoint names (ASCII, no JSON-special characters), so a minimal quoter suffices;
+/// it keeps the manifest emitter free of the external-brick json_escape dependency.
+inline std::string csv_to_json_array(const std::string& csv) {
+  std::string out = "[";
+  std::size_t start = 0;
+  bool first = true;
+  while (start <= csv.size()) {
+    std::size_t comma = csv.find(',', start);
+    const std::string tok =
+        csv.substr(start, comma == std::string::npos ? std::string::npos : comma - start);
+    if (!tok.empty()) {
+      if (!first)
+        out += ',';
+      out += '"' + tok + '"';
+      first = false;
+    }
+    if (comma == std::string::npos)
+      break;
+    start = comma + 1;
+  }
+  out += ']';
+  return out;
+}
+
+/// The conservative-role CSV of @p Model, or an empty string if the model declares no roles. SFINAE so
+/// a model WITHOUT conservative_vars() (a bare scalar) yields ``""`` rather than a hard compile error.
+template <class Model>
+std::string model_cons_roles_csv() {
+  if constexpr (requires { Model::conservative_vars(); })
+    return roles_csv(Model::conservative_vars());
+  else
+    return std::string{};
+}
+
+/// The native entrypoint symbols a POPS_DEFINE_COMPILED_BLOCK .so exports, as a CSV. A FIXED list (the
+/// macro emits exactly these), surfaced in the manifest so a loader/inspector can name the ABI surface
+/// without dlsym-probing each symbol. The ``_p`` runtime-param variants and the optional projection /
+/// metadata symbols are included because the macro always emits them.
+inline std::string compiled_native_entrypoints_csv() {
+  return "pops_model_nvars,pops_compiled_naux,pops_compiled_nparams,pops_compiled_param_defaults,"
+         "pops_compiled_residual,pops_compiled_residual_p,pops_compiled_advance,"
+         "pops_compiled_advance_p,pops_compiled_max_speed,pops_compiled_max_speed_p,"
+         "pops_compiled_poisson_rhs,pops_compiled_poisson_rhs_p,pops_compiled_to_conservative,"
+         "pops_compiled_to_conservative_p,pops_compiled_to_primitive,pops_compiled_to_primitive_p,"
+         "pops_compiled_has_projection,pops_compiled_project_p,pops_compiled_manifest";
+}
+
+/// The per-artifact NativeManifest of @p Model as a JSON string (Spec 5 sec.13.12, criterion #36).
+///
+/// Computed at the .so's OWN compile time from the model traits, so the manifest is AUTHORITATIVE for
+/// that artifact (it cannot drift from the code that was compiled into it):
+///   - ``abi_version``  = pops::kAbiVersion (the capability-contract revision the .so was built with);
+///   - ``n_vars``       = Model::n_vars (conservative state width);
+///   - ``n_aux``        = aux_comps<Model>() (aux channel width the model reads);
+///   - ``n_params``     = model_nparams<Model>() (runtime parameters; 0 if none);
+///   - ``ghost_depth``  = block_n_ghost("weno5") (the MAX ghost depth the artifact may allocate; the
+///                        actual depth is bound at run by the limiter the loader passes -- this is the
+///                        honest upper envelope, never an under-report);
+///   - ``supports_stride`` = false (the AOT flat-array path hardcodes stride=1, cf. make_grid);
+///   - ``supports_partial_imex_mask`` = false (NO C++ path backs it -- reporting true would be a lie);
+///   - ``supports_named_fields`` = true (the named-aux transport exists, load_aux / aux_field);
+///   - ``roles``        = conservative-role names (empty array if the model declares none);
+///   - ``native_entrypoints`` = the extern "C" symbols this .so exports.
+template <class Model>
+std::string compiled_manifest_json() {
+  const std::string roles = csv_to_json_array(model_cons_roles_csv<Model>());
+  const std::string entrypoints = csv_to_json_array(compiled_native_entrypoints_csv());
+  std::string out = "{";
+  out += "\"abi_version\":" + std::to_string(kAbiVersion);
+  out += ",\"n_vars\":" + std::to_string(Model::n_vars);
+  out += ",\"n_aux\":" + std::to_string(aux_comps<Model>());
+  out += ",\"n_params\":" + std::to_string(model_nparams<Model>());
+  out += ",\"ghost_depth\":" + std::to_string(block_n_ghost("weno5"));
+  out += ",\"supports_stride\":false";
+  out += ",\"supports_partial_imex_mask\":false";
+  out += ",\"supports_named_fields\":true";
+  out += ",\"roles\":" + roles;
+  out += ",\"native_entrypoints\":" + entrypoints;
+  out += "}";
+  return out;
+}
+
 }  // namespace pops::compiled_block
 
 /// Defines the extern "C" ABI of the compiled block for the model @p MODEL (a top-level alias WITHOUT a
@@ -480,4 +565,12 @@ void poisson_rhs(const double* U, double* rhs_out, int n, const double* pvals = 
   extern "C" void pops_compiled_project_p(double* U, const double* aux, int n, const double* pvals, \
                                          int npar) {                                               \
     pops::compiled_block::pointwise_project<MODEL>(U, aux, n, pvals, npar);                         \
+  }                                                                                                \
+  /* Spec 5 sec.13.12 (#36): per-artifact NativeManifest JSON computed at THIS .so's compile time   \
+     from the model traits. A function-local static built once (valid for the process); a loader     \
+     reads it by dlsym. An old .so without this symbol falls back gracefully (the reader returns     \
+     None). */                                                                                       \
+  extern "C" const char* pops_compiled_manifest() {                                                 \
+    static const std::string manifest = pops::compiled_block::compiled_manifest_json<MODEL>();      \
+    return manifest.c_str();                                                                        \
   }

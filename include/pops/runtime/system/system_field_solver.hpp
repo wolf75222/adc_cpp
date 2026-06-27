@@ -499,6 +499,61 @@ class SystemFieldSolver {
     pops_sf_mark("ell_solve: after std::visit");
   }
 
+  // --- ELLIPTIC-SOLVER PROFILING COUNTERS (Spec 5 sec.13.11.1, ADC-479 criteria 42/43) ----------
+  // Read-back accessors for the per-solve stats of the ACTIVE cartesian elliptic solver, queried at
+  // the System solve_fields seam AFTER ell_solve()+device_fence() to populate the native profiler
+  // counters (mg_cycles / krylov_iters / mg_levels / elliptic_bottom). LOW-INVASIVE by design: the
+  // deep numerics never sees the profiler -- GeometricMG caches the stats per solve (chrono only) and
+  // we visit the variant here. Solvers that lack a notion (FFT: direct, no cycles/levels/iters)
+  // return 0 HONESTLY -- not every solver has these. nullopt ell_ (never solved) -> 0.
+  //
+  // krylov_iters is 0 on the cartesian field-solve path: the default Poisson uses GeometricMG (or a
+  // direct FFT), never a Krylov solver (the Krylov path lives in the condensed Schur SOURCE stage,
+  // which is not the ell_ elliptic solve). The counter is emitted for completeness / future Krylov
+  // elliptic backends; it stays an honest 0 here.
+  int last_mg_cycles() const {
+    if (!ell_)
+      return 0;
+    return std::visit(
+        [](const auto& e) -> int {
+          using T = std::decay_t<decltype(e)>;
+          if constexpr (std::is_same_v<T, GeometricMG>)
+            return e.last_cycles();
+          else
+            return 0;  // direct FFT solver: no V-cycles
+        },
+        *ell_);
+  }
+  int last_krylov_iters() const {
+    return 0;  // cartesian ell_ = GeometricMG / FFT, never a Krylov elliptic solver (see note above)
+  }
+  int last_num_levels() const {
+    if (!ell_)
+      return 0;
+    return std::visit(
+        [](const auto& e) -> int {
+          using T = std::decay_t<decltype(e)>;
+          if constexpr (std::is_same_v<T, GeometricMG>)
+            return e.num_levels();
+          else
+            return 0;  // direct FFT solver: no multigrid hierarchy
+        },
+        *ell_);
+  }
+  double last_bottom_seconds() const {
+    if (!ell_)
+      return 0.0;
+    return std::visit(
+        [](const auto& e) -> double {
+          using T = std::decay_t<decltype(e)>;
+          if constexpr (std::is_same_v<T, GeometricMG>)
+            return e.last_bottom_seconds();
+          else
+            return 0.0;  // direct FFT solver: no coarsest-grid bottom solve
+        },
+        *ell_);
+  }
+
   // --- direct POLAR Poisson (PolarPoissonSolver) -------------------------
   /// Builds the direct POLAR Poisson (PolarPoissonSolver, single-rank, single box covering
   /// the ring) LAZILY. The radial BC comes from poisson_bc() (Foextrap -> homogeneous Neumann, wall; the

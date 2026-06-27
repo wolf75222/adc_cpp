@@ -229,6 +229,22 @@ class Problem(Descriptor):
                 % len(self._outputs))
         return True
 
+    def explain_routes(self):
+        """Return a printable route matrix sourced from the C++ authoritative facts (sec.13.12.1).
+
+        Spec 5 sec.13.12.1 (criterion #37): a ``feature x layout x backend x platform -> status /
+        limitation`` matrix whose capability VALUES come from the C++ core
+        (``_pops.module_capabilities()``), NOT a Python-derived walk. Each transport feature
+        (uniform / amr / mpi / gpu / stride / named_fields / partial_imex_mask) is reported with the
+        native ``available`` / ``unavailable`` status the built module decides, plus the route facts
+        the descriptor catalog adds (the layouts this problem can author). Inert: it imports ``_pops``
+        LAZILY and reads metadata only -- no compile, bind or run.
+
+        When ``_pops`` is absent or predates ``module_capabilities`` (old build), the matrix reports
+        every native status as ``unknown`` with that reason rather than fabricating a value.
+        """
+        return build_route_matrix(self)
+
     def inspect(self):
         info = super().inspect()
         info["layout"] = self._layout.inspect()
@@ -254,4 +270,124 @@ class Problem(Descriptor):
                 % (self._name, self._layout.name, sorted(self._blocks), sorted(self._fields)))
 
 
-__all__ = ["Problem"]
+# --- route matrix (Spec 5 sec.13.12.1, criterion #37) -----------------------------------
+# The transport features the route matrix reports, paired with the platform / backend axis each
+# one lives on. The capability VALUES are sourced from the C++ _pops.module_capabilities(), never a
+# Python computation; this table only names the features and their human-facing axis.
+_ROUTE_FEATURES = (
+    ("supports_uniform", "layout", "uniform single-level grid"),
+    ("supports_amr", "layout", "adaptive mesh refinement"),
+    ("supports_mpi", "backend", "distributed MPI transport"),
+    ("supports_gpu", "backend", "GPU device backend (Kokkos CUDA/HIP)"),
+    ("supports_stride", "transport", "strided cell access (production route)"),
+    ("supports_named_fields", "transport", "named aux-field transport"),
+    ("supports_partial_imex_mask", "transport", "partial IMEX mask"),
+)
+
+
+class RouteRow:
+    """One row of a :class:`RouteMatrix`: a feature x axis -> status / limitation (sec.13.12.1).
+
+    A plain, inert value. ``status`` is ``"available"`` / ``"unavailable"`` / ``"unknown"``;
+    ``source`` is ``"native"`` (the C++ ``module_capabilities`` flag) or ``"unknown"`` (no _pops);
+    ``limitation`` carries the honest reason a feature is unavailable / unknown (else empty).
+    """
+
+    def __init__(self, feature, axis, status, *, source, limitation=""):
+        self.feature = feature
+        self.axis = axis
+        self.status = status
+        self.source = source
+        self.limitation = limitation
+
+    def to_dict(self):
+        return {"feature": self.feature, "axis": self.axis, "status": self.status,
+                "source": self.source, "limitation": self.limitation}
+
+    def __repr__(self):
+        return ("RouteRow(feature=%r, axis=%r, status=%r, source=%r)"
+                % (self.feature, self.axis, self.status, self.source))
+
+
+class RouteMatrix:
+    """The printable route matrix of a :class:`Problem` (Spec 5 sec.13.12.1, criterion #37).
+
+    Holds the per-feature :class:`RouteRow`s (capability values sourced from the C++ core), the
+    problem name and its authored layout. :meth:`to_dict` returns a plain nested dict and
+    :meth:`__str__` a short, deterministic table. It is inert -- it computes nothing.
+    """
+
+    def __init__(self, problem_name, layout_name, rows):
+        self.problem_name = problem_name
+        self.layout_name = layout_name
+        self.rows = list(rows)
+
+    def to_dict(self):
+        return {"problem": self.problem_name, "layout": self.layout_name,
+                "rows": [r.to_dict() for r in self.rows]}
+
+    def __iter__(self):
+        return iter(self.rows)
+
+    def __repr__(self):
+        return "RouteMatrix(problem=%r, layout=%r, %d rows)" % (
+            self.problem_name, self.layout_name, len(self.rows))
+
+    def __str__(self):
+        lines = ["route matrix for %r (layout=%s, Spec 5 sec.13.12.1):"
+                 % (self.problem_name, self.layout_name)]
+        for row in self.rows:
+            note = ("  -- %s" % row.limitation) if row.limitation else ""
+            lines.append("  %-28s [%-9s] %-12s (source=%s)%s"
+                         % (row.feature, row.axis, row.status, row.source, note))
+        return "\n".join(lines)
+
+
+def _module_capabilities():
+    """The C++ authoritative capability dict (``_pops.module_capabilities()``) or ``None``.
+
+    Lazily imports ``_pops`` (top-level then ``pops._pops``) so :mod:`pops.problem` stays codegen /
+    ``_pops`` free at module scope and the import graph acyclic. Returns ``None`` when ``_pops`` is
+    unavailable or predates ``module_capabilities`` (old build) -- the matrix then reports the native
+    statuses as ``unknown`` rather than fabricating a value."""
+    try:
+        import _pops as mod  # noqa: PLC0415 -- lazy: keeps pops.problem free of _pops at import time
+    except Exception:
+        try:
+            from pops import _pops as mod  # noqa: PLC0415
+        except Exception:
+            return None
+    fn = getattr(mod, "module_capabilities", None)
+    if fn is None:
+        return None
+    try:
+        return dict(fn())
+    except Exception:
+        return None
+
+
+def build_route_matrix(problem):
+    """Build the :class:`RouteMatrix` of @p problem from the C++ authoritative facts (sec.13.12.1).
+
+    Each :data:`_ROUTE_FEATURES` entry becomes a :class:`RouteRow` whose status is read straight
+    from the C++ ``_pops.module_capabilities()`` flag (``source="native"``). A feature the C++ source
+    reports ``False`` carries an honest limitation note (e.g. ``partial_imex_mask`` has no C++ path);
+    when ``_pops`` is absent the row is ``unknown`` with that reason -- never a fabricated value."""
+    native_caps = _module_capabilities()
+    rows = []
+    for feature, axis, description in _ROUTE_FEATURES:
+        if native_caps is None or feature not in native_caps:
+            rows.append(RouteRow(
+                feature, axis, "unknown", source="unknown",
+                limitation="_pops.module_capabilities() unavailable (module not built or too old)"))
+            continue
+        if native_caps[feature]:
+            rows.append(RouteRow(feature, axis, "available", source="native", limitation=description))
+        else:
+            rows.append(RouteRow(
+                feature, axis, "unavailable", source="native",
+                limitation="%s: not provided by this build" % description))
+    return RouteMatrix(problem.name, problem.layout.name, rows)
+
+
+__all__ = ["Problem", "RouteMatrix", "RouteRow", "build_route_matrix"]
