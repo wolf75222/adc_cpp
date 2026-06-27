@@ -10,13 +10,16 @@ typed user surface over them.
 from .bricks import CompiledBrickRef, ExternalBrick
 from .manifests import (register, register_manifest_file, read_manifest,
                         CompiledManifest)
+from .artifact_manifest import (CompiledArtifactManifest, build_compiled_manifest,
+                                 check_layout_supported)
 from pops.descriptors import load_cpp_library, external
 
-from . import bricks, manifests
+from . import bricks, manifests, artifact_manifest
 
 __all__ = [
     "CompiledBrickRef", "ExternalBrick",
     "register", "register_manifest_file", "read_manifest", "CompiledManifest",
+    "CompiledArtifactManifest", "build_compiled_manifest", "check_layout_supported",
     "load_cpp_library", "external",
-    "bricks", "manifests",
+    "bricks", "manifests", "artifact_manifest",
 ]

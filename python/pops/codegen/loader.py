@@ -169,6 +169,21 @@ class CompiledProblem:
         from pops.codegen.inspect_compiled import build_arguments
         return build_arguments(self)
 
+    def manifest(self):
+        """The RICH self-describing manifest of this artifact (Spec 5 sec.13.12, #36).
+
+        Returns a :class:`pops.external.CompiledArtifactManifest`: the ABI identity (``abi_key`` /
+        ``required_headers_sig``), the model name, the blocks / variables / roles, the required
+        aux, the const / runtime params, the ghost depth, the field outputs and the ``supports_*``
+        capability flags (uniform / AMR / MPI / GPU known from the backend caps; stride /
+        partial-IMEX mask / named fields honestly ``None`` until the C++ codegen emits them). It
+        AGGREGATES the metadata this handle already carries (via :meth:`arguments` + the carried
+        model + ``abi_key``); it binds, dlopens and runs nothing. The widening of the thin
+        :class:`pops.external.CompiledManifest` (a brick-id / category list) into the full
+        artifact self-description Spec 5 sec.13.12 requires."""
+        from pops.external.artifact_manifest import build_compiled_manifest
+        return build_compiled_manifest(self)
+
     def estimate_memory(self, mesh, *, platform=None, layout=None):
         """A FORMULA-based memory estimate on ``mesh`` (Spec 5 sec.12.3, #46).
 
