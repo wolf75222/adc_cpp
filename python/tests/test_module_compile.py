@@ -67,7 +67,7 @@ def test_module_lowers_to_dsl():
 def test_pure_module_program_emits():
     mod = pure_module()
     P = adctime.Program("pc").bind_operators(mod)
-    libtime.std.predictor_corrector_local_linear(
+    libtime.predictor_corrector_local_linear(
         P, "plasma", fields_operator="fields_from_state",
         explicit_rate_operator="explicit_rhs", implicit_operator="lorentz")
     # compile_problem(model=Module) lowers the Module internally; emit the .so source (no compile).

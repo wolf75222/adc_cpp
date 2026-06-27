@@ -8,7 +8,7 @@ This enables Adams-Bashforth 2: ``U^{n+1} = U + dt*(3/2 R_n - 1/2 R_{n-1})`` the
 
   - ``P.history(name, lag=1)`` -> a State-typed value (the value @p lag macro-steps back);
   - ``P.store_history(name, value)`` -> a side-effecting op (copy the value into the current slot);
-  - ``pops.lib.time.std.adams_bashforth2(P, block)`` -> the AB2 IR (store-then-read, cold start = FE step 0).
+  - ``pops.lib.time.adams_bashforth2(P, block)`` -> the AB2 IR (store-then-read, cold start = FE step 0).
 
 The codegen lowers ``history`` -> ``ctx.history(...)``, ``store_history`` -> ``ctx.store_history(...)``,
 and appends ``ctx.rotate_histories()`` at the END of the step body when any history is used.
@@ -85,7 +85,7 @@ def test_history_lag_must_be_positive_int(t):
 
 def test_ab2_macro_lowers(t):
     P = t.Program("ab2")
-    lt.std.adams_bashforth2(P, "plasma")
+    lt.adams_bashforth2(P, "plasma")
     assert P.validate() is True, "the AB2 macro must validate"
     src = P.emit_cpp_program()
     for frag in ('ctx.history("plasma.R", 1)', 'ctx.store_history("plasma.R"',
@@ -100,7 +100,7 @@ def test_store_before_read_in_body(t):
     the history line bound to a MultiFab& (``pops::MultiFab& ... = ctx.history(...)``); the bare
     ``ctx.history(...)`` at the top is only the depth-locking registration."""
     P = t.Program("ab2")
-    lt.std.adams_bashforth2(P, "plasma")
+    lt.adams_bashforth2(P, "plasma")
     src = P.emit_cpp_program()
     body = src[src.index("ctx.install"):]
     read = body.index("= ctx.history(\"plasma.R\", 1);")  # the bound read, not the bare registration
@@ -113,7 +113,7 @@ def test_store_before_read_in_body(t):
 def test_non_history_schemes_emit_no_rotate(t):
     for sched in ("forward_euler", "ssprk2", "ssprk3", "rk4"):
         P = t.Program(sched)
-        getattr(lt.std, sched)(P, "blk")
+        getattr(lt, sched)(P, "blk")
         src = P.emit_cpp_program()
         assert "ctx.rotate_histories" not in src, "%s must not rotate (no history)" % sched
         assert "ctx.history(" not in src, "%s must not read a history" % sched
@@ -199,7 +199,7 @@ def _run_section_b(t):
     from pops.physics.facade import Model
 
     P = t.Program("ab2_step")
-    lt.std.adams_bashforth2(P, "blk")
+    lt.adams_bashforth2(P, "blk")
     try:
         compiled = pops.compile_problem(model=_passive_source_model("ab2_prog"), time=P)
     except RuntimeError as exc:  # no compiler / no Kokkos visible / .so compile failed

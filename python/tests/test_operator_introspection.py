@@ -59,7 +59,7 @@ def test_dsl_model_introspection():
 def test_compiled_problem_introspection():
     m = _model()
     P = adctime.Program("pc").bind_operators(m)
-    libtime.std.predictor_corrector_local_linear(
+    libtime.predictor_corrector_local_linear(
         P, "plasma", fields_operator="fields_from_state",
         explicit_rate_operator="explicit_rhs", implicit_operator="lorentz")
     # A CompiledProblem built directly: introspection reads model metadata, never the .so.

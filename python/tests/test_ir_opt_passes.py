@@ -147,7 +147,7 @@ def test_cse_condensed_schur_buffer_writers_untouched():
     result is discarded but whose buffer a later solve reads by identity. CSE must be a no-op here --
     none of those ops is pure, so the emitted C++ is byte-identical (still has assemble_schur_rhs)."""
     P = adctime.Program("cs")
-    libtime.std.condensed_schur(P, "blk", alpha=1.0, theta=1.0)
+    libtime.condensed_schur(P, "blk", alpha=1.0, theta=1.0)
     before = P.emit_cpp_program()
     assert "assemble_schur_rhs" in before, "fixture lost its schur RHS assembly"
     Q = adctime.eliminate_common_subexpressions(P)
@@ -238,7 +238,7 @@ def test_redundant_solve_noop_byte_identical():
 
 def _rk4():
     P = adctime.Program("rk4")
-    libtime.std.rk4(P, "plasma")
+    libtime.rk4(P, "plasma")
     return P
 
 
@@ -327,7 +327,7 @@ def test_gpu_detectors_flag_pathological_ir():
 
 def test_gpu_detectors_quiet_on_well_behaved_ir():
     """A small Forward Euler trips no host-side GPU heuristic."""
-    assert libtime.std and _euler_clean().gpu_detectors() == []
+    assert libtime.forward_euler and _euler_clean().gpu_detectors() == []
 
 
 # --------------------------------------------------------------------------- pipeline / byte-identity

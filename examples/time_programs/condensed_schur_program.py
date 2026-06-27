@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Condensed-Schur: the Program macro + a matrix-free Schur-like solve (epic ADC-399 / ADC-421).
 
-``pops.lib.time.std.condensed_schur`` (ADC-421) lowers the implicit electrostatic-Lorentz source stage to a
+``pops.lib.time.condensed_schur`` (ADC-421) lowers the implicit electrostatic-Lorentz source stage to a
 compiled Program -- the anisotropic coefficient assembly (``P.schur_coeffs`` -> the native
 ``A = I + c*rho*B^{-1}`` tensor), the coefficiented matrix-free matvec (``P.apply_laplacian_coeff``),
 the fused RHS (``P.schur_rhs``) and the closed-B^{-1} reconstruction (``P.schur_reconstruct``) solved
@@ -12,7 +12,7 @@ with ``P.solve_linear`` (BiCGStab) -- mirroring the native ``CondensedSchurSourc
       operator is the SCALAR Schur-like flux operator A(phi) = phi - alpha*div(grad phi) (the
       div(flux) structure of the condensed Poisson operator on the WIDE-stencil Laplacian), checked
       against an offline NumPy CG on the SAME discrete operator (like divergence_solve.py);
-  (b) shows ``pops.lib.time.std.condensed_schur(P, "blk", alpha=1.0, theta=1.0)`` lowering the full
+  (b) shows ``pops.lib.time.condensed_schur(P, "blk", alpha=1.0, theta=1.0)`` lowering the full
       assemble / solve / reconstruct chain, and the deferred ``theta != 1`` extrapolation raising. The
       end-to-end parity vs an offline reference is in ``python/tests/test_time_condensed_schur.py``; the
       native ``pops.CondensedSchur`` source stepper stays fully supported.
@@ -118,14 +118,14 @@ def show_macro():
     """(b) std.condensed_schur (ADC-421) lowers the theta == 1 condensed-Schur source stage to the full
     anisotropic assemble / solve / reconstruct chain; the deferred theta != 1 extrapolation raises."""
     P = adctime.Program("condensed_schur_macro")
-    libtime.std.condensed_schur(P, "blk", alpha=1.0, theta=1.0)
+    libtime.condensed_schur(P, "blk", alpha=1.0, theta=1.0)
     src = P.emit_cpp_program()
     have_chain = all(frag in src for frag in ("ctx.assemble_schur_coeffs", "ctx.assemble_schur_rhs",
                                               "ctx.apply_laplacian_coeff", "ctx.schur_reconstruct"))
     print("std.condensed_schur(theta=1) lowers the full coeff/RHS/solve/reconstruct chain:",
           "yes" if have_chain else "NO")
     try:
-        libtime.std.condensed_schur(adctime.Program("p"), "blk", alpha=1.0, theta=0.5)
+        libtime.condensed_schur(adctime.Program("p"), "blk", alpha=1.0, theta=0.5)
     except NotImplementedError as exc:
         print("std.condensed_schur(theta != 1) raises (deferred n+1 extrapolation):")
         print("  %s" % str(exc)[:160])

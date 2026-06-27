@@ -25,13 +25,13 @@ def _pops_time():
 def test_decorator_matches_inline_ir(t):
     """A decorated forward_euler builds the SAME IR as the builder forward_euler (equal _ir_hash)."""
     inline = t.Program("fe")
-    lt.std.forward_euler(inline, "plasma")
+    lt.forward_euler(inline, "plasma")
 
     deco = t.Program("fe")  # same name: _ir_hash includes it
 
     @deco.step
     def _build(P):
-        lt.std.forward_euler(P, "plasma")
+        lt.forward_euler(P, "plasma")
 
     assert deco._ir_hash() == inline._ir_hash(), \
         "the @P.step decorator must build IR identical to the inline builder body"
@@ -45,23 +45,23 @@ def test_decorator_calls_fn_exactly_once_at_build(t):
     @P.step
     def _build(prog):
         calls.append(prog)
-        lt.std.forward_euler(prog, "plasma")
+        lt.forward_euler(prog, "plasma")
 
     assert calls == [P], "the build fn must be called exactly once, with the Program, at decoration time"
     # Building the IR again (a second Program) must not re-run the first Program's fn.
     other = t.Program("fe")
-    lt.std.forward_euler(other, "plasma")
+    lt.forward_euler(other, "plasma")
     assert calls == [P], "no further calls happen after the IR is recorded"
 
 
 def test_decorator_returns_program(t):
     """Program.step returns the Program so a one-liner P = Program(name).step(build) reads cleanly."""
     def build(P):
-        lt.std.rk4(P, "plasma")
+        lt.rk4(P, "plasma")
     P = t.Program("rk4").step(build)
     assert isinstance(P, t.Program) and P.validate() is True
     inline = t.Program("rk4")
-    lt.std.rk4(inline, "plasma")
+    lt.rk4(inline, "plasma")
     assert P._ir_hash() == inline._ir_hash()
 
 

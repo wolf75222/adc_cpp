@@ -72,10 +72,11 @@ class _ProgramAuthoring(_ProgramConstants):
 
             @P.step
             def _(P):
-                pops.lib.time.std.forward_euler(P, "plasma")
+                pops.lib.time.forward_euler(P, "plasma")
 
-        produces byte-identical IR (same ``_ir_hash``) to calling ``std.forward_euler(P, "plasma")``
-        inline. Returns the Program so a one-liner ``P = pops.time.Program("p").step(build)`` also reads
+        produces byte-identical IR (same ``_ir_hash``) to calling
+        ``pops.lib.time.forward_euler(P, "plasma")`` inline. Returns the Program so a one-liner
+        ``P = pops.time.Program("p").step(build)`` also reads
         cleanly. @p fn must be callable; it is invoked with the Program as its single argument."""
         if not callable(fn):
             raise TypeError("Program.step expects a callable build_fn(P); got %r" % (fn,))

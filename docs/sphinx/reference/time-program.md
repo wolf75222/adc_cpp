@@ -46,7 +46,7 @@ scalar used as a Python `bool`, an unknown source, etc. all raise with an action
 
 ### Standard library
 
-`pops.lib.time` provides ready schemes (and a `pops.lib.time.std` bundle) that *lower to the same IR*
+`pops.lib.time` provides ready schemes (called by their explicit names) that *lower to the same IR*
 (they are not separate C++ steppers). A macro is an ordinary Python function that builds IR nodes -- it
 never computes arrays. The schemes live in `pops.lib.time`; `pops.time` is the temporal language only
 (`Program`, the scheduler, the optimizer passes).
@@ -82,7 +82,7 @@ P = pops.time.Program("fe")
 
 @P.step
 def _(P):
-    pops.lib.time.std.forward_euler(P, "plasma")   # same IR as calling it inline
+    pops.lib.time.forward_euler(P, "plasma")   # same IR as calling it inline
 ```
 
 ## Compiling and running

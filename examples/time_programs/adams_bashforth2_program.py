@@ -4,7 +4,7 @@
 A compiled Program can declare / read / write a SYSTEM-OWNED history field carried across macro-steps
 (a HistoryManager in System::Impl, not a closure capture), which enables the explicit 2-step AB2
 recurrence ``U^{n+1} = U + dt*(3/2 R_n - 1/2 R_{n-1})`` then ``store_history(block.R, R_n)``. The
-``pops.lib.time.std.adams_bashforth2`` macro builds this with ``P.history(name, lag=1)`` / ``store_history``
+``pops.lib.time.adams_bashforth2`` macro builds this with ``P.history(name, lag=1)`` / ``store_history``
 (the codegen appends ``ctx.rotate_histories()`` at the end of the step body).
 
 COLD START (step 0): the runtime fills EVERY history slot on the FIRST store, so step 0 reads
@@ -54,7 +54,7 @@ def ab2_program():
     """The AB2 step built via the std macro: R_n = R(U); U^{n+1} = U + dt*(3/2 R_n - 1/2 R_{n-1});
     store_history(blk.R, R_n). The lag-1 read R_{n-1} = P.history("blk.R", lag=1)."""
     P = adctime.Program("adams_bashforth2_example")
-    libtime.std.adams_bashforth2(P, "blk")
+    libtime.adams_bashforth2(P, "blk")
     return P
 
 

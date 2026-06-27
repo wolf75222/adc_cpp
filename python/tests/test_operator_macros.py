@@ -1,6 +1,6 @@
 """Spec 2 (S2-4): operator-first standard macros.
 
-pops.lib.time.std.predictor_corrector_local_linear / explicit_rk / imex_local_linear take typed
+pops.lib.time.predictor_corrector_local_linear / explicit_rk / imex_local_linear take typed
 operator NAMES (not physical terms) and compose them with P.call against the Module bound to
 the Program. The macros are model-free (their source mentions no physics) and reusable across
 any Module with matching signatures. Pure Python (emit only); skips if pops is not importable.
@@ -38,9 +38,9 @@ def _model(name, gain=1.0):
 
 
 def test_macros_are_model_free():
-    for macro in (libtime.std.predictor_corrector_local_linear,
-                  libtime.std.explicit_rk,
-                  libtime.std.imex_local_linear):
+    for macro in (libtime.predictor_corrector_local_linear,
+                  libtime.explicit_rk,
+                  libtime.imex_local_linear):
         src = inspect.getsource(macro)
         for tok in _PHYSICS_TOKENS:
             assert tok not in src, "%s must not mention %r" % (macro.__name__, tok)
@@ -50,7 +50,7 @@ def test_macros_are_model_free():
 def test_predictor_corrector_macro():
     m = _model("ep")
     P = adctime.Program("pc").bind_operators(m)
-    libtime.std.predictor_corrector_local_linear(
+    libtime.predictor_corrector_local_linear(
         P, "plasma", fields_operator="fields_from_state",
         explicit_rate_operator="explicit_rhs", implicit_operator="lorentz")
     P.validate()
@@ -62,9 +62,9 @@ def test_predictor_corrector_macro():
 def test_explicit_rk_macro():
     m = _model("rk")
     P = adctime.Program("rk").bind_operators(m)
-    libtime.std.explicit_rk(P, "plasma", rhs_operator="explicit_rhs",
+    libtime.explicit_rk(P, "plasma", rhs_operator="explicit_rhs",
                             fields_operator="fields_from_state",
-                            tableau=libtime.std.SSPRK2_TABLEAU)
+                            tableau=libtime.SSPRK2_TABLEAU)
     P.validate()
     assert "pops_install_program" in P.emit_cpp_program(model=m)
     print("OK  explicit_rk over a typed rate operator (SSPRK2 tableau)")
@@ -73,7 +73,7 @@ def test_explicit_rk_macro():
 def test_imex_local_linear_macro():
     m = _model("imex")
     P = adctime.Program("imex").bind_operators(m)
-    libtime.std.imex_local_linear(P, "plasma", explicit_operator="explicit_rhs",
+    libtime.imex_local_linear(P, "plasma", explicit_operator="explicit_rhs",
                                   implicit_operator="lorentz",
                                   fields_operator="fields_from_state", theta=1.0)
     P.validate()
@@ -84,7 +84,7 @@ def test_imex_local_linear_macro():
 def test_macro_reused_across_modules():
     def build(m):
         P = adctime.Program("pc").bind_operators(m)
-        libtime.std.predictor_corrector_local_linear(
+        libtime.predictor_corrector_local_linear(
             P, "plasma", fields_operator="fields_from_state",
             explicit_rate_operator="explicit_rhs", implicit_operator="lorentz")
         return P.emit_cpp_program(model=m)

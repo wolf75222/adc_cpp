@@ -2,7 +2,7 @@
 """SSPRK3 as a compiled multi-stage time Program (epic ADC-399 / ADC-407).
 
 Writes the three-stage SSPRK3 (Shu-Osher) scheme with ``pops.time.Program`` (two intermediate stage
-states + a linear-combination commit) via the ``pops.lib.time.std.ssprk3`` macro, compiles it to a
+states + a linear-combination commit) via the ``pops.lib.time.ssprk3`` macro, compiles it to a
 ``problem.so`` with ``pops.compile_problem``, installs it, advances one step C++-side, and checks it
 reproduces the native ``pops.Explicit(method="ssprk3")`` step bit-for-bit. There is NO special SSPRK3
 C++ class -- the scheme is just IR lowered by the codegen (like the merged ssprk2 example/test).
@@ -52,7 +52,7 @@ def ssprk3_program():
     """SSPRK3 (Shu-Osher), built via the std macro that lowers to typed IR:
     U1 = U0 + dt k0; U2 = 3/4 U0 + 1/4 (U1 + dt k1); U^{n+1} = 1/3 U0 + 2/3 (U2 + dt k2)."""
     P = adctime.Program("ssprk3_example")
-    libtime.std.ssprk3(P, "plasma")
+    libtime.ssprk3(P, "plasma")
     return P
 
 

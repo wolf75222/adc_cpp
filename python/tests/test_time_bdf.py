@@ -46,7 +46,7 @@ def _pops_time():
 # ---- (A) codegen + IR validation: pure Python, always runs ----
 def test_implicit_flux_bdf1_codegen(t):
     P = t.Program("bdf1")
-    lt.std.bdf(P, "blk", 1, sources=["default"], newton_max=3, krylov_max=50)
+    lt.bdf(P, "blk", 1, sources=["default"], newton_max=3, krylov_max=50)
     assert P.validate() is True, "the implicit-flux BDF1 Program must validate"
     assert P._ir_hash(), "the IR must serialize to a stable hash"
     src = P.emit_cpp_program(model=None)  # no model needed: the jacvec reuses the block rhs closure
@@ -59,7 +59,7 @@ def test_implicit_flux_bdf1_codegen(t):
 
 def test_implicit_flux_bdf2_codegen(t):
     P = t.Program("bdf2")
-    lt.std.bdf(P, "blk", 2, sources=["default"], newton_max=2, krylov_max=40)
+    lt.bdf(P, "blk", 2, sources=["default"], newton_max=2, krylov_max=40)
     assert P.validate() is True
     src = P.emit_cpp_program(model=None)
     assert src.count("pops::gmres_solve") == 2
@@ -73,7 +73,7 @@ def test_implicit_flux_bdf2_codegen(t):
 def test_flux_only_uses_source_free_rhs(t):
     # sources=[] (flux only) -> the apply calls neg_div_flux_default_into (no default source).
     P = t.Program("bdf1_fo")
-    lt.std.bdf(P, "blk", 1, sources=[], newton_max=1, krylov_max=10)
+    lt.bdf(P, "blk", 1, sources=[], newton_max=1, krylov_max=10)
     src = P.emit_cpp_program(model=None)
     assert "ctx.neg_div_flux_default_into(0" in src, "flux-only rhs inside the apply\n%s" % src
     assert "ctx.rhs_into(0" not in src, "no default source in the flux-only jacvec\n%s" % src
@@ -82,7 +82,7 @@ def test_flux_only_uses_source_free_rhs(t):
 def test_multicomponent_operator(t):
     # ncomp=2 (a multi-component block) -> a state-domain operator + 2-component jacvec scratch.
     P = t.Program("bdf1_mc")
-    lt.std.bdf(P, "blk", 1, sources=["default"], ncomp=2, newton_max=1, krylov_max=10)
+    lt.bdf(P, "blk", 1, sources=["default"], ncomp=2, newton_max=1, krylov_max=10)
     assert P.validate() is True
     src = P.emit_cpp_program(model=None)
     assert "ctx.alloc_scalar_field(2, ctx.state(0).n_grow())" in src, "2-component jacvec scratch\n%s" % src
@@ -93,7 +93,7 @@ def test_cell_local_fast_path_unchanged(t):
     # The cell-local linear-source path stays the block-diagonal solve_local_linear: NO Newton/Krylov.
     for order in (1, 2):
         P = t.Program("bdfL%d" % order)
-        lt.std.bdf(P, "blk", order, linear_source="lorentz")
+        lt.bdf(P, "blk", order, linear_source="lorentz")
         assert P.validate() is True
         ops = {v.op for v in P._values}
         assert "solve_local_linear" in ops, "the cell-local fast path uses solve_local_linear"
@@ -104,14 +104,14 @@ def test_cell_local_fast_path_unchanged(t):
 def test_argument_guards(t):
     for bad in (0, 3, True, 1.5, "1"):
         try:
-            lt.std.bdf(t.Program("x"), "b", bad)
+            lt.bdf(t.Program("x"), "b", bad)
         except ValueError:
             pass
         else:
             raise AssertionError("bdf order %r must raise" % (bad,))
     # flux=False with no linear_source has no implicit term -> rejected (not a silent no-op).
     try:
-        lt.std.bdf(t.Program("x"), "b", 1, flux=False)
+        lt.bdf(t.Program("x"), "b", 1, flux=False)
     except ValueError as exc:
         assert "linear_source" in str(exc), str(exc)
     else:
@@ -119,7 +119,7 @@ def test_argument_guards(t):
     # ncomp must be a positive int.
     for bad in (0, -1, True, 1.5):
         try:
-            lt.std.bdf(t.Program("x"), "b", 1, ncomp=bad)
+            lt.bdf(t.Program("x"), "b", 1, ncomp=bad)
         except ValueError as exc:
             assert "ncomp" in str(exc), str(exc)
         else:
@@ -158,7 +158,7 @@ def _nonlinear_flux_model():
 
 def _bdf_program(t, order, *, name, newton_max, krylov_max, tol):
     P = t.Program(name)
-    lt.std.bdf(P, "blk", order, sources=["default"], ncomp=_NCOMP, newton_max=newton_max,
+    lt.bdf(P, "blk", order, sources=["default"], ncomp=_NCOMP, newton_max=newton_max,
               krylov_tol=tol, krylov_max=krylov_max)
     return P
 

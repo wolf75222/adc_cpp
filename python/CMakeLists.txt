@@ -304,7 +304,7 @@ add_test(NAME test_time_program
 set_tests_properties(test_time_program PROPERTIES
   ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
 
-# pops.lib.time.std -- bibliotheque de macros de schemas temporels qui LOWERENT vers l'IR Program (ADC-407,
+# pops.lib.time -- bibliotheque de macros de schemas temporels qui LOWERENT vers l'IR Program (ADC-407,
 # phase 8a) : forward_euler / ssprk2 / ssprk3 / rk4 + combinateur strang construisent l'IR via les memes
 # operations builder + l'algebre affine en dt (un schema exprime UNE fois, aucune classe par schema ;
 # RK4 sans classe RK4 dediee). Verifie la STRUCTURE de l'IR (coefficients du commit) ; la parite vs les
@@ -322,7 +322,7 @@ add_test(NAME test_time_std_decorator
 set_tests_properties(test_time_std_decorator PROPERTIES
   ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
 
-# pops.lib.time.std.rk -- generic explicit Runge-Kutta from a Butcher tableau (ADC-423). (A) pure Python :
+# pops.lib.time.rk -- generic explicit Runge-Kutta from a Butcher tableau (ADC-423). (A) pure Python :
 # rk(RK4_TABLEAU) lowers to byte-identical IR as the rk4 macro (equal _ir_hash) and rk(SSPRK2_TABLEAU)
 # matches Heun ; the tableau validation rejects an implicit / inconsistent tableau. (B) compiled
 # trajectory parity (rk(RK4) == rk4 bit-for-bit) auto-skips without install_program / a compiler / a
@@ -332,7 +332,7 @@ add_test(NAME test_time_std_rk
 set_tests_properties(test_time_std_rk PROPERTIES
   ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
 
-# pops.lib.time.std.imex_local / lie / adams_bashforth(order) (ADC-423) : all lower to the existing IR (no
+# pops.lib.time.imex_local / lie / adams_bashforth(order) (ADC-423) : all lower to the existing IR (no
 # new C++ stepper). (A) pure Python : each macro builds + lowers (imex/bdf to the per-cell solve kernel
 # with a model, AB3 to two history reads + rotate), guards fire. (B) offline parity (compiled program
 # vs an independent numpy reference of the identical recurrence : implicit Lorentz IMEX, sequential Lie
@@ -342,7 +342,7 @@ add_test(NAME test_time_std_imex_lie_ab
 set_tests_properties(test_time_std_imex_lie_ab PROPERTIES
   ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
 
-# pops.lib.time.std.bdf IMPLICIT-FLUX via matrix-free Newton-Krylov (ADC-431): the implicit-flux BDF1/BDF2 is
+# pops.lib.time.bdf IMPLICIT-FLUX via matrix-free Newton-Krylov (ADC-431): the implicit-flux BDF1/BDF2 is
 # a pure-macro Newton-Krylov solve (P.rhs_jacvec FD Jacobian-vector inside the matrix-free apply + GMRES
 # solve_linear), the cell-local linear-source path unchanged. (A) pure Python: the IR builds/lowers with
 # one GMRES per Newton iteration, the rhs-inside-apply scratch, the residual diagnostic; the cell-local
@@ -354,7 +354,7 @@ add_test(NAME test_time_bdf
 set_tests_properties(test_time_bdf PROPERTIES
   ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
 
-# Compiled pops.lib.time.std.strang reproduces native pops.Strang on a simple case (ADC-410). (A) pure Python:
+# Compiled pops.lib.time.strang reproduces native pops.Strang on a simple case (ADC-410). (A) pure Python:
 # the std.strang macro lowers to two half-flow stages (U + dt/2 * R) around a no-op source, and
 # emit_cpp_program produces the matching C++. (B) native bit-parity: an uncoupled isothermal NoSource
 # block advanced with Forward Euler runs native step_strang (set_time_scheme("strang"), run_source_stage
@@ -576,7 +576,7 @@ set_tests_properties(test_time_multicomp_solve PROPERTIES
 # position-dependent operator-coefficient assembly (P.schur_coeffs -> ctx.assemble_schur_coeffs, the
 # native A = I + c*rho*B^{-1}) + the coefficiented matrix-free matvec (P.apply_laplacian_coeff ->
 # pops::apply_laplacian's coefficient path) + the fused RHS (P.schur_rhs) + the closed-B^{-1}
-# reconstruction (P.schur_reconstruct) compose the pops.lib.time.std.condensed_schur macro, mirroring the
+# reconstruction (P.schur_reconstruct) compose the pops.lib.time.condensed_schur macro, mirroring the
 # native CondensedSchurSourceStepper sequence with a matrix-free BiCGStab phi solve. Section (A) (pure
 # Python): the four builder ops + operand validation, the macro lowering (the full ctx chain), the
 # theta != 1 NotImplementedError. Section (B) compiles + installs + steps a field-coupled rho/mx/my block
@@ -589,7 +589,7 @@ set_tests_properties(test_time_condensed_schur PROPERTIES
   ENVIRONMENT "${_pops_py_test_env}")
 
 # Multistep histories + Adams-Bashforth 2 (ADC-406a) : emit_cpp_program lowers P.history /
-# P.store_history (a SYSTEM-OWNED ring buffer, not a closure capture) and pops.lib.time.std.adams_bashforth2.
+# P.store_history (a SYSTEM-OWNED ring buffer, not a closure capture) and pops.lib.time.adams_bashforth2.
 # Section (A) pins the IR + generated body (ctx.history / ctx.store_history / ctx.rotate_histories, the
 # 3/2 -1/2 weights, store-before-read, IR-hash sensitivity to name/lag), pure Python. Section (B) runs
 # the AB2 program N steps on a 1-var manufactured-source model and matches an OFFLINE AB2 recurrence

@@ -9,8 +9,8 @@ delegator), so this package imports only ``pops.ir`` / ``pops.model`` -- never `
 This package is the time LANGUAGE only: ``Program``, ``CompiledTime``, the ``Value`` /
 ``StageStateSet`` values, the ``Schedule`` scheduler (``always`` / ``every`` / ``when`` /
 ``on_start`` / ``on_end`` / ``subcycle``) and the IR-optimizer wrappers (``eliminate_*`` /
-``optimize``). The READY time-stepping schemes and their ``std`` bundle live in
-``pops.lib.time`` (Spec 4 s6 / s14); import them from there.
+``optimize``). The READY time-stepping schemes live in ``pops.lib.time`` (Spec 4 s6 / s14),
+called by their explicit names (no ``std`` bundle, Spec 4 s7); import them from there.
 
 cf. docs/sphinx/reference/time-program.md (Phase 8) and the ADC-399 epic.
 """

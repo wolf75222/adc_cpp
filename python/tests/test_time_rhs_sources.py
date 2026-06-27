@@ -224,7 +224,7 @@ chk(d_lie < 1e-12, "Lie split H(flux,sources=[]);S(source) == offline single-sou
 # zero-flux model it is U + dt*C*rho -- identical to the sources=['default'] one-step above.
 try:
     P_fe = adctime.Program("fe_default")
-    libtime.std.forward_euler(P_fe, "plasma", sources=("default",))
+    libtime.forward_euler(P_fe, "plasma", sources=("default",))
     compiled_fe = pops.compile_problem(model=decay_model("decay_fe", C), time=P_fe)
 except RuntimeError as exc:
     _skip("compile_problem (forward_euler) could not build the .so: %s" % str(exc)[:160])

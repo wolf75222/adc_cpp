@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""pops.lib.time.std.imex_local / lie / adams_bashforth(order) -- ADC-423 beyond-MVP macros.
+"""pops.lib.time.imex_local / lie / adams_bashforth(order) -- ADC-423 beyond-MVP macros.
 
 All three LOWER to the existing Program IR (no new C++ stepper):
 
@@ -94,7 +94,7 @@ def _lorentz_model(name):
 # ============================ (A) IR + codegen: pure Python =============================
 def test_imex_local_builds_and_lowers(t):
     P = t.Program("imex")
-    out = lt.std.imex_local(P, "plasma", linear_source="lorentz")
+    out = lt.imex_local(P, "plasma", linear_source="lorentz")
     assert P.validate() is True and P.commits()["plasma"] is out
     try:
         from pops.physics.facade import Model
@@ -109,7 +109,7 @@ def test_imex_local_builds_and_lowers(t):
 def test_imex_local_theta_guard(t):
     for bad in (0.0, -0.5, 1.5):
         try:
-            lt.std.imex_local(t.Program("x"), "plasma", linear_source="lorentz", theta=bad)
+            lt.imex_local(t.Program("x"), "plasma", linear_source="lorentz", theta=bad)
         except ValueError as exc:
             assert "theta" in str(exc)
         else:
@@ -118,7 +118,7 @@ def test_imex_local_theta_guard(t):
 
 def test_imex_local_rejects_empty_linear_source(t):
     try:
-        lt.std.imex_local(t.Program("x"), "plasma", linear_source="")
+        lt.imex_local(t.Program("x"), "plasma", linear_source="")
     except ValueError as exc:
         assert "linear_source" in str(exc)
     else:
@@ -136,40 +136,40 @@ def test_lie_chains_two_stages(t):
         S = prog.rhs(state=U, fields=None, flux=False, sources=["default"])
         return prog.linear_combine(None, U + (frac * prog.dt) * S)
 
-    out = lt.std.lie(P, "plasma", half_flow, source)
+    out = lt.lie(P, "plasma", half_flow, source)
     P.validate()
     assert P.commits()["plasma"] is out
     n_lc = sum(1 for v in P._values if v.op == "linear_combine")
     assert n_lc == 2, "Lie composes exactly two stages H(dt); S(dt) (got %d)" % n_lc
     # Lie advances each sub-flow over the FULL dt -> frac 1.0 on both; Strang would be 0.5/1.0/0.5.
     strang = t.Program("lie")  # same name to compare IR shape, not value
-    lt.std.strang(strang, "plasma", half_flow, source)
+    lt.strang(strang, "plasma", half_flow, source)
     assert P._ir_hash() != strang._ir_hash(), "Lie (2 stages, full dt) differs from Strang (3 stages)"
 
 
 def test_adams_bashforth_orders_build(t):
     for order in (1, 2, 3):
         P = t.Program("ab%d" % order)
-        lt.std.adams_bashforth(P, "plasma", order)
+        lt.adams_bashforth(P, "plasma", order)
         assert P.validate() is True, "AB%d must validate" % order
     # AB1 == forward_euler IR (no history op).
     ab1 = t.Program("p")
-    lt.std.adams_bashforth(ab1, "plasma", 1)
+    lt.adams_bashforth(ab1, "plasma", 1)
     fe = t.Program("p")
-    lt.std.forward_euler(fe, "plasma")
+    lt.forward_euler(fe, "plasma")
     assert ab1._ir_hash() == fe._ir_hash(), "AB1 must be byte-identical to forward_euler"
     # AB2 alias == adams_bashforth(2).
     a2 = t.Program("p")
-    lt.std.adams_bashforth2(a2, "plasma")
+    lt.adams_bashforth2(a2, "plasma")
     g2 = t.Program("p")
-    lt.std.adams_bashforth(g2, "plasma", 2)
+    lt.adams_bashforth(g2, "plasma", 2)
     assert a2._ir_hash() == g2._ir_hash(), "adams_bashforth2 is a thin alias for adams_bashforth(2)"
 
 
 def test_adams_bashforth_bad_order(t):
     for bad in (0, 4, 2.0):
         try:
-            lt.std.adams_bashforth(t.Program("x"), "plasma", bad)
+            lt.adams_bashforth(t.Program("x"), "plasma", bad)
         except ValueError as exc:
             assert "order" in str(exc)
         else:
@@ -178,7 +178,7 @@ def test_adams_bashforth_bad_order(t):
 
 def test_ab3_lowers_with_two_history_reads(t):
     P = t.Program("ab3")
-    lt.std.adams_bashforth(P, "plasma", 3)
+    lt.adams_bashforth(P, "plasma", 3)
     try:
         src = P.emit_cpp_program()  # AB3 has no Phase-4 ops -> lowers without a model
     except Exception as exc:  # noqa: BLE001
@@ -219,7 +219,7 @@ def _run_ab3(t):
         print("-- (B AB3) skipped: _pops lacks install_program (rebuild _pops) --")
         return
     P = t.Program("ab3_step")
-    lt.std.adams_bashforth(P, "blk", 3)
+    lt.adams_bashforth(P, "blk", 3)
     try:
         compiled = pops.compile_problem(model=_passive_source_model("ab3_prog"), time=P)
         cm = _passive_source_model("ab3_block").compile(backend="production")
@@ -261,7 +261,7 @@ def _run_imex(t):
         print("-- (B imex) skipped: _pops lacks install_program (rebuild _pops) --")
         return
     P = t.Program("imex_step")
-    lt.std.imex_local(P, "plasma", linear_source="lorentz", flux=True, sources=["default"], theta=1.0)
+    lt.imex_local(P, "plasma", linear_source="lorentz", flux=True, sources=["default"], theta=1.0)
     try:
         compiled = pops.compile_problem(model=_lorentz_model("imex_prog"), time=P)
         cm = _lorentz_model("imex_block").compile(backend="production")
@@ -324,7 +324,7 @@ def _run_lie(t):
         return prog.linear_combine(None, U + (frac * prog.dt) * S)
 
     P = t.Program("lie_step")
-    lt.std.lie(P, "blk", half_flow, source)
+    lt.lie(P, "blk", half_flow, source)
     try:
         compiled = pops.compile_problem(model=_reaction_term_model("lie_prog"), time=P)
         cm = _reaction_term_model("lie_block").compile(backend="production")

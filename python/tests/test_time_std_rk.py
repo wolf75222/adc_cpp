@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""pops.lib.time.std.rk -- generic explicit Runge-Kutta from a Butcher tableau (epic ADC-399 / ADC-423).
+"""pops.lib.time.rk -- generic explicit Runge-Kutta from a Butcher tableau (epic ADC-399 / ADC-423).
 
 ``std.rk(P, block, tableau)`` lowers an arbitrary EXPLICIT Butcher tableau (A, b, c) to the SAME stage
 chain the hard-coded `rk4` macro emits (solve_fields + rhs + linear_combine, no RK class):
@@ -43,9 +43,9 @@ def _coeff(node, value):
 def test_rk_rk4_tableau_matches_rk4_macro(t):
     """rk(RK4_TABLEAU) lowers to byte-identical IR as the hard-coded rk4 macro (same name -> same hash)."""
     macro = t.Program("rk4")
-    lt.std.rk4(macro, "plasma")
+    lt.rk4(macro, "plasma")
     generic = t.Program("rk4")  # the RK4_TABLEAU is named "rk4", so the node tags match too
-    lt.std.rk(generic, "plasma", lt.std.RK4_TABLEAU)
+    lt.rk(generic, "plasma", lt.RK4_TABLEAU)
     assert generic._ir_hash() == macro._ir_hash(), \
         "rk(RK4_TABLEAU) must produce the SAME IR as the rk4 macro"
 
@@ -53,7 +53,7 @@ def test_rk_rk4_tableau_matches_rk4_macro(t):
 def test_rk_ssprk2_tableau_is_heun(t):
     """rk(SSPRK2_TABLEAU) commits Heun's U + dt(1/2 k1 + 1/2 k2): two stages, two equal-weighted RHS."""
     P = t.Program("ssprk2")
-    lt.std.rk(P, "plasma", lt.std.SSPRK2_TABLEAU)
+    lt.rk(P, "plasma", lt.SSPRK2_TABLEAU)
     P.validate()
     node = P.commits()["plasma"]
     assert node.op == "linear_combine"
@@ -72,16 +72,16 @@ def test_rk_accepts_raw_triple(t):
     b = [0.5, 0.5]
     c = [0.0, 1.0]
     P = t.Program("raw")
-    lt.std.rk(P, "plasma", (A, b, c))
+    lt.rk(P, "plasma", (A, b, c))
     assert P.validate() is True
     heun = t.Program("raw")
-    lt.std.rk(heun, "plasma", lt.std.SSPRK2_TABLEAU)
+    lt.rk(heun, "plasma", lt.SSPRK2_TABLEAU)
     assert P._ir_hash() == heun._ir_hash(), "the raw triple == the SSPRK2 tableau IR"
 
 
 def test_tableau_rejects_implicit(t):
     try:  # an entry on/above the diagonal is implicit -> rejected (rk lowers explicit only)
-        lt.std.ButcherTableau(A=[[0.0], [1.0, 0.5]], b=[0.5, 0.5])
+        lt.ButcherTableau(A=[[0.0], [1.0, 0.5]], b=[0.5, 0.5])
     except ValueError as exc:
         assert "lower-triangular" in str(exc) or "EXPLICIT" in str(exc)
     else:
@@ -90,7 +90,7 @@ def test_tableau_rejects_implicit(t):
 
 def test_tableau_rejects_inconsistent_weights(t):
     try:  # b must sum to 1 for a consistent RK method
-        lt.std.ButcherTableau(A=[[], [1.0]], b=[0.5, 0.6])
+        lt.ButcherTableau(A=[[], [1.0]], b=[0.5, 0.6])
     except ValueError as exc:
         assert "sum to 1" in str(exc)
     else:
@@ -134,10 +134,10 @@ def _run_section_b(t):
             print("-- (B) skipped: compile_problem could not build the .so: %s --" % str(exc)[:160])
             return None
 
-    macro = compiled_so(lambda P: lt.std.rk4(P, "blk"), "rk4_macro")
+    macro = compiled_so(lambda P: lt.rk4(P, "blk"), "rk4_macro")
     if macro is None:
         return
-    generic = compiled_so(lambda P: lt.std.rk(P, "blk", lt.std.RK4_TABLEAU), "rk4_macro")
+    generic = compiled_so(lambda P: lt.rk(P, "blk", lt.RK4_TABLEAU), "rk4_macro")
     if generic is None:
         return
 

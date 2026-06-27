@@ -83,7 +83,7 @@ flux, source, Poisson or Lorentz: it only composes typed operator calls, linear 
 local and global solves, and a commit. That is the model-free level.
 
 The standard library provides model-free macros keyed on operator names:
-`pops.lib.time.std.predictor_corrector_local_linear`, `explicit_rk` and `imex_local_linear`. The
+`pops.lib.time.predictor_corrector_local_linear`, `explicit_rk` and `imex_local_linear`. The
 same macro runs against any module that provides operators with the expected signatures; see
 `examples/operator_modules/predictor_corrector_operator_first.py`.
 

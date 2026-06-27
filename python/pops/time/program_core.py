@@ -97,7 +97,7 @@ class _ProgramCore(_ProgramConstants):
         ``source`` is an ``pops.model.OperatorRegistry`` or any object exposing
         ``operator_registry()`` (a ``dsl.Model`` / ``pops.model.Module``). Returns ``self`` for
         chaining. The bound registry is build-time TYPE information only -- the codegen still reads
-        the model passed to ``compile_problem``; operator-first Programs and the ``pops.lib.time.std``
+        the model passed to ``compile_problem``; operator-first Programs and the ``pops.lib.time``
         macros bind the module's operators here.
         """
         reg = source.operator_registry() if hasattr(source, "operator_registry") else source

@@ -7,7 +7,7 @@ detail::SchurOperatorCoeffKernel), ``P.apply_laplacian_coeff`` applies ``div(A g
 (pops::apply_laplacian's coefficient path), ``P.schur_rhs`` assembles the fused RHS
 ``-Lap(phi^n) - theta*dt*alpha*div(B^{-1}(mx,my))`` (the native assemble_rhs), and
 ``P.schur_reconstruct`` reconstructs ``v = B^{-1}(v^n - theta*dt*grad phi)`` (the closed B^{-1}). The
-``pops.lib.time.std.condensed_schur`` macro composes them with ``P.solve_linear`` (matrix-free BiCGStab) into
+``pops.lib.time.condensed_schur`` macro composes them with ``P.solve_linear`` (matrix-free BiCGStab) into
 the same assemble / solve / reconstruct sequence as the native CondensedSchurSourceStepper (epic
 acceptance 32). The native ``pops.CondensedSchur`` stepper is untouched.
 
@@ -128,7 +128,7 @@ def test_schur_rhs_and_reconstruct_record(t):
 
 def test_condensed_schur_macro_lowers(t):
     P = t.Program("cs")
-    lt.std.condensed_schur(P, "blk", alpha=_ALPHA, theta=1.0)
+    lt.condensed_schur(P, "blk", alpha=_ALPHA, theta=1.0)
     assert P.validate() is True, "the condensed-Schur macro must validate"
     assert P._ir_hash(), "the IR must serialize to a stable hash"
     src = P.emit_cpp_program()
@@ -142,7 +142,7 @@ def test_condensed_schur_theta_half_lowers(t):
     no component-restricted IR op). The macro reconstructs on a COPY of U^n so the extrapolation can
     read mom^n, then commits U^n + (1/theta)(U^{n+theta} - U^n)."""
     P = t.Program("cs")
-    lt.std.condensed_schur(P, "blk", alpha=_ALPHA, theta=0.5)
+    lt.condensed_schur(P, "blk", alpha=_ALPHA, theta=0.5)
     assert P.validate() is True, "the theta=0.5 condensed-Schur macro must validate"
     assert P._ir_hash(), "the IR must serialize to a stable hash"
     src = P.emit_cpp_program()
@@ -157,7 +157,7 @@ def test_condensed_schur_theta_half_lowers(t):
 def test_condensed_schur_theta_out_of_range_raises(t):
     for bad in (0.0, -0.5, 1.5):
         try:
-            lt.std.condensed_schur(t.Program("p"), "blk", alpha=1.0, theta=bad)
+            lt.condensed_schur(t.Program("p"), "blk", alpha=1.0, theta=bad)
         except ValueError as exc:
             assert "theta must be in (0, 1]" in str(exc), str(exc)
         else:
@@ -167,7 +167,7 @@ def test_condensed_schur_theta_out_of_range_raises(t):
 def test_condensed_schur_energy_lowers(t):
     """ADC-427: an energy component (c_E) adds the native kinetic-energy increment via P.schur_energy."""
     P = t.Program("cs")
-    lt.std.condensed_schur(P, "blk", alpha=_ALPHA, theta=0.5, c_E=3)
+    lt.condensed_schur(P, "blk", alpha=_ALPHA, theta=0.5, c_E=3)
     assert P.validate() is True
     src = P.emit_cpp_program()
     assert "ctx.schur_energy" in src, "the energy variant must emit ctx.schur_energy\n%s" % src
@@ -177,7 +177,7 @@ def test_condensed_schur_theta_one_ir_unchanged(t):
     """ADC-427 no-regression: theta == 1 keeps its historical IR (reconstruct IN PLACE on U^n, no copy /
     extrapolation / energy op), so an existing theta==1 program's .so cache key is byte-identical."""
     P = t.Program("cs")
-    lt.std.condensed_schur(P, "blk", alpha=_ALPHA, theta=1.0)
+    lt.condensed_schur(P, "blk", alpha=_ALPHA, theta=1.0)
     src = P.emit_cpp_program()
     assert "ctx.schur_energy" not in src, "theta=1 must NOT emit an energy op"
     # No copy-then-reconstruct: the reconstruction writes U^n in place, the commit is the reconstruction.
@@ -384,7 +384,7 @@ def _run_section_b(t):
         if sim is None:
             return None
         P = t.Program("cs_step_%d" % int(round(theta * 100)))
-        lt.std.condensed_schur(P, "blk", alpha=_ALPHA, theta=theta, tol=_TOL, max_iter=400)
+        lt.condensed_schur(P, "blk", alpha=_ALPHA, theta=theta, tol=_TOL, max_iter=400)
         try:
             compiled = pops.compile_problem(model=schur_model("cs_prog_%d" % int(round(theta * 100))),
                                            time=P)

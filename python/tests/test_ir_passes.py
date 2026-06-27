@@ -175,7 +175,7 @@ def test_condensed_schur_buffer_writers_never_removed():
     extra linear_combine copy / extrapolation / schur_energy buffer-writers)."""
     for theta, c_E in ((1.0, None), (0.5, None), (0.5, 3), (1.0, 3)):
         P = adctime.Program("cs")
-        libtime.std.condensed_schur(P, "blk", alpha=_ALPHA, theta=theta, c_E=c_E)
+        libtime.condensed_schur(P, "blk", alpha=_ALPHA, theta=theta, c_E=c_E)
         before = P.emit_cpp_program()
         assert "assemble_schur_rhs" in before, "fixture lost its schur RHS assembly"
 

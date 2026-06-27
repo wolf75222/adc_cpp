@@ -27,8 +27,8 @@ Multi-step:
 Predictor-corrector:
     predictor_corrector_local_linear
 
-Bundle:
-    std (a SimpleNamespace mirroring the historical pops.time.std surface)
+The schemes are exposed by their explicit names (Spec 4 s7: the name ``std`` is banned -- no
+catch-all bundle). Call e.g. ``pops.lib.time.ssprk3`` / ``pops.lib.time.strang`` directly.
 """
 
 from .euler import forward_euler
@@ -38,7 +38,6 @@ from .strang import strang, lie, condensed_schur
 from .imex import imex_local, imex_local_linear
 from .multistep import adams_bashforth, adams_bashforth2, bdf
 from .predictor_corrector import predictor_corrector_local_linear
-from .std import std
 
 __all__ = [
     # Euler
@@ -66,6 +65,4 @@ __all__ = [
     "bdf",
     # Predictor-corrector
     "predictor_corrector_local_linear",
-    # Bundle
-    "std",
 ]

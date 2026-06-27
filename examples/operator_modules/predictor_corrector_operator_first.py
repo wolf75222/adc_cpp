@@ -6,7 +6,7 @@ are declared by signature with IR (``Expr``) bodies -- a field operator (Poisson
 (grid operator), an electric source, a Lorentz local linear operator -- plus a composite rate
 ``explicit_rhs``. No PDE method (``m.flux`` / ``m.source_term``) is called on the model; the Module
 IS the model. The time algorithm is the GENERIC macro
-``pops.lib.time.std.predictor_corrector_local_linear`` keyed on the three operator names -- it mentions no
+``pops.lib.time.predictor_corrector_local_linear`` keyed on the three operator names -- it mentions no
 flux / source / poisson / lorentz.
 
 ``compile_problem(model=module, time=P)`` lowers the Module to the dsl codegen engine (Module.to_dsl,
@@ -73,7 +73,7 @@ def operator_module(name="euler_poisson_lorentz_operator_first"):
 def operator_first_program(module, name="predictor_corrector_operator_first"):
     """The GENERIC model-free macro keyed on the three operator names. No physics here."""
     P = adctime.Program(name).bind_operators(module)
-    libtime.std.predictor_corrector_local_linear(
+    libtime.predictor_corrector_local_linear(
         P, "plasma",
         fields_operator="fields_from_state",
         explicit_rate_operator="explicit_rhs",
