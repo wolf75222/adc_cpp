@@ -156,4 +156,142 @@ def inspect_capabilities():
     return CapabilityMatrix(entries)
 
 
-__all__ = ["inspect_capabilities", "CapabilityMatrix", "CapabilityEntry"]
+class AmrReport:
+    """The structured, printable result of :func:`inspect_amr` (Spec 5 sec.5.11 / sec.8).
+
+    A plain record of an AMR hierarchy's declared metadata -- the level / ratio envelope, the
+    regrid / patch / nesting / refinement / checkpoint / output policies, the runtime
+    requirements (reflux, tag reduction), and the explainable route limitations. :meth:`to_dict`
+    returns a plain nested dict and :meth:`__str__` a short, deterministic report. It is inert:
+    it holds metadata read from the descriptors, it computes nothing.
+    """
+
+    def __init__(self, *, layout, max_levels, ratio, native_max_levels, native_ratios,
+                 available, limitations, requirements, policies):
+        self.layout = layout
+        self.max_levels = max_levels
+        self.ratio = ratio
+        self.native_max_levels = native_max_levels
+        self.native_ratios = tuple(native_ratios)
+        self.available = available
+        self.limitations = list(limitations)
+        self.requirements = dict(requirements or {})
+        # policies: ordered list of (slot, name, options-dict) for the attached policies.
+        self.policies = list(policies)
+
+    def to_dict(self):
+        return {
+            "layout": self.layout,
+            "max_levels": self.max_levels,
+            "ratio": self.ratio,
+            "native_max_levels": self.native_max_levels,
+            "native_ratios": list(self.native_ratios),
+            "available": self.available,
+            "limitations": list(self.limitations),
+            "requirements": dict(self.requirements),
+            "policies": [{"slot": slot, "name": name, "options": dict(options)}
+                         for slot, name, options in self.policies],
+        }
+
+    def __repr__(self):
+        return ("AmrReport(layout=%r, max_levels=%r, ratio=%r, available=%r)"
+                % (self.layout, self.max_levels, self.ratio, self.available))
+
+    def __str__(self):
+        lines = ["AMR hierarchy report (%s):" % self.layout]
+        lines.append("  levels: max_levels=%s ratio=%s (native envelope: max_levels<=%s, "
+                     "ratios=%s)" % (self.max_levels, self.ratio, self.native_max_levels,
+                                     ", ".join(map(str, self.native_ratios))))
+        lines.append("  available: %s" % self.available)
+        if self.requirements:
+            req = ", ".join("%s=%s" % (k, v) for k, v in sorted(self.requirements.items()))
+            lines.append("  requirements: %s" % req)
+        if self.policies:
+            lines.append("  policies:")
+            for slot, name, options in self.policies:
+                body = ", ".join("%s=%r" % (k, v) for k, v in options.items())
+                lines.append("    %-11s %s(%s)" % (slot + ":", name, body))
+        if self.limitations:
+            lines.append("  limitations:")
+            for note in self.limitations:
+                lines.append("    - %s" % note)
+        return "\n".join(lines)
+
+
+def _amr_policy_rows(layout):
+    """Ordered (slot, name, options) rows for the policies attached to an AMR layout.
+
+    A deterministic, stable walk of the descriptor chain (refine / regrid / patches / nesting /
+    checkpoint / output); a slot left as ``None`` on the layout is skipped. The refinement
+    criterion is expanded into its sub-criteria when it is a ``TagUnion`` so the report names
+    each tagged subject / predicate / threshold, not just the union count.
+    """
+    rows = []
+    for slot in ("refine", "regrid", "patches", "nesting", "checkpoint", "output"):
+        policy = getattr(layout, slot, None)
+        if policy is None:
+            continue
+        rows.append((slot, policy.name, policy.options()))
+        criteria = getattr(policy, "criteria", None)
+        if criteria is not None:
+            for sub in criteria:
+                rows.append((slot + ".criterion", sub.name, sub.options()))
+    return rows
+
+
+def inspect_amr(layout_or_context=None):
+    """Return a printable :class:`AmrReport` of an AMR hierarchy (Spec 5 sec.5.11 / sec.8).
+
+    The introspectable counterpart of :func:`inspect_capabilities` for the adaptive-mesh
+    route. PURE: it imports only the inert :mod:`pops.mesh` authoring descriptors and reads
+    their declared metadata (levels / ratio, the regrid / patch / nesting / refine / checkpoint
+    / output policies, the runtime requirements such as reflux / tag reduction, and the
+    explainable route limitations); it NEVER imports ``_pops`` / the runtime / codegen and runs
+    no numeric loop.
+
+    Args:
+        layout_or_context: an :class:`pops.mesh.layouts.AMR` (or :class:`Uniform`) descriptor to
+            report on, or ``None`` to report the current native AMR envelope (the
+            :data:`pops.mesh.amr.NATIVE_MAX_LEVELS` / ``NATIVE_RATIOS`` capability limits).
+    """
+    from pops.mesh.amr import NATIVE_MAX_LEVELS, NATIVE_RATIOS
+    from pops.mesh.layouts import AMR, Uniform
+
+    native_note = ("the current native AMR route supports max_levels<=%d at ratio %s; a request "
+                   "beyond that is refused before the runtime, not silently clamped"
+                   % (NATIVE_MAX_LEVELS, ", ".join(map(str, NATIVE_RATIOS))))
+
+    if layout_or_context is None:
+        return AmrReport(
+            layout="native-envelope", max_levels=NATIVE_MAX_LEVELS, ratio=NATIVE_RATIOS[0],
+            native_max_levels=NATIVE_MAX_LEVELS, native_ratios=NATIVE_RATIOS,
+            available="yes", limitations=[native_note], requirements={}, policies=[])
+
+    if isinstance(layout_or_context, Uniform):
+        caps = layout_or_context.capabilities()
+        return AmrReport(
+            layout="uniform", max_levels=caps.get("levels", 1), ratio=1,
+            native_max_levels=NATIVE_MAX_LEVELS, native_ratios=NATIVE_RATIOS,
+            available="yes",
+            limitations=["a Uniform layout is single-level: no refinement, regrid or reflux"],
+            requirements={}, policies=[])
+
+    if not isinstance(layout_or_context, AMR):
+        raise TypeError(
+            "inspect_amr expects a pops.mesh.layouts.AMR / Uniform descriptor (or None for the "
+            "native envelope); got %r" % (type(layout_or_context).__name__,))
+
+    layout = layout_or_context
+    status = layout.available()
+    limitations = [native_note]
+    if not status.ok and status.reason:
+        limitations.append(status.reason)
+    return AmrReport(
+        layout="amr", max_levels=layout.max_levels, ratio=layout.ratio,
+        native_max_levels=NATIVE_MAX_LEVELS, native_ratios=NATIVE_RATIOS,
+        available=status.status, limitations=limitations,
+        requirements=layout.requirements(), policies=_amr_policy_rows(layout))
+
+
+__all__ = ["inspect_capabilities", "CapabilityMatrix", "CapabilityEntry",
+           "inspect_amr", "AmrReport"]
