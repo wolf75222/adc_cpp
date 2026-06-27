@@ -3,9 +3,11 @@
 Originally in pops.dsl.
 """
 
-import numpy as np
-
 from .expr import Expr, _wrap
+
+# numpy backs only the EigWitness host mirror (eval, and the im_tol validation of a predicate); it is
+# imported lazily where used so pops.ir stays importable in a bare interpreter (e.g. the build-time
+# gen_solver_kernel codegen, which never constructs an EigWitness predicate nor evaluates).
 
 # Champs scalaires d'pops::EigBounds exposables comme une valeur DSL (cf. dense_eig.hpp).
 _EIG_FIELDS = {
@@ -67,6 +69,7 @@ class EigWitness(Expr):
         # scalaire (max_im/lmin/lmax) il est rejete s'il est fourni, et reste None -> chemin scalaire
         # bit-identique a l'historique (cle CSE, codegen et eval inchanges).
         if field in _EIG_PREDICATES:
+            import numpy as np
             tol = 1e-5 if im_tol is None else float(im_tol)
             if not (tol > 0.0) or not np.isfinite(tol):
                 raise ValueError("EigWitness : im_tol doit etre fini et > 0 (recu %r)" % (im_tol,))
@@ -97,6 +100,7 @@ class EigWitness(Expr):
     def eval(self, env):
         # Miroir hote (reference de test / prototypage) : empile la matrice par cellule puis numpy.
         # Les entrees sont diffusees a une forme commune ; eigvals s'applique sur le dernier axe 2x2.
+        import numpy as np
         vals = [e.eval(env) for e in self.entries()]
         bshape = np.broadcast(*[np.asarray(v) for v in vals]).shape if vals else ()
         k = self.k

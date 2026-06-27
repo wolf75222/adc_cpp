@@ -132,6 +132,13 @@ development/index
 
 ```{toctree}
 :maxdepth: 1
+:caption: Design
+
+design/index
+```
+
+```{toctree}
+:maxdepth: 1
 :caption: C++ reference
 
 Embedded C++ API <doxygen/index>

@@ -297,6 +297,18 @@ jobs:
           python-version: '3.12'
           cache: pip
 
+      # Spec 4 architecture gate (ADC-474): assert the package restructure invariants
+      # (no flat modules, <=500-line files, symbolic layers never import the runtime, acyclic
+      # import graph, public surface resolves). These tests live under tests/architecture/ and are
+      # NOT discovered by the python/tests auto-runner below, so they need their own step. They are
+      # source-only (test_public_imports skips itself when _pops is absent), run fast, and gate the
+      # structure independent of the build -- only on shard 0 to avoid redundant matrix reruns.
+      - name: Spec 4 architecture tests
+        if: matrix.shard == 0
+        run: |
+          pip install --upgrade pip pytest
+          python3 -m pytest tests/architecture -q
+
       # ccache du module Python. ADC-366: PER-SHARD write key so the N shards finishing together do not
       # race on one shared key (GitHub would keep only the first; a partial cache could win). restore-keys
       # still fall back to this shard on the branch, then master, then ANY python ccache, so a fresh shard
