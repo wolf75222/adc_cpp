@@ -28,8 +28,8 @@ the compatible transport brick. It is the `state=` argument of `pops.Model(...)`
 | Brick | Signature | Declared variables | Required transport |
 |---|---|---|---|
 | `Scalar` | `pops.Scalar()` | 1 conservative variable `n` (transported density) ; primitive = conservative (`n`). | `ExB` |
-| `FluidState` (compressible) | `pops.FluidState(kind="compressible", gamma=1.4)` | 4 variables `[rho, rho_u, rho_v, E]`, primitives `[rho, u, v, p]` ; carries `gamma` (reported into `spec.gamma`). | `CompressibleFlux` |
-| `FluidState` (isothermal) | `pops.FluidState(kind="isothermal", cs2=0.5, vacuum_floor=0.0)` | 3 variables `[rho, rho_u, rho_v]`, primitives `[rho, u, v]` ; carries `cs2` (reported into `spec.cs2`) and `vacuum_floor` (reported into `spec.vacuum_floor`). | `IsothermalFlux` |
+| `FluidState` (compressible) | `pops.FluidState.compressible(gamma=1.4)` | 4 variables `[rho, rho_u, rho_v, E]`, primitives `[rho, u, v, p]` ; carries `gamma` (reported into `spec.gamma`). | `CompressibleFlux` |
+| `FluidState` (isothermal) | `pops.FluidState.isothermal(cs2=0.5, vacuum_floor=0.0)` | 3 variables `[rho, rho_u, rho_v]`, primitives `[rho, u, v]` ; carries `cs2` (reported into `spec.cs2`) and `vacuum_floor` (reported into `spec.vacuum_floor`). | `IsothermalFlux` |
 
 `FluidState(kind=...)` only accepts `"compressible"` or `"isothermal"` (any other value raises
 a `ValueError`). The `gamma` / `cs2` arguments are stored even when the `kind` does not use them
@@ -148,7 +148,7 @@ bricks per block). `add_elliptic_model(...)` is thus the explicit form of `set_p
 
 ```python
 # ces deux appels sont equivalents (memes numeriques) :
-sim.set_poisson(rhs="charge_density", solver="geometric_mg", bc="dirichlet",
+sim.set_poisson(rhs="charge_density", solver="geometric_mg", bc=pops.Dirichlet(),
                 wall="circle", wall_radius=0.40)
 
 sim.add_elliptic_model(
@@ -156,7 +156,7 @@ sim.add_elliptic_model(
     pops.elliptic(operator=pops.div_eps_grad(1.0), rhs=pops.charge_density(),
                  output=pops.electric_field_from_potential()),
     solver=pops.EllipticSolver("geometric_mg"),
-    bc="dirichlet", wall="circle", wall_radius=0.40,
+    bc=pops.Dirichlet(), wall="circle", wall_radius=0.40,
 )
 ```
 
@@ -490,7 +490,7 @@ sim.add_block(
 )
 
 # --- Poisson de systeme avec mur conducteur circulaire (Dirichlet) ---
-sim.set_poisson(bc="dirichlet", wall="circle", wall_radius=0.40)
+sim.set_poisson(bc=pops.Dirichlet(), wall="circle", wall_radius=0.40)
 
 # --- densite annulaire initiale (anneau d'electrons creux) ---
 xs = (np.arange(n) + 0.5) / n

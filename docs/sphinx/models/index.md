@@ -65,8 +65,8 @@ GPU/MPI preserved). The available bricks, as exposed by `pops.*` (and their C++ 
 
 **State** (`state=`)
 - `pops.Scalar()`: scalar state (1 variable, e.g. a transported density).
-- `pops.FluidState(kind="compressible", gamma=1.4)`: compressible Euler (the index `gamma`).
-- `pops.FluidState(kind="isothermal", cs2=0.5)`: isothermal Euler (the sound speed `cs2`).
+- `pops.FluidState.compressible(gamma=1.4)`: compressible Euler (the index `gamma`).
+- `pops.FluidState.isothermal(cs2=0.5)`: isothermal Euler (the sound speed `cs2`).
 
 **Transport** (`transport=`)
 - `pops.ExB(B0=1.0)`: scalar advection by the ExB drift (magnetic field `B0`),

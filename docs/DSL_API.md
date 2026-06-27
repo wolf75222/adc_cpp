@@ -92,7 +92,7 @@ amr.add_equation("fluide",
 ```
 
 Important points :
-- `riemann=` names the NUMERICAL flux (`rusanov`/`hllc`/`roe`) ; `m.flux(...)` is the PHYSICAL flux.
+- `riemann=` names the NUMERICAL flux (`Rusanov()`/`HLLC()`/`Roe()` from `pops.numerics.riemann`) ; `m.flux(...)` is the PHYSICAL flux.
 - `fft` / `fft_spectral` now run under `System` in MPI `np>1` (distributed via a box-slab remap, `RemappedFFTSolver`, ADC-287) ; periodic constant-coefficient only -- use `geometric_mg` for walls, variable/anisotropic eps, or kappa.
 - `backend="production"` with `target="amr_system"` : `AmrSystem` is single- AND multi-block,
   explicit ; HLLC/Roe/`primitive` are wired on the Python AMR facade with a pressure guard: HLLC/Roe require a
