@@ -100,6 +100,8 @@ bash scripts/build_python.sh   # build + install, then pops.doctor()
 Released versions and binaries: the
 [Releases page](https://github.com/wolf75222/adc_cpp/releases).
 
+## Usage
+
 <p align="center">
   <img src="docs/anim_romeo_diocotron_amr3.gif" alt="Diocotron instability, 3-level AMR, on ROMEO" width="480">
 </p>
@@ -111,8 +113,6 @@ Reproducible local version (Python facade):
 <a href="https://github.com/wolf75222/adc_cases/tree/master/diocotron_amr"><code>adc_cases/diocotron_amr</code></a>.
 </sub>
 </div>
-
-## Usage
 
 ### From a C++ project
 
