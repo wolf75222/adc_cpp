@@ -169,6 +169,19 @@ class _ProgramInspect(_ProgramConstants):
                                  "message": msg})
         return warnings
 
+    def scratch_plan(self, model=None):
+        """The scratch-buffer liveness plan of this Program (Spec 5 sec.13.11.3, criterion #38).
+
+        A thin delegator to :func:`pops.codegen.scratch_plan.build_scratch_plan` (lazy import, so
+        ``pops.time`` keeps no codegen edge at module scope): the analysis -- per-category scratch
+        counts, the provably-reusable buffers, the rejected reuse and the persistent Krylov /
+        multigrid solver buffers -- lives in the codegen layer; this builds it off ``self``'s IR.
+        Returns a :class:`pops.codegen.scratch_plan.ScratchPlan`, inspectable BEFORE any run. PURE: it
+        reuses :meth:`scratch_liveness` / :meth:`buffer_reuse_report`, mutates nothing, never compiles
+        or allocates."""
+        from pops.codegen.scratch_plan import build_scratch_plan
+        return build_scratch_plan(self, model=model)
+
     def estimate_report(self):
         """A human-readable cost report: the static memory-traffic / kernel-count :meth:`estimate`,
         the buffer-reuse summary and any GPU detector warnings (Spec 3 s28 inspection surface,

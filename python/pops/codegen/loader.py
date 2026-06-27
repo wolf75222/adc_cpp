@@ -199,6 +199,21 @@ class CompiledProblem:
         from pops.codegen.inspect_compiled import build_memory_estimate
         return build_memory_estimate(self, mesh, platform=platform, layout=layout)
 
+    def scratch_plan(self):
+        """The scratch-buffer liveness plan of this artifact's time Program (Spec 5 sec.13.11.3, #38).
+
+        Returns a :class:`pops.codegen.scratch_plan.ScratchPlan`: the per-category scratch counts
+        (state / rhs / scalar-field), the PROVABLY-reusable buffers (scratch nodes whose SSA live
+        ranges are disjoint, so the codegen may share one buffer), the REJECTED reuse (with the
+        reason -- a still-live occupant or an aux/field barrier) and the PERSISTENT Krylov / multigrid
+        solver buffers. Computed by a liveness analysis over the carried Program IR
+        (``Program.scratch_liveness`` / ``buffer_reuse_report``); the step-body reuse is EXACT, the
+        persistent solver counts are conservative and labelled so. It NEVER binds, dlopens or
+        allocates -- it is inspectable BEFORE ``System.install``. Raises a clear error if this handle
+        carries no Program."""
+        from pops.codegen.scratch_plan import build_scratch_plan
+        return build_scratch_plan(self._require_program("scratch_plan"), model=self.model)
+
     # --- inspection completeness (Spec 5 sec.12.1, criterion #15) -------------
     # The print(compiled) reports + the codegen/IR dumps. All INERT metadata-reading (they aggregate
     # the carried Program + model + compile artifacts), EXCEPT dump_cpp which REUSES the existing

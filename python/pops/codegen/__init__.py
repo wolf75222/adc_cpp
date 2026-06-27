@@ -18,6 +18,8 @@ from .loader import CompiledProblem  # noqa: F401
 from .library_codegen import emit_library_cpp  # noqa: F401
 # Spec 5 (sec.12.2 / 12.3): inert introspection of a compiled artifact (bind arguments + memory).
 from .inspect_compiled import Arguments, MemoryEstimate  # noqa: F401
+# Spec 5 (sec.13.11.3 / criterion 38): inert scratch-liveness plan of a compiled time Program.
+from .scratch_plan import ScratchPlan, build_scratch_plan  # noqa: F401
 # Spec 5 (sec.12.1): inert printable reports of a compiled artifact (inspect / requirements / bind).
 from .inspect_report import CompiledReport, RequirementsReport, BindReport  # noqa: F401
 # Spec 5 (sec.13.8): typed codegen optimization policy + numeric math modes.
@@ -43,6 +45,7 @@ __all__ = [
     "compile_problem",
     "CompiledProblem",
     "Arguments", "MemoryEstimate",
+    "ScratchPlan", "build_scratch_plan",
     "CompiledReport", "RequirementsReport", "BindReport",
     "emit_library_cpp",
     "Optimization", "ConservativeFusion", "Disabled",
