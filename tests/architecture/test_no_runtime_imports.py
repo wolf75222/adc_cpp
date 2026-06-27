@@ -22,7 +22,7 @@ POPS = REPO_ROOT / "python" / "pops"
 # Symbolic (authoring/IR) layers that must not touch the runtime at module scope.
 SYMBOLIC_LAYERS = ("ir", "model", "physics", "time", "lib", "mesh",
                    "numerics", "moments", "diagnostics", "params", "output", "external",
-                   "fields")
+                   "fields", "linalg")
 
 # Forbidden module-scope import targets (and their dotted sub-modules).
 FORBIDDEN_ROOTS = ("_pops", "pops.codegen", "pops.runtime", "pops._pops")

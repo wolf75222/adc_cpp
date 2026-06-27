@@ -57,7 +57,7 @@ __all__ = [
     "electric_field_from_potential", "EllipticSolver", "EllipticModel",
     "Ionization", "Collision", "ThermalExchange",
     "PythonFlux", "time", "model", "math", "physics", "lib", "mesh",
-    "params", "output", "external", "fields",
+    "params", "output", "external", "fields", "linalg",
     "abi_key", "capabilities", "inspect_capabilities",
     "set_threads", "has_kokkos", "parallel_info", "doctor",
     "compile_problem", "CompiledProblem", "CompiledTime",
@@ -77,6 +77,7 @@ from . import params  # noqa: E402  (pops.params typed scalar params; pure stdli
 from . import output  # noqa: E402  (pops.output typed output/checkpoint policies; pure stdlib, Spec 5)
 from . import external  # noqa: E402  (pops.external compiled-brick references; pure stdlib, Spec 5)
 from . import fields  # noqa: E402  (pops.fields typed elliptic field-problem authoring; pure stdlib, Spec 5)
+from . import linalg  # noqa: E402  (pops.linalg abstract algebra: names A x = b; pure stdlib, Spec 5)
 from .codegen.library import (  # noqa: E402,F401  (re-export: brick-library manifest API, Spec 3 section 21)
     LibraryManifest, compile_library, read_library_manifest)
 from .time import CompiledTime  # noqa: E402,F401  (re-export: compiled-Program time policy)
