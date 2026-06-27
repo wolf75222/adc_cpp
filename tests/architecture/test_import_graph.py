@@ -36,9 +36,13 @@ ALLOWED = {
     "time": {"ir", "model"},
     "mesh": set(),  # Spec 5: pure mesh/layout/AMR descriptors; import nothing else in pops.
     # Spec 5 central packages: inert descriptor catalogs. numerics/diagnostics/params/output/
-    # external import only the flat pops.descriptors / pops.math modules (not tracked layers);
-    # moments imports the symbolic pops.ir. None import the runtime.
+    # external/fields import only the flat pops.descriptors / pops.math modules (not tracked
+    # layers); moments imports the symbolic pops.ir. None import the runtime.
     "numerics": set(),
+    # Spec 5 Phase E: pops.fields authoring imports only pops.descriptors + pops.math at
+    # module scope. fields.aux re-exports pops.mesh.aux.AuxHalo via a LAZY module __getattr__
+    # (in-function import), so it adds no module-scope mesh edge -> ALLOWED stays empty.
+    "fields": set(),
     "moments": {"ir"},
     "diagnostics": set(),
     "params": set(),

@@ -18,6 +18,7 @@ CENTRAL_PACKAGES = (
     "params",        # typed scalar params
     "output",        # output/checkpoint policies
     "external",      # compiled-brick references
+    "fields",        # typed elliptic field-problem authoring (Spec 5 Phase E)
 )
 
 # Catalogs Spec 5 moves OUT of pops.lib (no longer their own modules under lib/).
