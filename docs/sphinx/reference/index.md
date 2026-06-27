@@ -28,6 +28,8 @@ typed-ir
 spec2-builder-layer
 native-numerics
 typed-bricks
+spec5-packages
+migration-strings-to-typed
 multispecies
 program-scheduler
 custom-solvers

@@ -261,6 +261,27 @@ tested_by = ["python/tests/test_lib_descriptors.py", "python/tests/test_external
              "tests/test_external_brick_json.cpp"]
 testable = false
 
+[docs."docs/sphinx/reference/spec5-packages.md"]
+owner = "Romain"
+mode = "warning"
+depends_on = ["python/pops/numerics", "python/pops/fields", "python/pops/mesh",
+              "python/pops/params", "python/pops/output", "python/pops/external",
+              "python/pops/diagnostics", "python/pops/descriptors.py",
+              "python/pops/codegen/optimization.py", "python/pops/codegen/math_options.py"]
+tested_by = []
+testable = false
+reviewed = "cd88a898"
+
+[docs."docs/sphinx/reference/migration-strings-to-typed.md"]
+owner = "Romain"
+mode = "warning"
+depends_on = ["python/pops/numerics", "python/pops/mesh", "python/pops/output",
+              "python/pops/params", "python/pops/codegen/optimization.py",
+              "python/pops/descriptors.py"]
+tested_by = []
+testable = false
+reviewed = "cd88a898"
+
 [docs."docs/sphinx/reference/multispecies.md"]
 owner = "Romain"
 mode = "warning"
@@ -433,6 +454,14 @@ mode = "warning"
 depends_on = []
 tested_by = []
 testable = false
+
+[docs."docs/sphinx/concepts/typed-api.md"]
+owner = "Romain"
+mode = "warning"
+depends_on = ["python/pops/descriptors.py"]
+tested_by = []
+testable = false
+reviewed = "cd88a898"
 
 [docs."docs/sphinx/concepts/multi-block-multi-species.md"]
 owner = "Romain"

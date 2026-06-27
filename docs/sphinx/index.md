@@ -49,6 +49,7 @@ tutorials/isothermal-two-fluid-ap
 :caption: Concepts
 
 concepts/hyperbolic-elliptic-systems
+concepts/typed-api
 concepts/physical-model
 concepts/conservative-primitive-variables
 concepts/fluxes-sources-eigenvalues
