@@ -1,14 +1,18 @@
 """Spec 4: the intra-pops import graph is acyclic and respects the layering.
 
-The seven sub-packages form a directed acyclic dependency stack:
+The sub-packages form a directed acyclic dependency stack:
 
-    ir       imports nothing else in pops
-    model    -> ir
-    physics  -> ir, model
-    time     -> ir, model
-    lib      -> ir, model, time, physics
-    codegen  -> ir, model, physics, time, lib   (lowering, no _pops at module scope)
-    runtime  -> everything, and is the ONLY layer allowed to import _pops
+    ir        imports nothing else in pops
+    model     -> ir
+    physics   -> ir, model
+    time      -> ir, model
+    mesh      -> (nothing)                       (Spec 5: pure mesh/layout/AMR descriptors)
+    numerics  -> (nothing)                       (Spec 5: discretisation descriptors)
+    moments   -> ir                              (Spec 5: moment-model toolkit)
+    diagnostics / params / output / external -> (nothing)   (Spec 5: inert descriptors)
+    lib       -> ir, model, time, physics, moments
+    codegen   -> ir, model, physics, time, lib   (lowering, no _pops at module scope)
+    runtime   -> everything, and is the ONLY layer allowed to import _pops
 
 This test builds the cross-layer edges from module-scope imports (``ast``,
 ``col_offset == 0``) between sub-packages and asserts (a) the graph has no cycle and
@@ -31,7 +35,16 @@ ALLOWED = {
     "physics": {"ir", "model"},
     "time": {"ir", "model"},
     "mesh": set(),  # Spec 5: pure mesh/layout/AMR descriptors; import nothing else in pops.
-    "lib": {"ir", "model", "time", "physics"},
+    # Spec 5 central packages: inert descriptor catalogs. numerics/diagnostics/params/output/
+    # external import only the flat pops.descriptors / pops.math modules (not tracked layers);
+    # moments imports the symbolic pops.ir. None import the runtime.
+    "numerics": set(),
+    "moments": {"ir"},
+    "diagnostics": set(),
+    "params": set(),
+    "output": set(),
+    "external": set(),
+    "lib": {"ir", "model", "time", "physics", "moments"},  # lib.models wraps pops.moments
     "codegen": {"ir", "model", "physics", "time", "lib"},
     "runtime": {"ir", "model", "physics", "time", "lib", "mesh", "codegen"},
 }
