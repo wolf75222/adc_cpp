@@ -1,4 +1,4 @@
-"""pops.moments.speeds -- the wave-speed strategy descriptor (inert).
+"""pops.moments.speeds -- the wave-speed strategy descriptor (Spec 5 sec.6).
 
 Maps the moment-model wave-speed strategy onto the engine's ``exact_speeds`` / ``roe``
 flags:
@@ -8,17 +8,23 @@ flags:
 * ``ROE_DISSIPATION`` -- additionally emit the generic Roe dissipation (``roe=True``).
 * ``BOUNDED`` -- the caller sets the wave speeds itself (``exact_speeds=False``).
 
-Inert; it records the choice and exposes it as the engine flags on ``.build()``.
+It CHOOSES the wave-speed algorithm, so it is a typed :class:`pops.descriptors.Descriptor`
+(Spec 5 sec.6): it declares its options / capabilities and is inspectable. Inert -- it
+records the choice and exposes it as the engine flags on ``.build()``; the eigenvalue / Roe
+arithmetic is generated and runs in C++.
 """
+from pops.descriptors import Descriptor
 
 
-class ExactSpeeds:
-    """The wave-speed strategy a moment hierarchy uses (inert descriptor).
+class ExactSpeeds(Descriptor):
+    """The wave-speed strategy a moment hierarchy uses (route-choosing descriptor).
 
     ``EXACT_EIGENVALUES`` / ``ROE_DISSIPATION`` / ``BOUNDED`` map to the engine's
     ``exact_speeds`` / ``roe`` flags. It records the choice; the eigenvalue / Roe
     arithmetic is generated and runs in C++.
     """
+
+    category = "wave_speed"
 
     EXACT_EIGENVALUES = "exact_eigenvalues"
     ROE_DISSIPATION = "roe_dissipation"
@@ -47,6 +53,12 @@ class ExactSpeeds:
     def roe(self):
         """The engine ``roe`` flag (True only for the ROE_DISSIPATION strategy)."""
         return self.kind == ExactSpeeds.ROE_DISSIPATION
+
+    def options(self):
+        return {"kind": self.kind}
+
+    def capabilities(self):
+        return {"exact_speeds": self.exact_speeds, "roe": self.roe}
 
     def __repr__(self):
         return "ExactSpeeds(%r)" % (self.kind,)

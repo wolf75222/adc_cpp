@@ -7,6 +7,8 @@ the DSL compiler; no lazy import is needed here.
 """
 from math import comb
 
+from pops.descriptors import Descriptor
+
 from .model_builder import moment_indices, _pow
 
 
@@ -135,17 +137,28 @@ class VlasovSources:
         return bgk_source(M, nu)
 
 
-class MagneticMomentSource:
+class MagneticMomentSource(Descriptor):
     """Descriptor of a pure-magnetic moment source: ``omega_c(B) = q_over_m * B``.
 
-    Records the cyclotron-frequency inputs (the ``q_over_m`` param name and the ``b_field``
-    aux name); :meth:`as_sources` returns a sources callable forwarding to the magnetic
-    branch of :func:`lorentz_sources` (zero electric field). It carries no arithmetic.
+    It CHOOSES the magnetic-source route, binding which ``q_over_m`` param name and
+    ``b_field`` aux name the Lorentz magnetic branch reads, so it is a typed
+    :class:`pops.descriptors.Descriptor` (Spec 5 sec.6): it declares its options /
+    capabilities and is inspectable. :meth:`as_sources` returns a sources callable
+    forwarding to the magnetic branch of :func:`lorentz_sources` (zero electric field).
+    It carries no arithmetic.
     """
+
+    category = "moment_source"
 
     def __init__(self, q_over_m="q_over_m", b_field="B_z"):
         self.q_over_m = str(q_over_m)
         self.b_field = str(b_field)
+
+    def options(self):
+        return {"q_over_m": self.q_over_m, "b_field": self.b_field}
+
+    def capabilities(self):
+        return {"provides": "magnetic_lorentz"}
 
     def as_sources(self, q_over_m_value=1.0):
         """A ``(m, M) -> list`` sources callable: ``omega_c = q_over_m * B`` (electric field 0).
