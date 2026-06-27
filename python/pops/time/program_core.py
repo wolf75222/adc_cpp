@@ -4,7 +4,9 @@ State / field / RHS / source / apply construction (the operator-first builder co
 """
 from pops.time.program_base import _ProgramConstants
 from pops.time.schedule import Schedule
-from pops.time.values import Value, _Coeff, _CoupledResult, _Operator, _state_base_name, _to_affine
+from pops.time.values import (
+    Value, _Coeff, _CoupledResult, _Operator, _resolve_handle, _state_base_name, _to_affine,
+)
 
 
 class _ProgramCore(_ProgramConstants):
@@ -28,16 +30,31 @@ class _ProgramCore(_ProgramConstants):
             self._values.append(v)
         return v
 
-    def state(self, block, space=None):
-        """Reference the current conservative state of ``block`` at the start of the step.
+    def state(self, arg=None, space=None, *, block=None):
+        """Reference the current conservative state of a block at the start of the step.
+
+        Two forms (additive; the positional form is the historical one, byte-identical):
+
+          - ``P.state("plasma")`` / ``P.state("plasma", space=...)`` (LEGACY) returns the State
+            :class:`pops.time.values.Value` of block ``"plasma"`` -- the positional argument is the
+            block name;
+          - ``P.state("U", block="plasma")`` (Spec 5 sec.5.3.1) returns a
+            :class:`pops.time.handles.TimeState` -- a family of typed temporal-version handles
+            (``.n`` / ``.stage`` / ``.next`` / ``.prev``) for block ``"plasma"`` named ``"U"``.
+
+        The handle form is detected SOLELY by the ``block=`` keyword (no legacy caller passes it),
+        so the positional path is unchanged.
 
         @p space (Spec 2): the operator-first :class:`pops.model.StateSpace` this block instantiates.
         It is recorded for type checking (a State tagged with space U cannot be combined with a
         Rate(V), and an operator expecting state U cannot be called on it) and is NOT serialized into
         the IR. ``None`` keeps the legacy untyped state (no space checks)."""
-        if not isinstance(block, str) or not block:
+        if block is not None:
+            from pops.time.handles import TimeState
+            return TimeState(self, block, name=arg or "U")
+        if not isinstance(arg, str) or not arg:
             raise ValueError("state: block must be a non-empty string")
-        v = self._new("state", "state", (), {}, block, block)
+        v = self._new("state", "state", (), {}, arg, arg)
         v.space = space
         return v
 
@@ -49,6 +66,9 @@ class _ProgramCore(_ProgramConstants):
         the default Poisson coupling; its derived aux populate that field's named aux channel. The
         multi-field RUNTIME is DEFERRED: a non-None @p field lowers to a clear NotImplementedError
         (the IR records it so a program reads cleanly when the runtime lands)."""
+        # A defined temporal-version handle (U.stage(k) / U.next / U.prev) resolves to its Value
+        # here so it composes wherever a State does; a plain Value / None / str is unchanged.
+        name, state = _resolve_handle(name), _resolve_handle(state)
         if isinstance(name, Value) and state is None:
             name, state = None, name
         if not (isinstance(state, Value) and state.vtype == "state"):
@@ -279,6 +299,7 @@ class _ProgramCore(_ProgramConstants):
         evaluated flux fields: so splitting the physical flux into named pieces that sum to it
         reproduces the same -div F to round-off. Mixing ``"default"`` with named fluxes is rejected
         (the two divergence stencils differ); request either the default or a set of named fluxes."""
+        state, fields = _resolve_handle(state), _resolve_handle(fields)
         if isinstance(name, Value):
             raise ValueError("rhs: pass state=/fields= by keyword (first arg is the debug name)")
         if not (isinstance(state, Value) and state.vtype == "state"):
@@ -343,6 +364,7 @@ class _ProgramCore(_ProgramConstants):
         """Evaluate a single named model source ``S_name(U, fields)`` (``m.source_term``) on its own.
         Returns an RHS-like value (a dU/dt contribution) usable in linear combinations. Named sources
         are never summed implicitly; this requests exactly one."""
+        state, fields = _resolve_handle(state), _resolve_handle(fields)
         if not isinstance(name, str) or not name:
             raise ValueError("source: a non-empty source name is required")
         if not (isinstance(state, Value) and state.vtype == "state"):
@@ -366,6 +388,7 @@ class _ProgramCore(_ProgramConstants):
     def apply(self, operator=None, state=None, fields=None, name=None):
         """Apply a linear-source operator to a state: ``LU = L_name(aux, params) U``. ``operator`` is
         a `linear_source` value (or its name). Returns an RHS-like value."""
+        state, fields = _resolve_handle(state), _resolve_handle(fields)
         lname = self._linear_source_name(operator, "apply")
         if not (isinstance(state, Value) and state.vtype == "state"):
             raise ValueError("apply: a State value is required (state=...)")

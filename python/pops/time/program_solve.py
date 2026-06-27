@@ -3,7 +3,7 @@
 Krylov solve_linear, histories, commits, board sugar (fields/define/solve) and records.
 """
 from pops.time.program_base import _ProgramConstants
-from pops.time.values import StageStateSet, Value, _Affine, _is_field_value
+from pops.time.values import StageStateSet, Value, _Affine, _is_field_value, _resolve_handle
 
 
 class _ProgramSolve(_ProgramConstants):
@@ -106,13 +106,42 @@ class _ProgramSolve(_ProgramConstants):
         self._histories.setdefault(name, 1)
         return self._new("state", "store_history", (value,), {"history": name}, name, value.block)
 
-    def commit(self, block, state):
+    def keep_history(self, timestate, depth, cold_start=None):
+        """Keep a ring of past states for a :class:`pops.time.handles.TimeState` (Spec 5 sec.5.3.1).
+
+        Records the ring ``depth`` and the ``cold_start`` policy on the handle and lowers a
+        ``store_history("<block>.<name>", U.n)`` so the System-owned ring is populated every step.
+        After this, ``U.prev(lag)`` (for ``lag <= depth``) reads the lagged state via ``P.history``.
+        ``cold_start`` defaults to :class:`pops.time.history.CopyCurrent` (seed every slot with the
+        current state on step 0, the historical behavior). Returns the lowered ``store_history`` node.
+        """
+        from pops.time.handles import TimeState
+        if not isinstance(timestate, TimeState):
+            raise ValueError(
+                "keep_history: a TimeState handle is required (P.state('U', block=...))")
+        if timestate.program is not self:
+            raise ValueError("keep_history: the TimeState belongs to a different Program")
+        return timestate._keep_history(depth, cold_start)
+
+    def commit(self, block, state=None):
         """Replace the current state of ``block`` with ``state`` at the end of the step. Each block
         is committed AT MOST once; read-only blocks need no commit.
+
+        Two forms (additive; the positional ``(block, state)`` form is unchanged):
+
+          - ``P.commit("plasma", U_next)`` (LEGACY) commits a State value to a named block;
+          - ``P.commit(U.next)`` (Spec 5 sec.5.3.1) commits a single typed version handle to its own
+            block (``commit(handle.block, handle.value)``). The version must have been defined
+            (``T.define(U.next, ...)``) first; an undefined handle raises.
 
         @p state is normally a State value; a 1-component model's conservative state doubles as a
         scalar field, so a ``scalar_field`` (e.g. a ``solve_linear`` solution) is also accepted and
         copied back into the block state at commit (the final ``ctx.lincomb`` in the lowered body)."""
+        from pops.time.handles import _Version
+        if isinstance(block, _Version) and state is None:
+            version = block
+            return self.commit(version.block, version.value)  # version.value raises if undefined
+        state = _resolve_handle(state)  # P.commit("blk", U.next) also resolves a defined handle
         if not (isinstance(state, Value) and state.vtype in ("state", "scalar_field")):
             raise ValueError("commit: a State (or scalar_field) value is required")
         if state.prog is not self:
@@ -156,10 +185,36 @@ class _ProgramSolve(_ProgramConstants):
             return self.call(operator, *states, name=name)
         return self.solve_fields_from_blocks(states, name=name)
 
-    def define(self, name, value):
-        """Board sugar to name a value. An affine combination of states materializes via
-        ``linear_combine``; a ``rate(U) == <expr>`` equation keeps its right-hand side; any other
-        Value is named in place."""
+    def define(self, name, value=None):
+        """Board sugar to name a value, or lower a typed temporal-version handle (Spec 5 sec.5.3.1).
+
+        Two forms (additive; the ``(name, value)`` board form is unchanged):
+
+          - ``P.define("U1", U0 + dt * k0)`` (board sugar) names a value: an affine combination of
+            states materializes via ``linear_combine``, a ``rate(U) == <expr>`` equation keeps its
+            right-hand side, and any other Value is named in place;
+          - ``P.define(U.stage(1), U.n + dt * k0)`` / ``P.define(U.next, ...)`` (handle form) lowers
+            the same way through this method (with a generated name) and binds the resulting Value
+            onto the version handle, enforcing SSA single assignment. ``T.define(U.n, ...)`` raises
+            (the current state is read-only) and ``T.define(U.prev, ...)`` raises (history is
+            produced by the history policy).
+
+        The handle form is detected by the FIRST argument being a version handle; the legacy form
+        keeps a string name.
+        """
+        from pops.time.handles import TimeState, _Prev, _Version
+        if isinstance(name, (_Version, _Prev)):
+            timestate = name._timestate
+            return timestate._define(name, value)
+        if isinstance(name, TimeState):
+            raise ValueError(
+                "T.define: pass a version handle (U.stage(k) / U.next), not the TimeState itself")
+        if isinstance(name, Value):
+            # The handle ``U.n`` is a State Value (the current state). No legacy define names a Value
+            # (the board form always passes a string name), so a Value target can only be a misuse of
+            # the read-only current state -- reject it with the spec message.
+            raise ValueError("current state is read-only in Program")
+        value = _resolve_handle(value)  # a bare defined handle as the rhs names its resolved Value
         from pops import math as _bm
         if isinstance(value, _bm.Equation):
             if not isinstance(value.lhs, _bm.TimeDerivative):
