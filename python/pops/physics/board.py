@@ -42,6 +42,7 @@ class Model(_MultiSpeciesMixin):
         self._operator_inputs = {}  # registered op name -> declared field-input names
         self._aliases = {}          # board operator name -> registered op name
         self._invariants = {}
+        self._field_problems = {}   # name -> inert pops.fields field problem (Spec 5 sec.5.1/9.6)
         self._riemann = None        # selected Riemann descriptor (board surface)
         self._reconstruction = None
         self._riemann_hooks = {}    # capability formulas for the native-hook codegen (ADC-456)
@@ -204,6 +205,66 @@ class Model(_MultiSpeciesMixin):
         if solver is not None:
             self._field_solvers[name] = solver
         return h
+
+    def field_problem(self, name, equation, outputs=None, solver=None, bcs=None,
+                      coefficients=None):
+        """Author an inspectable elliptic field problem (Spec 5 sec.5.1 / sec.9.6).
+
+        The typed-object ergonomic shortcut: it CONSTRUCTS and RETURNS an inert
+        :class:`pops.fields.PoissonProblem` (or a :class:`pops.fields.FieldProblem` when
+        ``coefficients`` are present, e.g. a screened / anisotropic operator) describing the
+        solve ``-laplacian(phi) == rhs`` directly from a :class:`pops.math.Equation`, and
+        records it on the model's authoring state so :meth:`inspect` surfaces it.
+
+        Unlike :meth:`solve_field`, this method is INERT: it lowers ONLY to an inspectable
+        field-problem descriptor; it does NOT touch the dsl model, the elliptic right-hand
+        side, the operator graph, codegen or the runtime. Wiring the problem into the operator
+        graph (a second elliptic operator + aux channel) is the deeper lowering and stays
+        DEFERRED (see :meth:`solve_field` / the multi-elliptic runtime); this entry point only
+        produces the typed descriptor a user can ``validate()`` / ``inspect()`` before any run.
+
+        Args:
+            name: the field-problem name (also the unknown's display name when not derivable).
+            equation: a :class:`pops.math.Equation` of the form ``-laplacian(phi) == rhs``.
+            outputs: the produced fields (passed through to the descriptor's ``outputs``).
+            solver: the elliptic solver descriptor (carried; ``None`` leaves it unset so the
+                descriptor's own ``available`` / ``validate`` flags the missing solver).
+            bcs: an iterable of field boundary-condition descriptors (``pops.fields.bcs``).
+            coefficients: an optional operator coefficient; when present the descriptor is a
+                general :class:`pops.fields.FieldProblem` rather than a ``PoissonProblem``.
+        """
+        from pops import fields as _fields  # lazy: keep the module import-graph numpy-free.
+
+        if not isinstance(equation, _bm.Equation):
+            raise TypeError(
+                "field_problem(%r) expects a pops.math.Equation '-laplacian(phi) == rhs'; got %r"
+                % (name, type(equation).__name__))
+        unknown = equation.lhs.field if isinstance(equation.lhs, _bm.Laplacian) else name
+        cls = _fields.FieldProblem if coefficients is not None else _fields.PoissonProblem
+        problem = cls(name=name, unknown=unknown, equation=equation,
+                      coefficients=coefficients, bcs=tuple(bcs or ()), outputs=outputs,
+                      solver=solver)
+        self._field_problems[name] = problem
+        return problem
+
+    def inspect(self):
+        """A plain-dict, inert view of the model's authoring state (Spec 5 sec.12.1).
+
+        Reports the declared state / field / flux / source / operator names and the inspectable
+        field problems authored via :meth:`field_problem` (each as its descriptor's
+        :meth:`~pops.fields.FieldProblem.inspect` dict). Read-only: it touches no numerics,
+        codegen or runtime.
+        """
+        return {
+            "name": self.name,
+            "states": sorted(self._states),
+            "fields": sorted(self._fields),
+            "fluxes": sorted(self._fluxes),
+            "sources": sorted(self._sources),
+            "operators": sorted(self._operators),
+            "field_problems": {nm: prob.inspect()
+                               for nm, prob in self._field_problems.items()},
+        }
 
     def rate(self, name, equation):
         """Declare a rate operator from ``ddt(U) == -div(F) + sources``."""

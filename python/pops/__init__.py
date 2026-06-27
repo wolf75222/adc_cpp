@@ -58,7 +58,7 @@ __all__ = [
     "Ionization", "Collision", "ThermalExchange",
     "PythonFlux", "time", "model", "math", "physics", "lib", "mesh",
     "params", "output", "external", "fields", "linalg",
-    "abi_key", "capabilities", "inspect_capabilities",
+    "abi_key", "capabilities", "inspect_capabilities", "inspect_amr",
     "set_threads", "has_kokkos", "parallel_info", "doctor",
     "compile_problem", "CompiledProblem", "CompiledTime",
     "compile_library", "read_library_manifest", "LibraryManifest",
@@ -81,7 +81,7 @@ from . import linalg  # noqa: E402  (pops.linalg abstract algebra: names A x = b
 from .codegen.library import (  # noqa: E402,F401  (re-export: brick-library manifest API, Spec 3 section 21)
     LibraryManifest, compile_library, read_library_manifest)
 from .time import CompiledTime  # noqa: E402,F401  (re-export: compiled-Program time policy)
-from ._capabilities import inspect_capabilities  # noqa: E402,F401  (Spec 5: descriptor-sourced matrix)
+from ._capabilities import inspect_capabilities, inspect_amr  # noqa: E402,F401  (Spec 5: descriptor-sourced matrix + AMR report)
 
 
 # LAZY pops.compile_problem / pops.CompiledProblem (PEP 562): the codegen engine pulls numpy at
