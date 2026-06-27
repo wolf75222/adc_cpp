@@ -11,6 +11,7 @@ from pops.runtime import threading as _threading
 from pops.runtime.bricks import Spatial, Explicit, Split
 from pops.runtime._amr_system_equation import _AmrSystemEquation
 from pops.runtime._amr_system_io import _AmrSystemIO
+from pops.runtime._system_unified_install import validate_install_arguments
 
 
 class AmrSystem(_AmrSystemEquation, _AmrSystemIO):
@@ -166,6 +167,129 @@ class AmrSystem(_AmrSystemEquation, _AmrSystemIO):
                           getattr(time, "newton_fail_policy", "none"),
                           getattr(time, "newton_diagnostics", False),
                           getattr(spatial, "positivity_floor", 0.0))
+
+    def install(self, compiled=None, *, instances=None, params=None, aux=None, solvers=None,
+                cadence=None):
+        """Unified install on the AMR hierarchy (Spec 5 sec.10) -- signature parity with
+        ``System.install``.
+
+        Runs the SAME early bind-input validation (``validate_install_arguments``: reject -- BEFORE
+        any native mutation -- an install missing a REQUIRED argument the artifact declares, with one
+        clear actionable error), then lowers to the AMR layer:
+
+          - NATIVE install (``compiled=None``): wires each instance with ``add_equation`` (native
+            bricks / a CompiledModel target='amr_system'), sets the field solvers (``set_poisson``),
+            the aux inputs (``set_magnetic_field`` / ``set_aux_field``) and each instance's initial
+            density (``set_density``). This is the real AMR add path; a full run is Kokkos-gated.
+          - COMPILED install (a ``compiled`` handle carrying a time Program): the early validation
+            runs, then a clear ``NotImplementedError`` -- the AMR runtime has no ``install_program``
+            seam (a compiled whole-system time Program is a single-level System concept today). Use
+            the NATIVE AMR path (``compiled=None`` with a ``target='amr_system'`` CompiledModel per
+            instance), or ``System`` for a compiled time Program.
+
+        @param compiled a compiled time-Program handle, or ``None`` for a native AMR install.
+        @param instances dict {name: {"initial": array, "spatial": <brick>, "model": <model>,
+            "time": <policy>}}; the block is bound by the dict KEY.
+        @param params runtime parameters -- NOT wired on AMR (no ``set_block_params``); a non-empty
+            ``params=`` raises ``NotImplementedError`` rather than dropping them silently.
+        @param aux dict {field_name: array}: "B_z" -> set_magnetic_field, "T_e" rejected (derived),
+            any other -> set_aux_field on the declaring block.
+        @param solvers dict {field: <solver>}: lowered to set_poisson (default Poisson field only).
+        @param cadence NOT wired on AMR (no ``set_program_cadence``); a non-None value raises.
+        """
+        instances = instances or {}
+        params = params or {}
+        aux = aux or {}
+        solvers = solvers or {}
+
+        # (0) EARLY VALIDATION (shared with System.install): reject a compiled install missing a
+        # required declared argument BEFORE any native mutation. Inert (reads arguments() metadata).
+        validate_install_arguments(self, compiled, instances, params, aux, solvers)
+
+        if compiled is not None:
+            raise NotImplementedError(
+                "AmrSystem.install: a COMPILED time Program is not installable on the AMR runtime "
+                "(no install_program seam: a compiled whole-system time Program is a single-level "
+                "System concept today). Use the NATIVE AMR path (compiled=None with a "
+                "target='amr_system' CompiledModel per instance), or System for a compiled Program. "
+                "The early bind-input validation above still ran.")
+        if params:
+            raise NotImplementedError(
+                "AmrSystem.install: runtime params (params=%s) are not wired on AMR (no "
+                "set_block_params); set them on the native model, or use System." % sorted(params))
+        if cadence is not None:
+            raise NotImplementedError(
+                "AmrSystem.install: a program cadence is not wired on AMR (no set_program_cadence); "
+                "set substeps / stride on the native time policy instead.")
+
+        # (1) FIELD SOLVERS first (parity with System: set_poisson before adding blocks).
+        for field, solver_brick in solvers.items():
+            self._install_solver(field, solver_brick)
+
+        # (2) INSTANCES: add each named block (add_equation), then set its initial density.
+        for name, spec in instances.items():
+            if not isinstance(spec, dict):
+                raise TypeError("AmrSystem.install: instances[%r] must be a dict "
+                                "(initial/spatial/time/model); got %r"
+                                % (name, type(spec).__name__))
+            model = spec.get("model")
+            if model is None:
+                raise ValueError(
+                    "AmrSystem.install: instance %r has no block model -- supply "
+                    "instances[%r]['model'] (an pops.Model(...) / a target='amr_system' "
+                    "CompiledModel). A native AMR install carries no compiled handle to fall back "
+                    "on." % (name, name))
+            spatial = spec.get("spatial")
+            time = spec.get("time")
+            self.add_equation(name, model, spatial=spatial, time=time)
+
+        # (3) AUX fields: B_z -> set_magnetic_field; named -> set_aux_field. After the blocks exist
+        # (a named aux resolves against the block's declared aux table).
+        for field_name, field in aux.items():
+            self._install_aux(field_name, field)
+
+        # (4) INITIAL state per instance (set_density on the AMR coarse base level).
+        for name, spec in instances.items():
+            initial = spec.get("initial")
+            if initial is not None:
+                self.set_density(name, initial)
+
+    def _install_solver(self, field, solver_brick):
+        """Lower a field-solver selection to set_poisson (AMR). Only the default Poisson field is
+        wired; a second named elliptic field is deferred (NotImplementedError). Mirror of
+        System._install_solver, minus the System-only solver options the AMR set_poisson lacks."""
+        if field not in ("phi", "poisson", "charge_density", "default"):
+            raise NotImplementedError(
+                "AmrSystem.install: a second named elliptic field (%r) is not wired; only the "
+                "default Poisson field ('phi') is supported." % (field,))
+        token = solver_brick if isinstance(solver_brick, str) else (
+            getattr(solver_brick, "scheme", None) or getattr(solver_brick, "name", None))
+        if token is None:
+            raise TypeError("AmrSystem.install: solver must be a token string or an "
+                            "pops.lib.fields.<Solver>(...) descriptor; got %r"
+                            % type(solver_brick).__name__)
+        self.set_poisson(solver=token)
+
+    def _install_aux(self, field_name, field):
+        """Lower an aux entry on AMR: 'B_z' -> set_magnetic_field; 'T_e' rejected (derived); any
+        other name -> set_aux_field on the block that declares it. Mirror of System._install_aux."""
+        if field_name == "B_z":
+            self.set_magnetic_field(field)
+            return
+        if field_name == "T_e":
+            raise ValueError(
+                "AmrSystem.install: aux 'T_e' is DERIVED from a fluid block, not a static aux "
+                "field; use set_electron_temperature_from(block).")
+        block = None
+        for blk, table in self._aux_field_index.items():
+            if field_name in table:
+                block = blk
+                break
+        if block is None:
+            raise ValueError(
+                "AmrSystem.install: aux field %r is not declared by any installed instance; add the "
+                "instance with a model declaring m.aux_field(%r)." % (field_name, field_name))
+        self.set_aux_field(block, field_name, field)
 
     def add_coupling(self, coupling):
         """Add a generic inter-species COUPLED SOURCE (pops.dsl.CoupledSource(...).compile(...))
