@@ -16,6 +16,8 @@ from .abi import check_compiled_matches_module  # noqa: F401
 from .compile import compile_problem  # noqa: F401
 from .loader import CompiledProblem  # noqa: F401
 from .library_codegen import emit_library_cpp  # noqa: F401
+# Spec 5 (sec.12.2 / 12.3): inert introspection of a compiled artifact (bind arguments + memory).
+from .inspect_compiled import Arguments, MemoryEstimate  # noqa: F401
 # Spec 5 (sec.13.8): typed codegen optimization policy + numeric math modes.
 from .optimization import Optimization, ConservativeFusion, Disabled  # noqa: F401
 from .math_options import StrictMath, FastMath, DebugMath, GpuRegisterAware  # noqa: F401
@@ -35,6 +37,7 @@ __all__ = [
     "check_compiled_matches_module",
     "compile_problem",
     "CompiledProblem",
+    "Arguments", "MemoryEstimate",
     "emit_library_cpp",
     "Optimization", "ConservativeFusion", "Disabled",
     "StrictMath", "FastMath", "DebugMath", "GpuRegisterAware",

@@ -407,29 +407,67 @@ def compile_problem(so_path=None, *, model=None, time=None, backend="production"
     cc, cflags, lflags = pops_loader_build_flags(cxx)
     eff_std = _probe_cxx_std(cc, std or loader_cxx_std())
     abi_key = "%s|%s|%s" % (sig, cc, eff_std)
+    # Stable program (problem) hash + cache key (Spec 5 sec.12.4, #48): the program-source hash is
+    # the WHAT, the cache key combines it with the abi_key (the HOW) -- the same identity the
+    # out-of-source .so cache file name carries. Computed unconditionally so the metadata is present
+    # on BOTH the cache-hit and the fresh-compile path (and even when an explicit so_path is given).
+    program_hash = hashlib.sha256(src.encode()).hexdigest()
+    cache_key = hashlib.sha256(("%s|%s|program-production|%s" % (program_hash, abi_key, target))
+                               .encode()).hexdigest()
 
     if so_path is None:
-        program_hash = hashlib.sha256(src.encode()).hexdigest()
         so_path = _cache_so_path(program_hash, abi_key, "program-production", target,
                                  getattr(time, "name", "problem"))
         if not force and os.path.isfile(so_path):
             return CompiledProblem(so_path, time, model, abi_key, cc, eff_std,
-                                   libraries=library_manifests)
+                                   libraries=library_manifests, problem_hash=program_hash,
+                                   cache_key=cache_key)
 
     optflags = _dsl_optflags()
+    gen_src_path = os.path.splitext(so_path)[0] + ".cpp" if debug else None
     with tempfile.TemporaryDirectory() as tmp:
         cpp = os.path.join(tmp, "problem.cpp")
         with open(cpp, "w") as f:
             f.write(src)
         if debug:
             try:
-                with open(os.path.splitext(so_path)[0] + ".cpp", "w") as f:
+                with open(gen_src_path, "w") as f:
                     f.write(src)
             except OSError:
-                pass
+                gen_src_path = None
         flags = ["-shared", "-fPIC", "-std=" + eff_std, *optflags,
                  "-DPOPS_HEADER_SIG=\"%s\"" % sig, *cflags]
         cmd = [cc, *flags, "-I", include, cpp, "-o", so_path, *lflags]
+        # Record the compile command for introspection (Spec 5 sec.12.4, #49). The temporary .cpp is
+        # in a TemporaryDirectory that is gone after this block, so report the persistent debug .cpp
+        # (or "<generated>") rather than the vanished temp path; redact secrets/env in the tokens.
+        compile_command = _redact_compile_command(cmd, tmp_cpp=cpp,
+                                                  gen_src=gen_src_path or "<generated>")
         _run_compile(cmd, "compile_problem (backend production)")
     return CompiledProblem(so_path, time, model, abi_key, cc, eff_std,
-                           libraries=library_manifests)
+                           libraries=library_manifests, problem_hash=program_hash,
+                           cache_key=cache_key, compile_command=compile_command,
+                           generated_sources=[gen_src_path] if gen_src_path else [])
+
+
+def _redact_compile_command(cmd, *, tmp_cpp, gen_src):
+    """Return a redacted compile-command STRING for introspection (Spec 5 sec.12.4, #49).
+
+    The raw argv is safe to surface (it is a compiler invocation, not a credential), but two things
+    are normalised so the string is stable and leaks nothing machine-specific: the ephemeral
+    TemporaryDirectory .cpp path is replaced by the persistent generated-source path (or
+    ``<generated>``), and any token that looks like a secret/credential (``*token*`` / ``*secret*``
+    / ``*password*`` / ``*key*=value``) is masked. Header / include / library paths are KEPT (they
+    are part of the reproducible toolchain), only obvious secrets are masked."""
+    masked = []
+    for tok in cmd:
+        if tok == tmp_cpp:
+            masked.append(gen_src)
+            continue
+        low = tok.lower()
+        if (("token" in low or "secret" in low or "password" in low or "passwd" in low)
+                and "=" in tok):
+            masked.append(tok.split("=", 1)[0] + "=<redacted>")
+        else:
+            masked.append(tok)
+    return " ".join(masked)

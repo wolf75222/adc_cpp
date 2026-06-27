@@ -25,7 +25,8 @@ class CompiledProblem:
     path is expected).
     """
 
-    def __init__(self, so_path, program, model, abi_key, cxx, std, libraries=None):
+    def __init__(self, so_path, program, model, abi_key, cxx, std, libraries=None,
+                 problem_hash=None, cache_key=None, compile_command=None, generated_sources=None):
         self.so_path = so_path
         self.program = program          # the pops.time.Program that was lowered
         self.model = model              # the physical model (optional; added as a block in the MVP)
@@ -39,9 +40,68 @@ class CompiledProblem:
         # generated symbols) are exposed to the problem; a compiled library .so was already
         # dlopen'd (and ABI-guarded) by read_library_manifest.
         self.libraries = list(libraries) if libraries else []
+        # Compiled-artifact metadata (Spec 5 sec.12.4, #48-49): set by compile_problem. The
+        # problem hash is the program-SOURCE hash (the WHAT the .so was built from -- distinct from
+        # program_hash, the IR hash of the in-memory Program); cache_key is the (problem_hash|abi)
+        # identity the out-of-source cache file name carries; compile_command is the redacted
+        # compiler invocation; generated_sources are the .cpp files written for inspection (debug=).
+        # None on a route that does not record a value (e.g. an externally constructed handle) -- a
+        # documented absence, not a fabricated value (cf. the property accessors below).
+        self._problem_hash = problem_hash
+        self._cache_key = cache_key
+        self._compile_command = compile_command
+        self._generated_sources = list(generated_sources) if generated_sources else []
 
     def __fspath__(self):
         return self.so_path
+
+    # --- compiled-artifact metadata (Spec 5 sec.12.4, #48-49) ----------------
+    @property
+    def codegen_dir(self):
+        """Directory the compiled ``.so`` (and any generated source) lives in (sec.12.4, #48).
+
+        The out-of-source cache directory the .so was written to (``os.path.dirname(so_path)``);
+        the generated ``.cpp`` -- when ``compile_problem(debug=True)`` wrote one -- sits beside it.
+        ``None`` only if the handle carries no ``so_path``."""
+        import os
+        return os.path.dirname(self.so_path) if self.so_path else None
+
+    @property
+    def problem_hash(self):
+        """Stable hash of the program SOURCE the ``.so`` was compiled from (sec.12.4, #48).
+
+        The sha256 of the emitted C++ program text -- the cache identity (the WHAT). ``None`` for a
+        handle built outside ``compile_problem`` (it records no source hash); use
+        :attr:`program_hash` for the in-memory Program's IR hash, which is always available."""
+        return self._problem_hash
+
+    @property
+    def cache_key(self):
+        """The (problem source | abi_key | backend/target) cache key of the ``.so`` (sec.12.4, #48).
+
+        The sha256 the out-of-source build cache keys the artifact on; reproducing it requires the
+        same program, headers, compiler and C++ standard. ``None`` for an externally built handle."""
+        return self._cache_key
+
+    @property
+    def compile_command(self):
+        """The REDACTED compiler invocation that built the ``.so`` (sec.12.4, #49).
+
+        A single command string with the ephemeral temp source replaced by the generated-source
+        path and any secret-looking token masked (cf. ``_redact_compile_command``). ``None`` on a
+        cache HIT (the .so was not rebuilt this call -- a documented absence, never a fabricated
+        command) or for an externally constructed handle. Recompile with ``force=True`` to populate
+        it."""
+        return self._compile_command
+
+    @property
+    def generated_sources(self):
+        """The generated source files written for inspection (sec.12.4, #49).
+
+        The ``.cpp`` files ``compile_problem(debug=True)`` persisted next to the ``.so`` (the
+        default keeps the source only in a TemporaryDirectory, so this is empty unless ``debug``
+        was set). A list (possibly empty), never ``None``."""
+        return list(self._generated_sources)
 
     # --- operator introspection (Spec 2, S2-5): metadata read from the carried model,
     # no need to load or run the .so.
@@ -74,6 +134,48 @@ class CompiledProblem:
     def operator_capabilities(self, name):
         """The capabilities dict of operator ``name``."""
         return dict(self._intro_model().operator_registry().get(name).capabilities)
+
+    # --- bind-input + memory introspection (Spec 5 sec.12.2 / 12.3, #44-46) ---
+    # These read the carried metadata (the lowered Program + the physical model); they do NOT
+    # compile, bind, dlopen or read any runtime array.
+    def arguments(self):
+        """The runtime inputs this artifact expects at ``System.install`` (Spec 5 sec.12.2, #44-45).
+
+        Returns an :class:`pops.codegen.inspect_compiled.Arguments` listing -- WITHOUT any bind or
+        runtime data -- the instances (state space / components / required), params (type / kind /
+        required), aux (layout / required), solvers (problem / solver), outputs and the runtime
+        layout the artifact expects. Sourced from the carried Program (the blocks it commits, the
+        field solves it performs) and the physical model (its state / params / aux). It is DISTINCT
+        from :meth:`requirements`-style compile constraints: ``arguments`` lists what you must SUPPLY
+        to bind. It allocates and reads nothing."""
+        from pops.codegen.inspect_compiled import build_arguments
+        return build_arguments(self)
+
+    def estimate_memory(self, mesh, *, platform=None, layout=None):
+        """A FORMULA-based memory estimate on ``mesh`` (Spec 5 sec.12.3, #46).
+
+        Returns an :class:`pops.codegen.inspect_compiled.MemoryEstimate`: the state /
+        field-output / aux / RHS-scratch / state-scratch / scalar-field / Krylov / multigrid /
+        AMR-patch / halo / MPI-buffer byte budgets, computed as a FORMULA over the mesh shape and
+        the artifact's static cost (``Program.estimate``) + component counts. It NEVER allocates a
+        ``MultiFab``; every assumption is in :attr:`MemoryEstimate.assumptions` and the estimate is
+        CONSERVATIVE. @p mesh an ``pops.mesh.CartesianMesh`` (or an int / 2-tuple of extents); @p
+        platform an optional hint (``"mpi"`` adds the halo-exchange buffer); @p layout an optional
+        ``pops.mesh.layouts.AMR`` / ``Uniform`` for an AMR hierarchy estimate (conservative;
+        full-refinement worst case)."""
+        from pops.codegen.inspect_compiled import build_memory_estimate
+        return build_memory_estimate(self, mesh, platform=platform, layout=layout)
+
+    def __str__(self):
+        """A short, deterministic, array-free summary (Spec 5 sec.12.1, #40-41).
+
+        Prints the program name, a short program-source/IR hash, a short ABI key and the validated
+        library count -- never the ``.so`` contents and never a ``<...object at 0x...>`` repr. The
+        hash makes two artifacts of the same program look identical run to run (deterministic)."""
+        short_hash = (self._problem_hash or self.program_hash or "")[:12] or "none"
+        short_abi = (self.abi_key or "")[:12] or "none"
+        return ("CompiledProblem(name=%s, hash=%s, backend=%s, libraries=%d)"
+                % (self.program_name or "problem", short_hash, short_abi, len(self.libraries)))
 
     def __repr__(self):
         return "<CompiledProblem %r -> %s>" % (self.program_name, self.so_path)
