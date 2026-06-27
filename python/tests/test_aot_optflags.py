@@ -24,7 +24,7 @@ sys.path.insert(0, os.path.dirname(__file__))
 import pops  # noqa: E402  (the .so paths require the native module, like the neighboring AOT tests)
 from pops.codegen.cache import _cache_so_path, _platform_cache_key, pops_cache_dir
 from pops.codegen.toolchain import _native_kokkos_root
-from pops.codegen import compile as _cg_compile  # noqa: E402  (compile_aot + its toolchain helpers live here)
+from pops.codegen import compile_drivers as _cg_compile  # noqa: E402  (compile_aot + its toolchain helpers live here, after the Spec-4 codegen split)
 from test_dsl_phase_a import INCLUDE, build_euler, initial_state  # noqa: E402
 
 
