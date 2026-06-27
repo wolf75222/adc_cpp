@@ -128,15 +128,25 @@ class _ProgramCore(_ProgramConstants):
         return self
 
     def call(self, operator_name, *args, name=None, schedule=None):
-        """Call a typed operator by name (the operator-first level).
+        """Call a typed operator by name or handle (the operator-first level).
 
-        Resolves ``operator_name`` against the bound operator registry (see :meth:`bind_operators`),
+        ``operator_name`` is EITHER the string name of a declared operator OR the
+        :class:`pops.model.OperatorHandle` a declarer (``m.rate_operator`` / ``m.source_term`` /
+        ``m.linear_source``) returned (Spec 5 sec.14.2.3). A handle is a transparent alias for its
+        ``.name``: it is coerced to that name and follows the EXACT same resolution + lowering, so
+        ``P.call(handle, ...)`` builds the byte-identical IR as ``P.call(handle.name, ...)``. A plain
+        string passes through unchanged; any other type is a clear ``TypeError``.
+
+        Resolves the name against the bound operator registry (see :meth:`bind_operators`),
         type-checks the arguments against the operator's ``Signature``, then lowers to the equivalent
         primitive op so the result is IDENTICAL to the matching PDE shortcut: a ``field_operator`` to
         ``solve_fields``, a ``local_source`` to ``source``, a ``grid_operator`` / ``local_rate`` to
         ``rhs``, a ``local_linear_operator`` to ``linear_source``, a ``projection`` to ``project``.
         A Program composes operators by signature, never by a hardcoded PDE category.
         """
+        # Coerce an OperatorHandle to its name; a plain string is transparent; anything else is a
+        # clear typed surface error (cf. lower_backend(None): do not add a stricter string check).
+        operator_name = self._operator_call_name(operator_name)
         if self._registry is None:
             raise ValueError("P.call(%r): no operators bound; call P.bind_operators(model) first"
                              % (operator_name,))
@@ -161,6 +171,22 @@ class _ProgramCore(_ProgramConstants):
         if schedule is not None:
             result.attrs["schedule"] = schedule
         return result
+
+    def _operator_call_name(self, operator):
+        """Normalize a ``P.call`` operator selector to its registry name (Spec 5 sec.14.2.3).
+
+        Accepts EITHER a plain ``str`` (returned unchanged -- the legacy, transparent path) OR an
+        :class:`pops.model.OperatorHandle` (its ``.name`` is returned). A handle resolves through the
+        identical registry lookup + lowering as its name, so the IR is byte-identical. Any other type
+        is a clear ``TypeError`` (a typed surface, not a silent coercion)."""
+        from pops.model import OperatorHandle
+        if isinstance(operator, str):
+            return operator
+        if isinstance(operator, OperatorHandle):
+            return operator.name
+        raise TypeError(
+            "P.call: operator must be a str name or an pops.model.OperatorHandle "
+            "(from m.rate_operator / m.source_term / m.linear_source), got %r" % (operator,))
 
     def _validate_schedule(self, op, schedule):
         """A schedule= on P.call must be a Schedule; a caching policy (hold / accumulate_dt)

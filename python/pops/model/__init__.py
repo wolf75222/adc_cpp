@@ -21,6 +21,7 @@ The package imports only the standard library so it can be exercised without the
 compiled ``_pops`` extension.
 """
 from .bundles import RateBundle
+from .handles import OperatorHandle
 from .module import Module
 from .operators import (
     OPERATOR_KINDS,
@@ -55,5 +56,6 @@ __all__ = [
     "AuxSpace",
     "Module",
     "RateBundle",
+    "OperatorHandle",
     "OPERATOR_KINDS",
 ]

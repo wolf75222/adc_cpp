@@ -174,21 +174,30 @@ class Model(_FacadeCompileMixin):
         """NAMED local source S_name(U, primitives, aux, params): exactly n_cons expressions
         (delegates to HyperbolicModel.source_term). Opt-in -- emitted only when a compiled time
         Program requests it (ctx.rhs(..., sources=[name]) / ctx.source(name)), never summed
-        implicitly. name='default' is the backward-compatible alias of m.source([...])."""
-        self._m.source_term(name, exprs)
+        implicitly. name='default' is the backward-compatible alias of m.source([...]).
+
+        Returns the declared operator's :class:`pops.model.OperatorHandle` (Spec 5 sec.14.2.3),
+        which a Program can pass to ``P.call`` in place of the string name."""
+        return self._m.source_term(name, exprs)
 
     def linear_source(self, name, matrix):
         """NAMED local linear operator L_name(aux, params) U, an n_cons x n_cons matrix whose
         coefficients are independent of U / primitives (delegates to HyperbolicModel.linear_source).
         Used explicitly by a Program (ctx.linear_source / ctx.apply / ctx.solve_local_linear);
-        never folded into m.source or ctx.rhs."""
-        self._m.linear_source(name, matrix)
+        never folded into m.source or ctx.rhs.
+
+        Returns the declared operator's :class:`pops.model.OperatorHandle` (Spec 5 sec.14.2.3),
+        which a Program can pass to ``P.call`` in place of the string name."""
+        return self._m.linear_source(name, matrix)
 
     def rate_operator(self, name, *, flux=True, sources=("default",), fluxes=None):
         """NAMED composite rate operator R_name = -div F + sum(sources) (Spec 2, operator-first):
         a Program-side alias for ctx.rhs(flux=, sources=, fluxes=) so a model-free Program can call
-        P.call(name, U[, fields]) instead of P.rhs(...). Delegates to HyperbolicModel.rate_operator."""
-        self._m.rate_operator(name, flux=flux, sources=sources, fluxes=fluxes)
+        P.call(name, U[, fields]) instead of P.rhs(...). Delegates to HyperbolicModel.rate_operator.
+
+        Returns the declared operator's :class:`pops.model.OperatorHandle` (Spec 5 sec.14.2.3),
+        which a Program can pass to ``P.call`` in place of the string name."""
+        return self._m.rate_operator(name, flux=flux, sources=sources, fluxes=fluxes)
 
     def source_frequency(self, expr_mu):
         """Local frequency mu(U, aux) [1/s] of the source -- the 'source' step bound from the meeting

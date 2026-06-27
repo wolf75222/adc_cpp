@@ -9,6 +9,7 @@ import numpy as np
 
 from pops.ir import _wrap
 from pops.ir.visitors import _expr_uses_cons_or_prim
+from pops.model import OperatorHandle
 
 from .aux import AUX_CANONICAL
 
@@ -80,7 +81,11 @@ class _SourceMixin:
         (ctx.rhs(..., sources=[name]) / ctx.source(name)) and is NEVER summed implicitly into the
         legacy total source. name == "default" is the backward-compatible alias of m.source([...])
         (stored in self._source, hash unchanged). Other names must be valid identifiers, unique, and
-        must not collide with a linear_source."""
+        must not collide with a linear_source.
+
+        Returns the declared operator's :class:`pops.model.OperatorHandle` (Spec 5 sec.14.2.3): an
+        inert typed reference (``.name`` / ``.kind == "local_source"``) a Program can pass to
+        ``P.call`` in place of the string name, lowering to the byte-identical IR."""
         n = self.n_vars
         if n == 0:
             raise ValueError("source_term(%r): declare conservative_vars(...) first" % (name,))
@@ -92,7 +97,7 @@ class _SourceMixin:
                              % (name, len(exprs), n))
         if name == "default":
             self._source = exprs   # equivalent to m.source([...]) -- the legacy default source
-            return
+            return OperatorHandle("default", kind="local_source")
         if not name.isidentifier():
             raise ValueError("source_term('%s'): name must be a valid identifier "
                              "(letters/digits/_, no leading digit)" % name)
@@ -101,6 +106,7 @@ class _SourceMixin:
         if name in self._linear_sources:
             raise ValueError("source_term('%s'): name collides with a linear_source" % name)
         self._source_terms[name] = exprs
+        return OperatorHandle(name, kind="local_source")
 
     def linear_source(self, name, matrix):
         """Declare a NAMED local linear operator L_name(aux, params): an n_cons x n_cons matrix whose
@@ -109,7 +115,11 @@ class _SourceMixin:
         local linear source by solve_local_linear). The operator is OPT-IN: never folded into m.source
         or ctx.rhs; a Program uses it explicitly via ctx.linear_source(name) / ctx.apply /
         ctx.solve_local_linear. Name must be a valid identifier, unique, and must not collide with a
-        source_term."""
+        source_term.
+
+        Returns the declared operator's :class:`pops.model.OperatorHandle` (Spec 5 sec.14.2.3): an
+        inert typed reference (``.name`` / ``.kind == "local_linear_operator"``) a Program can pass to
+        ``P.call`` in place of the string name, lowering to the byte-identical IR."""
         n = self.n_vars
         if n == 0:
             raise ValueError("linear_source(%r): declare conservative_vars(...) first" % (name,))
@@ -133,6 +143,7 @@ class _SourceMixin:
         if name in self._source_terms:
             raise ValueError("linear_source('%s'): name collides with a source_term" % name)
         self._linear_sources[name] = wrapped
+        return OperatorHandle(name, kind="local_linear_operator")
 
     def rate_operator(self, name, *, flux=True, sources=("default",), fluxes=None):
         """Declare a NAMED composite rate operator ``R_name = -div F + sum(sources)`` (Spec 2,
@@ -142,7 +153,11 @@ class _SourceMixin:
         flux/sources. The alias carries no new numerics (its flux/sources are already in the model and
         the hash) -- it never enters the model hash nor the codegen. ``flux`` / ``sources`` / ``fluxes``
         have the same meaning as :meth:`Program.rhs`. ``name`` must be a valid identifier, unique among
-        rate operators, and must not collide with a source_term / linear_source."""
+        rate operators, and must not collide with a source_term / linear_source.
+
+        Returns the declared operator's :class:`pops.model.OperatorHandle` (Spec 5 sec.14.2.3): an
+        inert typed reference (``.name`` / ``.kind == "local_rate"``) a Program can pass to ``P.call``
+        in place of the string name, lowering to the byte-identical IR."""
         if self.n_vars == 0:
             raise ValueError("rate_operator(%r): declare conservative_vars(...) first" % (name,))
         if not (isinstance(name, str) and name.isidentifier()):
@@ -159,6 +174,7 @@ class _SourceMixin:
                              "(a source-only rate has no flux to divide)" % name)
         srcs = list(sources) if sources is not None else None
         self._rate_operators[name] = {"flux": bool(flux), "sources": srcs, "fluxes": flx}
+        return OperatorHandle(name, kind="local_rate")
 
     def stability_speed(self, expr):
         """STABILITY speed lambda* (expression of cons / prims / aux): drives the block CFL
