@@ -65,7 +65,21 @@ class _Coeff:
         return tuple(sorted(self.powers.items()))
 
 
+def _resolve_handle(x):
+    """Unwrap a typed temporal-version handle to its resolved :class:`Value`, else return ``x``.
+
+    A handle (``pops.time.handles._Version`` / ``_Prev``) exposes ``_as_value()`` returning the
+    Value it lowered to (raising a clear error if used before definition). Anything else -- a plain
+    Value, a string, ``None`` -- is returned unchanged, so the legacy positional paths are
+    byte-identical. Used at the State-accepting boundaries (``state=`` / ``fields=``) so a defined
+    handle composes wherever a Value does, without any new IR.
+    """
+    to_value = getattr(x, "_as_value", None)
+    return to_value() if callable(to_value) else x
+
+
 def _to_affine(x):
+    x = _resolve_handle(x)
     if isinstance(x, _Affine):
         return x
     if isinstance(x, Value) and x.is_field():

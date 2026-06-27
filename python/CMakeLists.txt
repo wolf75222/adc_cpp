@@ -304,6 +304,16 @@ add_test(NAME test_time_program
 set_tests_properties(test_time_program PROPERTIES
   ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
 
+# pops.time typed temporal-version handles (Spec 5 sec.5.3.1, ADC-485) : P.state("U", block=...) ->
+# a TimeState with .n / .stage / .next / .prev, plus T.define / T.commit / T.keep_history. The handle
+# layer is SUGAR over the existing SSA IR (no new IR, no Python runtime data) : the SSPRK3-via-handles
+# IR is byte-identical to the legacy positional style (equal _ir_hash). Checks the read-only / SSA /
+# history-policy guards too. Pure Python, no codegen / runtime / compiler.
+add_test(NAME test_time_handles
+         COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_time_handles.py)
+set_tests_properties(test_time_handles PROPERTIES
+  ENVIRONMENT "PYTHONPATH=${CMAKE_CURRENT_BINARY_DIR}")
+
 # pops.lib.time -- bibliotheque de macros de schemas temporels qui LOWERENT vers l'IR Program (ADC-407,
 # phase 8a) : forward_euler / ssprk2 / ssprk3 / rk4 + combinateur strang construisent l'IR via les memes
 # operations builder + l'algebre affine en dt (un schema exprime UNE fois, aucune classe par schema ;

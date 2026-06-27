@@ -3,7 +3,7 @@
 IR dumps, decorator step(), control flow (while_/if_/range), reductions and the dt bound.
 """
 from pops.time.program_base import _ProgramConstants
-from pops.time.values import Value, _is_field_value
+from pops.time.values import Value, _is_field_value, _resolve_handle
 
 
 class _ProgramAuthoring(_ProgramConstants):
@@ -101,6 +101,7 @@ class _ProgramAuthoring(_ProgramConstants):
         the projection primitive; only ``"block"`` (the block's own, set at add_block time) is supported
         -- a custom projection is a later phase. Lowered to ``ctx.apply_projection(idx, state)`` for the
         state's own block (ADC-426)."""
+        name, state = _resolve_handle(name), _resolve_handle(state)
         if isinstance(name, Value) and state is None:
             name, state = None, name
         if not (isinstance(state, Value) and state.vtype == "state"):
