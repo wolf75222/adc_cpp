@@ -72,7 +72,7 @@ is genuinely model-specific: optional Lorentz **sources** for a Vlasov-Lorentz c
 piece means to the core.
 
 Beyond the Rusanov and HLL resolvers the wave speeds feed, `build_moment_model(roe=True)` also emits a
-generic moment Roe dissipation so `riemann="roe"` is usable on the hierarchy. Realizability is not a
+generic moment Roe dissipation so the Roe flux (`riemann=Roe()`) is usable on the hierarchy. Realizability is not a
 generator concern: it is a separate pointwise projection hook (`m.projection`) the system applies
 after each step.
 
