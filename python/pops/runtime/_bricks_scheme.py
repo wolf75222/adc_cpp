@@ -204,6 +204,36 @@ class Spatial:
         return cls(_tokens=(limiter, flux, recon),
                    positivity_floor=positivity_floor, wave_speed_cache=wave_speed_cache)
 
+    def validate(self, ghost_depth=None, block=None):
+        """Reject a reconstruction whose ghost depth exceeds an EXPLICIT block halo (Spec 5 sec.7).
+
+        The fifth-order WENO5 stencil needs a 3-cell halo; reading past a too-thin halo is a
+        correctness bug (criterion 11). This checks the chosen reconstruction's DECLARED
+        requirement and raises a clear, actionable error when an EXPLICIT @p ghost_depth
+        constrains the block below it.
+
+        The discipline is NO FALSE POSITIVE. The native runtime GROWS each block's halo to match
+        its reconstruction (``block_n_ghost(lim)``: 3 for weno5), so WENO5 on a default block is
+        a VALID problem -- and ``ghost_depth=None`` (the default) means exactly that and never
+        rejects. A MUSCL / minmod / vanleer scheme (requirement <= 2) passes at any depth >= 2,
+        and an undeclared reconstruction is never rejected.
+
+        Args:
+            ghost_depth: An EXPLICIT block ghost (halo) depth to check against, or ``None`` to
+                defer to the scheme-matched runtime allocation (no rejection).
+            block: Optional block name woven into the error message.
+
+        Returns:
+            bool: ``True`` when the reconstruction fits the (explicit or scheme-matched) depth.
+
+        Raises:
+            ValueError: When an explicit @p ghost_depth is below the reconstruction's requirement.
+        """
+        from pops.numerics.reconstruction import validate_ghost_depth
+
+        available = None if ghost_depth is None else int(ghost_depth)
+        return validate_ghost_depth(self.limiter, available=available, block=block)
+
 
 def FiniteVolume(limiter=None, riemann=None, variables=None,
                  positivity_floor=None, wave_speed_cache=False, *, reconstruction=None,

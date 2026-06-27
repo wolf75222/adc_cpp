@@ -1861,6 +1861,23 @@ std::vector<double> System::get_primitive_state(const std::string& name) {
 void System::solve_fields() {
   pops::runtime::program::ProfileScope s(p_->profiler_, "field_solve");
   p_->solve_fields();
+  // ELLIPTIC-SOLVER NATIVE COUNTERS (Spec 5 sec.13.11.1, ADC-479 criteria 42/43). The opaque
+  // "field_solve" scope hides where the elliptic solve (96-99.9% of step cost) spends its time: read
+  // the active solver's per-solve stats back HERE -- after p_->solve_fields() returns, so AFTER its
+  // internal device_fence() (system_field_solver.hpp CRITICAL invariant: the V-cycle must be done
+  // before phi is read), preserving the device-fence ordering. Cheap int/double reads, all guarded
+  // by enabled() -> ZERO cost when profiling is off (count/record are no-ops too, but the accessor
+  // reads are skipped entirely).
+  if (p_->profiler_.enabled()) {
+    // mg_cycles / krylov_iters ACCUMULATE (total elliptic iteration work over the run); elliptic_bottom
+    // records the coarsest-grid self-time as a timing sample. mg_levels is a STRUCTURAL CONSTANT (the
+    // hierarchy depth), so count_max (peak) reports the actual level count instead of summing it per
+    // step (same idiom as scratch_peak_bytes). All four are honest 0 for a direct FFT solver.
+    p_->profiler_.count("mg_cycles", p_->fields_.last_mg_cycles());
+    p_->profiler_.count("krylov_iters", p_->fields_.last_krylov_iters());
+    p_->profiler_.count_max("mg_levels", p_->fields_.last_num_levels());
+    p_->profiler_.record("elliptic_bottom", p_->fields_.last_bottom_seconds());
+  }
 }
 
 // --- profiling (ADC-459) -------------------------------------------------------------------------
@@ -1900,6 +1917,15 @@ void System::solve_fields_from_state(int block_idx, const MultiFab& U_stage) {
 POPS_EXPORT void System::solve_fields_from_blocks(const std::vector<const MultiFab*>& U_stages) {
   pops::runtime::program::ProfileScope s(p_->profiler_, "field_solve");
   p_->solve_fields_from_blocks(U_stages);
+  // Same elliptic-solver counters as System::solve_fields (ADC-479 criteria 42/43), read back AFTER
+  // the coupled solve returns -- i.e. after its internal device_fence() (system_field_solver.hpp). The
+  // coupled multi-block solve uses the SAME ell_ solver, so the stats are populated identically.
+  if (p_->profiler_.enabled()) {
+    p_->profiler_.count("mg_cycles", p_->fields_.last_mg_cycles());
+    p_->profiler_.count("krylov_iters", p_->fields_.last_krylov_iters());
+    p_->profiler_.count_max("mg_levels", p_->fields_.last_num_levels());
+    p_->profiler_.record("elliptic_bottom", p_->fields_.last_bottom_seconds());
+  }
 }
 
 // NAMED multi-elliptic field (ADC-428): a SECOND elliptic solve for @p field from block @p block_idx's

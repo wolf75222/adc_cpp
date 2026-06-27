@@ -1,6 +1,7 @@
 #include "../bindings_detail.hpp"
 
 #include <pops/core/state/aux_names.hpp>  // ADC-291: canonical aux name<->component table + bounds
+#include <pops/runtime/module_capabilities.hpp>  // ADC-479 (#36/#37): authoritative static capability facts
 
 // ADC-365: module attributes/globals + SystemConfig + ModelSpec (registered first so System/
 // AmrSystem signatures resolve them).
@@ -78,6 +79,45 @@ void init_core(py::module_& m) {
 #else
   m.attr("__version__") = "unknown";
 #endif
+
+  // AUTHORITATIVE STATIC capability facts (Spec 5 sec.13.12 / sec.13.12.1, criteria #36/#37). The
+  // (backend, layout, platform) transport capabilities the built module ACTUALLY provides, sourced from
+  // pops::module_capabilities() -- the SAME compile-time tokens as the attrs above (POPS_HAS_KOKKOS /
+  // POPS_HAS_MPI), never a Python computation. pops._capabilities.inspect_capabilities cross-checks its
+  // descriptor walk against this so the two cannot SILENTLY disagree; problem.explain_routes sources the
+  // route matrix from it. We expose kAbiVersion separately (it versions the capability vocabulary, not
+  // the toolchain ABI key) and module_capabilities(target) returns a plain dict (route-dependent: the
+  // production / native route carries a stride, the aot / prototype route does not).
+  m.attr("__abi_version__") = static_cast<int>(pops::kAbiVersion);
+  m.def(
+      "module_capabilities",
+      [](const std::string& target) {
+        pops::CapabilityTarget tgt = pops::CapabilityTarget::kModule;
+        if (target == "production")
+          tgt = pops::CapabilityTarget::kProduction;
+        else if (target == "aot")
+          tgt = pops::CapabilityTarget::kAot;
+        else if (target != "module" && !target.empty())
+          throw std::invalid_argument(
+              "module_capabilities: target must be 'module', 'production' or 'aot' (got '" + target +
+              "')");
+        const pops::ModuleCapabilities c = pops::module_capabilities(tgt);
+        py::dict d;
+        d["abi_version"] = c.abi_version;
+        d["supports_uniform"] = c.supports_uniform;
+        d["supports_amr"] = c.supports_amr;
+        d["supports_mpi"] = c.supports_mpi;
+        d["supports_gpu"] = c.supports_gpu;
+        d["supports_stride"] = c.supports_stride;
+        d["supports_named_fields"] = c.supports_named_fields;
+        d["supports_partial_imex_mask"] = c.supports_partial_imex_mask;
+        return d;
+      },
+      py::arg("target") = "module",
+      "Authoritative static capability facts of the built module (Spec 5 sec.13.12, #36): "
+      "{abi_version, supports_uniform/amr/mpi/gpu/stride/named_fields/partial_imex_mask}, sourced "
+      "from the C++ compile-time tokens. target in {'module','production','aot'} selects the route "
+      "(stride differs aot vs production).");
 
   // AUX channel limits + canonical name table (ADC-291), exposed from the SINGLE C++ source
   // (pops/core/state.hpp + aux_names.hpp). The DSL/capabilities() read these so the Python mirrors

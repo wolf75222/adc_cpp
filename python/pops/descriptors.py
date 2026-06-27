@@ -196,6 +196,42 @@ def load_cpp_library(path):
     return _register_manifest(raw.decode("utf-8"))
 
 
+def load_compiled_manifest(path):
+    """Read the per-artifact NativeManifest JSON of a compiled block ``.so`` (Spec 5 sec.13.12, #36).
+
+    The sibling of :func:`load_cpp_library` for an AOT model artifact (one built by the DSL through
+    ``POPS_DEFINE_COMPILED_BLOCK``): it dlopens @p path with :func:`ctypes.CDLL` and calls the
+    exported C function ``const char* pops_compiled_manifest()`` -- the JSON the macro emits at the
+    ``.so``'s OWN compile time from the model traits ({abi_version, n_vars, n_aux, n_params,
+    ghost_depth, supports_stride, supports_partial_imex_mask, supports_named_fields, roles,
+    native_entrypoints}). Returns the parsed dict.
+
+    GRACEFUL FALLBACK for an OLD ``.so`` (built before this work) that does NOT export the symbol:
+    returns ``None`` rather than raising, so a manifest builder can fall back to its honest-None set.
+    A path that is not a loadable library still raises ``OSError`` (it is not an pops artifact at
+    all); a present-but-malformed JSON raises ``ValueError`` (a corrupt manifest must not pass).
+    """
+    import ctypes
+    handle = ctypes.CDLL(str(path))  # raises OSError if the path is not a loadable library
+    try:
+        manifest_fn = handle.pops_compiled_manifest
+    except AttributeError:
+        return None  # old .so without the symbol: honest fallback, not an error
+    manifest_fn.restype = ctypes.c_char_p
+    raw = manifest_fn()
+    if raw is None:
+        return None
+    try:
+        doc = json.loads(raw.decode("utf-8"))
+    except (json.JSONDecodeError, TypeError) as err:
+        raise ValueError("compiled-artifact manifest of %r is not valid JSON: %s"
+                         % (path, err)) from err
+    if not isinstance(doc, dict):
+        raise ValueError("compiled-artifact manifest of %r must be a JSON object; got %r"
+                         % (path, raw))
+    return doc
+
+
 def _external_descriptor(brick_id, *, expect_category=None):
     """The ``external_cpp`` descriptor for a loaded brick @p brick_id (raise if not loaded).
 

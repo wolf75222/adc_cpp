@@ -10,10 +10,10 @@ dance. Two pieces:
   the report the C++ :class:`pops::runtime::program::Profiler` produces (a per-scope timing table
   plus integer counters) into a structured dict and exposes typed views:
   :meth:`~PerformanceSummary.by_program_node` / :meth:`~PerformanceSummary.by_native_brick` /
-  :meth:`~PerformanceSummary.by_solver` / :meth:`~PerformanceSummary.by_memory`. When a measure is
-  not available on the current build (the heavy per-brick / scheduler counters are Kokkos-gated and
-  only move under a compiled ``.so`` step), the view DECLARES it unavailable honestly rather than
-  fabricating a zero.
+  :meth:`~PerformanceSummary.by_solver` / :meth:`~PerformanceSummary.by_elliptic` /
+  :meth:`~PerformanceSummary.by_memory`. When a measure is not available on the current build (the
+  heavy per-brick / scheduler counters are Kokkos-gated and only move under a compiled ``.so`` step),
+  the view DECLARES it unavailable honestly rather than fabricating a zero.
 
 The off-by-default contract (criterion 44): profiling adds no heavy timers unless explicitly
 enabled. The native ``enable_profiling`` already gates this -- a plain run leaves the profiler
@@ -43,6 +43,13 @@ _MEMORY_COUNTERS = ("scratch_allocs", "scratch_peak_bytes")
 # Scheduler / cache counters that only move under a compiled .so step body (Kokkos/ROMEO); absent
 # (the honest zero) on the native host path.
 _ADVANCED_COUNTERS = ("cache_hits", "cache_misses", "nodes_due", "nodes_skipped")
+# Elliptic-solver counters (Spec 5 sec.13.11.1, ADC-479 criteria 42/43): the System reads these back
+# at the field_solve seam (system.cpp). The elliptic solve is 96-99.9% of step cost, so these break the
+# opaque "field_solve" scope into actionable numbers. mg_cycles / krylov_iters accumulate; mg_levels is
+# the (constant) hierarchy depth via count_max; elliptic_bottom is a TIMING SCOPE (the coarsest-grid
+# self-time). A direct FFT solver reports honest zeros (no cycles / levels / iters / bottom solve).
+_ELLIPTIC_COUNTERS = ("mg_cycles", "krylov_iters", "mg_levels")
+_ELLIPTIC_TIME_SCOPE = "elliptic_bottom"
 
 # POPS_PROFILE: map sim.profile() called with NO argument to a default level.
 _ENV_VAR = "POPS_PROFILE"
@@ -280,6 +287,36 @@ class PerformanceSummary:
                 out[name[len(_NODE_PREFIX):]] = dict(fields)
         return out
 
+    def by_elliptic(self):
+        """Elliptic-solver counters: the most actionable view given the elliptic-solve dominance.
+
+        The elliptic field solve is 96-99.9% of step cost (Spec 5 sec.13.11.1), yet ``by_solver`` only
+        exposes the opaque ``field_solve`` phase. This view breaks it down with the native counters the
+        System reads back at the field_solve seam (ADC-479 criteria 42/43):
+
+        * ``mg_cycles`` -- total geometric-multigrid V-cycles over the run;
+        * ``krylov_iters`` -- total Krylov iterations (0 on the default Poisson path: it uses multigrid
+          / a direct FFT, never a Krylov elliptic solver);
+        * ``mg_levels`` -- multigrid hierarchy depth (a structural constant, reported as the peak);
+        * ``elliptic_bottom`` -- coarsest-grid (bottom) solve self-time, as a timing entry
+          ``{count, total_s, mean_s, min_s, max_s}``.
+
+        Returns ``{name: int | timing-dict}`` with only the counters / scope the run actually produced.
+        A direct FFT solver yields zeros (no cycles / levels / bottom solve), and a build whose ``_pops``
+        predates these counters (no ``mg_cycles`` etc.) declares the view unavailable rather than faking.
+        """
+        out = {name: self._parsed["counters"][name]
+               for name in _ELLIPTIC_COUNTERS if name in self._parsed["counters"]}
+        bottom = self._parsed["scopes"].get(_ELLIPTIC_TIME_SCOPE)
+        if bottom is not None:
+            out[_ELLIPTIC_TIME_SCOPE] = dict(bottom)
+        if not out:
+            return _Unavailable(
+                "by_elliptic",
+                "elliptic-solver counters need a field-solve under profiling on a _pops build "
+                "that emits them (mg_cycles / krylov_iters / mg_levels / elliptic_bottom)")
+        return out
+
     def by_memory(self):
         """Scratch-memory counters: allocation count + the largest single scratch buffer (bytes).
 
@@ -311,6 +348,7 @@ class PerformanceSummary:
                 "by_program_node": self.by_program_node(),
                 "by_native_brick": _view_to_dict(self.by_native_brick()),
                 "by_solver": self.by_solver(),
+                "by_elliptic": _view_to_dict(self.by_elliptic()),
                 "by_memory": _view_to_dict(self.by_memory()),
             },
         }

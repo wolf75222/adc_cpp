@@ -133,6 +133,49 @@ class FieldProblem(Descriptor):
             raise ValueError("%s: a solver must be provided" % self.name)
         return True
 
+    def _require_solver_capability(self, tag, operator, alternative):
+        """Reject the solver only when it declares ``supports_<tag>`` KNOWN-False (Spec 5 sec.7).
+
+        The Poisson-family subclasses call this so a problem whose operator needs a special
+        capability (a screened reaction term, an anisotropic / variable coefficient) is not
+        paired with a solver that cannot serve it -- the spec's pre-runtime incompatible-solver
+        check (criterion 11). The OVERRIDING discipline is NO FALSE POSITIVE:
+
+        * a solver that exposes no ``capabilities()`` dict (a bare object, an external brick) is
+          NOT rejected -- the capability is ABSENT, not declared-False;
+        * a solver that declares ``supports_variable_epsilon`` True is NOT rejected -- a
+          variable-coefficient elliptic kernel (``GeometricMG``) subsumes a screened reaction
+          term and an anisotropic-by-coefficient operator, so its ``supports_<tag>=False`` is
+          not a real incompatibility (this is exactly why ``GeometricMG`` is the recommended
+          alternative for both);
+        * only a solver that declares ``supports_<tag>`` literally ``False`` AND does not
+          declare variable epsilon is refused, with a clear message naming the operator and the
+          typed alternative.
+
+        Args:
+            tag: The capability tag the operator needs (``"screened"`` / ``"anisotropic"``).
+            operator: A human phrase for the operator ("a screened operator").
+            alternative: The typed solver to recommend ("GeometricMG()").
+
+        Raises:
+            ValueError: When the chosen solver declares the capability KNOWN-False.
+        """
+        caps = getattr(self.solver, "capabilities", None)
+        if not callable(caps):
+            return  # no capability surface -> absent, not declared-False: never reject.
+        declared = caps()
+        if not isinstance(declared, dict):
+            return
+        # A variable-coefficient elliptic kernel serves screened / anisotropic-by-coefficient.
+        if declared.get("supports_variable_epsilon") is True:
+            return
+        if declared.get("supports_%s" % tag) is False:
+            solver_name = getattr(self.solver, "name", type(self.solver).__name__)
+            raise ValueError(
+                "%s: solver %s does not support %s (supports_%s is False); "
+                "use pops.solvers.elliptic.%s."
+                % (self.name, solver_name, operator, tag, alternative))
+
     def solve(self, schedule, policy):
         """Record an inert field-solve cadence (a schedule + a not-due policy).
 

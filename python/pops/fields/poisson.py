@@ -63,6 +63,8 @@ class ScreenedPoissonProblem(PoissonProblem):
                     "%s: a screened Poisson expects a zeroth-order reaction term "
                     "(e.g. -laplacian(phi) + k*phi == rhs); got %r"
                     % (self.name, self.equation.lhs))
+        # Reject only a solver that declares it cannot serve a screened operator (criterion 11).
+        self._require_solver_capability("screened", "a screened operator", "GeometricMG()")
         return True
 
 
@@ -91,6 +93,9 @@ class AnisotropicPoissonProblem(PoissonProblem):
                     "%s: an anisotropic Poisson expects a div(coeff*grad(phi)) principal "
                     "operator (e.g. -div(eps*grad(phi)) == rhs); got %r"
                     % (self.name, self.equation.lhs))
+        # Reject only a solver that declares it cannot serve an anisotropic operator (criterion 11).
+        self._require_solver_capability(
+            "anisotropic", "an anisotropic operator", "GeometricMG()")
         return True
 
 

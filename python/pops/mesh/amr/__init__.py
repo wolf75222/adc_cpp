@@ -18,6 +18,76 @@ NATIVE_MAX_LEVELS = 2
 NATIVE_RATIOS = (2,)
 
 
+def _subject_name(subject):
+    """The plain string name of a Refine subject (a string, or an object carrying ``.name``)."""
+    if isinstance(subject, str):
+        return subject
+    name = getattr(subject, "name", None)
+    return name if isinstance(name, str) else None
+
+
+def _declared_subjects(model_or_context):
+    """The set of subject names a model / context legitimately declares (duck-typed).
+
+    A Refine subject is a state component, a physical role, or a named aux / field. This reads
+    those names off whatever ``model_or_context`` is passed WITHOUT importing the physics / model
+    layers (the mesh layer imports nothing else in pops): it tries the documented surfaces in
+    turn -- conservative + primitive component names, explicit / canonical roles, named aux
+    fields, and a typed ``state_space()`` view's components / role values. Returns ``None`` when
+    the context exposes NONE of these surfaces, so the caller can DEFER (not falsely reject) a
+    context that simply does not advertise its names.
+    """
+    names = set()
+    found_surface = False
+
+    def add_iter(value):
+        nonlocal found_surface
+        if value is None:
+            return
+        try:
+            items = list(value)
+        except TypeError:
+            return
+        found_surface = True
+        for item in items:
+            text = item if isinstance(item, str) else getattr(item, "name", None)
+            if isinstance(text, str):
+                names.add(text)
+
+    for attr in ("cons_names", "prim_names", "aux_extra_names", "aux_names"):
+        if hasattr(model_or_context, attr):
+            add_iter(getattr(model_or_context, attr))
+
+    # Explicit role overrides (cons_roles / prim_roles) name roles directly.
+    for attr in ("cons_roles", "prim_roles"):
+        value = getattr(model_or_context, attr, None)
+        if value is not None:
+            add_iter(value)
+
+    # A typed StateSpace view: its components AND its role values are both legal subjects.
+    space = getattr(model_or_context, "state_space", None)
+    if callable(space):
+        try:
+            view = space()
+        except Exception:  # pragma: no cover - a view that needs args is just skipped.
+            view = None
+        if view is not None:
+            add_iter(getattr(view, "components", None))
+            roles = getattr(view, "roles", None)
+            if isinstance(roles, dict):
+                found_surface = True
+                names.update(k for k in roles if isinstance(k, str))
+                names.update(v for v in roles.values() if isinstance(v, str))
+
+    # A bare mapping / collection of declared subject names (a lightweight context).
+    if isinstance(model_or_context, dict):
+        for key in ("roles", "subjects", "variables", "components"):
+            if key in model_or_context:
+                add_iter(model_or_context[key])
+
+    return names if found_surface else None
+
+
 class Refine(MeshDescriptor):
     """A typed refinement criterion (Spec 5 sec.8.6).
 
@@ -57,10 +127,30 @@ class Refine(MeshDescriptor):
         return {"subject": subj, "predicate": self.predicate, "threshold": self.threshold}
 
     def validate(self, context=None):
+        """Validate the criterion shape and -- when a model context is given -- its subject.
+
+        With no @p context this self-validates the predicate / threshold only and DEFERS the
+        subject check to where the model is available (``problem.amr.refine`` / compile); the
+        role-existence check is wired there so it happens SOMEWHERE before runtime, never never.
+
+        When @p context is a model / context that advertises its declared subjects (state
+        components, roles, named aux), a subject that is NOT among them raises a clear error
+        listing the declared names. The discipline is NO FALSE POSITIVE: a context that exposes
+        no subject surface (``_declared_subjects`` returns ``None``) is NOT rejected, and a
+        non-string subject (a field-expression handle) is carried opaquely and skipped.
+        """
         if self.predicate is None or self.threshold is None:
             raise ValueError(
                 "Refine criterion is incomplete: use Refine.on(subject).above(value) "
                 "(or .below / .gradient_above / .magnitude_above)")
+        if context is not None:
+            declared = _declared_subjects(context)
+            subject = _subject_name(self.subject)
+            if declared is not None and subject is not None and subject not in declared:
+                raise ValueError(
+                    "Refine.on(%r): %r is not a declared subject of the model; declared "
+                    "subjects are %s (a role / state component / named aux). Refine on one of "
+                    "those." % (subject, subject, sorted(declared) or "none"))
         return True
 
 
