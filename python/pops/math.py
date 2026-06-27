@@ -40,3 +40,31 @@ from pops.ir.ops import (  # noqa: F401
     integral,
 )
 from pops.ir.ops import board_sqrt as sqrt  # noqa: F401
+
+
+# --- scalar dtypes (Spec 5 sec.5.12: a typed param declares its dtype) -------------------
+class _DType:
+    """An inert scalar dtype marker (``Real`` / ``Integer`` / ``Bool``).
+
+    Used by :mod:`pops.params` so a parameter declares a typed dtype instead of a string;
+    the codegen / runtime consume it. It computes nothing.
+    """
+
+    def __init__(self, name):
+        self._name = str(name)
+
+    @property
+    def name(self):
+        return self._name
+
+    def __repr__(self):
+        return self._name
+
+    __str__ = __repr__
+
+
+Real = _DType("Real")
+Integer = _DType("Integer")
+Bool = _DType("Bool")
+
+__all__ += ["Real", "Integer", "Bool"]

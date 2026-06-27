@@ -202,3 +202,110 @@ def external(brick_id):
     whatever category the manifest registered. An unloaded id raises a clear :class:`LookupError`.
     """
     return _external_descriptor(brick_id)
+
+
+# --- generic typed-descriptor protocol (Spec 5 sec.6) -----------------------------------
+# Spec 5 stabilizes "every object that chooses a route is a typed descriptor that declares
+# its requirements/capabilities/options and answers available(context) with an EXPLAINABLE
+# status". The native-brick :class:`BrickDescriptor` above is one family; the params / output /
+# external (and, after Phase D, the mesh) descriptors are another. They share this small base.
+class Availability:
+    """An explainable availability status (Spec 5 sec.6: not just True/False).
+
+    ``status`` is ``"yes"`` / ``"no"`` / ``"partial"``; truthiness is ``status == "yes"`` so
+    it reads naturally in a boolean test while still carrying the reason + alternatives, so a
+    rejection can be reported before the runtime is ever touched.
+    """
+
+    _STATUSES = ("yes", "no", "partial")
+
+    def __init__(self, status, reason="", *, missing=None, alternatives=None):
+        if status not in self._STATUSES:
+            raise ValueError("Availability status must be one of %s (got %r)"
+                             % (", ".join(self._STATUSES), status))
+        self.status = status
+        self.reason = str(reason)
+        self.missing = list(missing or [])
+        self.alternatives = list(alternatives or [])
+
+    @classmethod
+    def yes(cls, reason=""):
+        return cls("yes", reason)
+
+    @classmethod
+    def no(cls, reason, *, missing=None, alternatives=None):
+        return cls("no", reason, missing=missing, alternatives=alternatives)
+
+    @classmethod
+    def partial(cls, reason, *, missing=None, alternatives=None):
+        return cls("partial", reason, missing=missing, alternatives=alternatives)
+
+    @property
+    def ok(self):
+        return self.status == "yes"
+
+    def __bool__(self):
+        return self.status == "yes"
+
+    def __repr__(self):
+        return "Availability(%r, reason=%r)" % (self.status, self.reason)
+
+    def __str__(self):
+        lines = ["available: %s" % self.status]
+        if self.reason:
+            lines.append("  reason: %s" % self.reason)
+        if self.missing:
+            lines.append("  missing: %s" % ", ".join(map(str, self.missing)))
+        if self.alternatives:
+            lines.append("  alternatives: %s" % ", ".join(map(str, self.alternatives)))
+        return "\n".join(lines)
+
+
+class Descriptor:
+    """Base of the inert typed descriptors (Spec 5 sec.6).
+
+    Subclasses set :attr:`category` and override :meth:`options` (and :meth:`available` /
+    :meth:`validate` where a route can be refused). The default contract reports an empty
+    requirements/capabilities set and an unconditionally-available status. :meth:`inspect`
+    returns a plain dict and :meth:`__str__` a short, deterministic summary (Spec 5 sec.12.1)
+    -- never a dump of runtime data. A descriptor computes nothing.
+    """
+
+    category = "descriptor"
+
+    @property
+    def name(self):
+        return type(self).__name__
+
+    def requirements(self):
+        return {}
+
+    def capabilities(self):
+        return {}
+
+    def options(self):
+        return {}
+
+    def available(self, context=None):
+        return Availability.yes()
+
+    def validate(self, context=None):
+        status = self.available(context)
+        if not status.ok:
+            raise ValueError("%s is not available for this route:\n%s" % (self.name, status))
+        return True
+
+    def inspect(self):
+        return {"name": self.name, "category": self.category, "options": self.options(),
+                "requirements": self.requirements(), "capabilities": self.capabilities()}
+
+    def _summary(self):
+        return ", ".join("%s=%r" % (k, v) for k, v in self.options().items())
+
+    def __repr__(self):
+        return "%s(%s)" % (self.name, self._summary())
+
+    def __str__(self):
+        body = self._summary()
+        head = "%s [%s]" % (self.name, self.category)
+        return "%s(%s)" % (head, body) if body else head
