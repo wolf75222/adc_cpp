@@ -40,6 +40,28 @@ def _lower_wall(wall):
     return lower_wall()
 
 
+def _lower_bc(bc):
+    """Lower a Poisson boundary condition to the native ``bc`` string (Spec 5 sec.14.2.6).
+
+    A typed native boundary brick (``pops.Dirichlet()`` / ``pops.Neumann()`` / ``pops.Periodic()``)
+    lowers to its token (``"dirichlet"`` / ``"neumann"`` / ``"periodic"``) via its ``.bc`` attribute;
+    any STRING (including ``"auto"``) passes straight through to the native ``set_poisson``, which
+    validates an unknown token with its own error exactly as before -- the coercion never adds a
+    stricter string rejection of its own (cf. the ``lower_backend(None)`` regression: a transparent
+    coercion keeps the legacy error path intact). A non-string, non-boundary value raises a clear
+    ``TypeError`` (that surface is new, so there is no legacy behavior to preserve).
+    """
+    if isinstance(bc, str):
+        return bc
+    token = getattr(bc, "bc", None)  # native _Boundary brick carries its token on .bc
+    if isinstance(token, str):
+        return token
+    raise TypeError(
+        "set_poisson: bc must be an 'auto' / 'dirichlet' / 'neumann' / 'periodic' string or a typed "
+        "native boundary brick (pops.Dirichlet() / Neumann() / Periodic()), got %r"
+        % (type(bc).__name__,))
+
+
 class _SystemInstall:
     """Block/equation/coupling installation methods of System."""
 
@@ -365,19 +387,23 @@ class _SystemInstall:
                     wall="none", wall_radius=0.0, epsilon=1.0, abs_tol=0.0):
         """Configure the shared system Poisson solve (thin wrapper over the native binding).
 
-        Spec 5 sec.8.16 lets ``wall`` be a TYPED conducting wall in addition to the legacy
-        string::
+        Spec 5 sec.8.16 / sec.14.2.6 let ``bc`` and ``wall`` be TYPED objects in addition to the
+        legacy strings::
 
+            from pops import Dirichlet, Neumann, Periodic
             from pops.mesh.geometry import Disc, NoWall
-            sim.set_poisson(bc="dirichlet", wall=Disc(radius=0.4))   # == wall="circle", wall_radius=0.4
-            sim.set_poisson(wall=NoWall())                           # == wall="none"
+            sim.set_poisson(bc=Dirichlet(), wall=Disc(radius=0.4))   # == bc="dirichlet", wall="circle"
+            sim.set_poisson(bc="dirichlet", wall=NoWall())           # == bc="dirichlet", wall="none"
 
-        A typed :class:`pops.mesh.geometry.Disc` lowers to ``wall="circle"`` + its radius (the
+        A typed boundary brick (:class:`pops.Dirichlet` / :class:`pops.Neumann` /
+        :class:`pops.Periodic`) lowers to its ``bc`` token. A typed
+        :class:`pops.mesh.geometry.Disc` lowers to ``wall="circle"`` + its radius (the
         ``wall_radius=`` argument is then ignored in favour of the disc's radius); a
-        :class:`pops.mesh.geometry.NoWall` lowers to ``wall="none"``. The legacy string form is
+        :class:`pops.mesh.geometry.NoWall` lowers to ``wall="none"``. The legacy string forms are
         passed through unchanged (byte-identical native call). All the other arguments mirror the
         native ``set_poisson`` defaults verbatim.
         """
+        bc = _lower_bc(bc)
         lowered = _lower_wall(wall)
         if lowered is not None:
             wall, wall_radius = lowered  # typed wall overrides the wall string + radius
