@@ -325,5 +325,14 @@ class AmrSystem(_AmrSystemEquation, _AmrSystemIO):
             blocks = []
         return "AmrSystem(blocks=%s)" % (blocks,)
 
+    def explain_bind(self, compiled):
+        """A printable :class:`pops.codegen.inspect_report.BindReport` of @p compiled vs this AMR sim
+        (Spec 5 sec.12.1, criterion #15). INERT parity with ``System.explain_bind``: reads the
+        artifact's DECLARED bind inputs (``compiled.arguments()``) and the blocks / named aux wired on
+        this AmrSystem, then reuses ADC-463 :func:`collect_missing_arguments` to report PROVIDED vs
+        still-REQUIRED per group. It binds nothing and mutates nothing -- a read-only bind plan."""
+        from pops.codegen.inspect_report import build_bind_report
+        return build_bind_report(self, compiled)
+
     def __getattr__(self, attr):
         return getattr(self._s, attr)

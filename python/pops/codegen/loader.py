@@ -166,6 +166,132 @@ class CompiledProblem:
         from pops.codegen.inspect_compiled import build_memory_estimate
         return build_memory_estimate(self, mesh, platform=platform, layout=layout)
 
+    # --- inspection completeness (Spec 5 sec.12.1, criterion #15) -------------
+    # The print(compiled) reports + the codegen/IR dumps. All INERT metadata-reading (they aggregate
+    # the carried Program + model + compile artifacts), EXCEPT dump_cpp which REUSES the existing
+    # emit_cpp_program codegen. None binds, dlopens, allocates or runs.
+    def inspect(self):
+        """A printable :class:`pops.codegen.inspect_report.CompiledReport` of this artifact (sec.12.1).
+
+        The ``print(compiled.inspect())`` summary: name, backend, platform, layout, blocks (+ state /
+        components), fields (+ solver), program (+ commits), the REQUIRED runtime inputs (states /
+        params / aux from :meth:`arguments`), the on-disk artifacts (so_path / abi_key / cache_key)
+        and the bind-pending status line. It AGGREGATES the metadata this handle already carries (no
+        compile / bind / runtime read); :meth:`~CompiledReport.to_dict` serialises it."""
+        from pops.codegen.inspect_report import build_compiled_report
+        return build_compiled_report(self)
+
+    def requirements(self):
+        """The COMPILE-TIME constraints of this artifact (sec.12.1), DISTINCT from :meth:`arguments`.
+
+        Returns a :class:`pops.codegen.inspect_report.RequirementsReport`: the model capabilities the
+        lowered route relies on (``wave_speeds`` / ``hllc_star_state`` / ``roe_dissipation``, read
+        from the carried model's emitted flags), the required descriptors (the spatial scheme is a
+        BIND input, reported as such), and the layout / backend / ABI constraints. A piece genuinely
+        unknowable from today's metadata is stated honestly in
+        :attr:`~RequirementsReport.unknown`, never fabricated. :meth:`arguments` lists what you SUPPLY
+        at bind; ``requirements`` lists what the compiled route NEEDS from the model + toolchain."""
+        from pops.codegen.inspect_report import build_requirements
+        return build_requirements(self)
+
+    def inspect_capabilities(self):
+        """The descriptor capability rows relevant to THIS compiled artifact (sec.12.1).
+
+        Delegates to the top-level :func:`pops.inspect_capabilities` machinery (the descriptor-sourced
+        capability matrix) and SCOPES it to the descriptor categories a compiled time Program can
+        select at bind -- the Riemann / reconstruction / limiter / projection bricks and the mesh
+        layouts (the solver / field catalogs are bind inputs, kept too). Returns the same printable
+        :class:`pops.CapabilityMatrix`. PURE: it imports only the inert authoring catalogs, never
+        ``_pops`` (cf. :func:`pops.inspect_capabilities`)."""
+        from pops._capabilities import inspect_capabilities, CapabilityMatrix
+        matrix = inspect_capabilities()
+        scoped = [e for e in matrix if e.category in self._CAPABILITY_CATEGORIES]
+        return CapabilityMatrix(scoped)
+
+    # Descriptor categories a compiled time Program selects from at bind (a spatial brick + a layout
+    # + a field solver); the capability scope of inspect_capabilities().
+    _CAPABILITY_CATEGORIES = ("riemann", "reconstruction", "limiter", "projection", "layout",
+                              "solver", "field")
+
+    def dump_ir(self, path=None):
+        """Write the serialized Program IR (JSON) -- the SAME serialization ``_ir_hash`` digests.
+
+        EXPOSES the existing codegen: the lowered ``pops.time.Program``'s ``_serialize()`` blob (its
+        nodes, commits, block order, optional dt bound) as indented, sort-keyed JSON -- byte-stable
+        run to run, the WHAT the ``.so`` was built from. Writes to @p path if given (returns the
+        path), else returns the JSON string. Raises a clear error if this handle carries no Program."""
+        import json
+        program = self._require_program("dump_ir")
+        blob = json.dumps(program._serialize(), indent=2, sort_keys=True)
+        if path is not None:
+            with open(str(path), "w", encoding="utf-8") as handle:
+                handle.write(blob)
+            return path
+        return blob
+
+    def dump_cpp(self, target):
+        """Write the generated C++ source of the problem ``.so`` (REUSES the existing emit).
+
+        Calls the EXISTING ``Program.emit_cpp_program(model=...)`` codegen (the same source
+        ``compile_problem`` compiles) and writes it. @p target is a directory (the source is written
+        as ``<program_name>.cpp`` inside it) OR a path ending in ``.cpp`` (written verbatim); the
+        parent directory must exist. Returns the written file path. The carried model is passed so a
+        Program whose IR names a model source / linear kernel lowers (without it such a Program raises
+        the SAME NotImplementedError the compile path raises -- it is not faked). Raises a clear error
+        if this handle carries no Program."""
+        import os
+        program = self._require_program("dump_cpp")
+        src = program.emit_cpp_program(model=self.model)
+        name = self.program_name or "problem"
+        if str(target).endswith(".cpp"):
+            out_path = str(target)
+            parent = os.path.dirname(out_path) or "."
+        else:
+            parent = str(target)
+            out_path = os.path.join(parent, "%s.cpp" % name)
+        if not os.path.isdir(parent):
+            raise NotADirectoryError(
+                "dump_cpp: the target directory %r does not exist; create it first "
+                "(dump_cpp does not allocate or create directories)." % (parent,))
+        with open(out_path, "w", encoding="utf-8") as handle:
+            handle.write(src)
+        return out_path
+
+    def dump_schedule(self, path=None):
+        """Write the schedule / commit order of the Program (the block advance order).
+
+        EXPOSES the lowered schedule WITHOUT running it: the committed blocks in the runtime block
+        index order (``_block_indices``: the order the Program first declares each block via
+        ``P.state``, the order ``install_program`` binds them), each with the IR id of its committed
+        State value. A plain, deterministic text listing. Writes to @p path if given (returns the
+        path), else returns the string. Raises a clear error if this handle carries no Program."""
+        program = self._require_program("dump_schedule")
+        commits = program.commits()
+        order = program._block_indices() if hasattr(program, "_block_indices") else {}
+        ordered = sorted(commits, key=lambda b: order.get(b, len(order)))
+        lines = ["schedule for Program %r (block commit order):" % (self.program_name or "problem")]
+        for block in ordered:
+            state = commits[block]
+            lines.append("  %2d  commit %-14s <- %s"
+                         % (order.get(block, -1), block, getattr(state, "name", "?")))
+        if not ordered:
+            lines.append("  (no committed block)")
+        text = "\n".join(lines)
+        if path is not None:
+            with open(str(path), "w", encoding="utf-8") as handle:
+                handle.write(text)
+            return path
+        return text
+
+    def _require_program(self, who):
+        """Return the carried Program, or raise a clear error naming what is missing (never fake)."""
+        program = self.program
+        if program is None:
+            raise ValueError(
+                "%s: this CompiledProblem carries no Program (the lowered pops.time.Program is "
+                "unavailable on this handle), so the IR / C++ / schedule cannot be dumped." % who)
+        return program
+
     def __str__(self):
         """A short, deterministic, array-free summary (Spec 5 sec.12.1, #40-41).
 

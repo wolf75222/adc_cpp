@@ -210,6 +210,16 @@ class _SystemUnifiedInstall:
                     "(pops.Explicit(substeps=, stride=)) instead.")
             self._install_cadence(cadence)
 
+    def explain_bind(self, compiled):
+        """A printable :class:`pops.codegen.inspect_report.BindReport` of @p compiled vs this sim
+        (Spec 5 sec.12.1, criterion #15). INERT: reads the artifact's DECLARED bind inputs
+        (``compiled.arguments()``) and the blocks / named aux ALREADY wired on this System, then
+        reuses the ADC-463 :func:`collect_missing_arguments` to compute, per group
+        (instances / params / aux / solvers), which inputs are PROVIDED vs still REQUIRED. It binds
+        nothing and mutates nothing -- the read-only counterpart of ``install``'s early validation."""
+        from pops.codegen.inspect_report import build_bind_report
+        return build_bind_report(self, compiled)
+
     def _validate_install_arguments(self, compiled, instances, params, aux, solvers):
         """Early bind-input validation (Spec 5 sec.10): reject a COMPILED install missing a REQUIRED
         argument the artifact declares, BEFORE any native mutation. Thin wrapper around the shared
