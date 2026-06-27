@@ -45,10 +45,14 @@ def _objects():
     """
     mesh = pops.CartesianMesh(n=8, L=1.0)
     phi = pmath.Unknown("phi")
+    prog = pops.time.Program("demo")
+    prog.state("plasma")  # one op so the summary reports a non-zero op count
     return {
         # numerics scheme bricks (runtime layer).
         "Spatial": pops.Spatial(),
         "FiniteVolume": pops.FiniteVolume(),
+        # compiled time-program authoring object (pure-Python SSA builder).
+        "time.Program": prog,
         # mesh layouts.
         "layouts.Uniform": layouts.Uniform(mesh),
         "layouts.AMR": layouts.AMR(mesh),

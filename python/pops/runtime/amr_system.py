@@ -190,5 +190,16 @@ class AmrSystem(_AmrSystemEquation, _AmrSystemIO):
                             "(pops.dsl.CoupledSource(...).compile(...)): the AMR coupled source is "
                             "MULTI-BLOCK and described in formulas")
 
+    def __str__(self):
+        """Short, array-free summary: block names on the AMR hierarchy (Spec 5 sec.12.1).
+
+        Field/patch data stays out of the summary -- it prints the block registry only.
+        """
+        try:
+            blocks = list(self._s.block_names())
+        except Exception:  # pragma: no cover - defensive: _AmrSystem not fully wired
+            blocks = []
+        return "AmrSystem(blocks=%s)" % (blocks,)
+
     def __getattr__(self, attr):
         return getattr(self._s, attr)

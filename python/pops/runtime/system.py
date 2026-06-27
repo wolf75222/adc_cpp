@@ -133,6 +133,17 @@ class System(_SystemInstall, _SystemUnifiedInstall, _SystemAuxState,
         """
         return list(self._s.block_names())
 
+    def __str__(self):
+        """Short, array-free summary: the installed block names (Spec 5 sec.12.1).
+
+        Deliberately field-data-free -- it prints the block registry, never a Fab dump.
+        """
+        try:
+            blocks = self.block_names()
+        except Exception:  # pragma: no cover - defensive: _System not fully wired
+            blocks = []
+        return "System(blocks=%s)" % (blocks,)
+
     @staticmethod
     def abi_key():
         """Module ABI key (compiler, C++ standard, signature of the pops headers). Compared to
