@@ -62,6 +62,7 @@ __all__ = [
     "set_threads", "has_kokkos", "parallel_info", "doctor",
     "compile_problem", "CompiledProblem", "CompiledTime",
     "compile_library", "read_library_manifest", "LibraryManifest",
+    "Problem", "PhysicsModel", "compile", "bind",
 ]
 
 
@@ -79,6 +80,8 @@ from . import external  # noqa: E402  (pops.external compiled-brick references; 
 from . import fields  # noqa: E402  (pops.fields typed elliptic field-problem authoring; pure stdlib, Spec 5)
 from . import linalg  # noqa: E402  (pops.linalg abstract algebra: names A x = b; pure stdlib, Spec 5)
 from . import solvers  # noqa: E402  (pops.solvers linear/nonlinear/elliptic solver catalog; pure stdlib, Spec 5)
+from .problem import Problem  # noqa: E402,F401  (Spec 5 sec.5.16: top-level compilable assembly; pure stdlib)
+from pops.physics import PhysicsModel  # noqa: E402,F401  (Spec 5 sec.11: alias of pops.physics.Model)
 from .codegen.library import (  # noqa: E402,F401  (re-export: brick-library manifest API, Spec 3 section 21)
     LibraryManifest, compile_library, read_library_manifest)
 from .time import CompiledTime  # noqa: E402,F401  (re-export: compiled-Program time policy)
@@ -97,4 +100,8 @@ def __getattr__(name):
     if name == "CompiledProblem":
         from .codegen.loader import CompiledProblem
         return CompiledProblem
+    if name in ("compile", "bind"):
+        # Thin pops.Problem orchestration over compile_problem + System/AmrSystem install.
+        from .codegen import orchestration
+        return getattr(orchestration, name)
     raise AttributeError("module %r has no attribute %r" % (__name__, name))

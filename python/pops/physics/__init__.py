@@ -40,6 +40,10 @@ from .multispecies import CoupledSource, CompiledCoupledSource
 
 # Blackboard board facade: the public pops.physics.Model surface (Spec 3).
 from .board import Model
+# Spec 5 sec.5.16 / sec.11 preferred name. ALIAS, not a rename: it is the SAME class object
+# (PhysicsModel is Model), so every existing pops.physics.Model consumer keeps working and the
+# class __name__ stays "Model" (a `type(x).__name__ == "Model"` check is unaffected).
+PhysicsModel = Model
 from .board_handles import (
     Invariant, FluxHandle, SourceHandle, FieldsHandle, FieldHandle,
     LocalLinearOperatorExpr, CallableOperator, StateHandle, VectorHandle,
@@ -47,7 +51,7 @@ from .board_handles import (
 
 __all__ = [
     # board surface (the historical pops.physics public names)
-    "Model", "Invariant", "FluxHandle", "SourceHandle", "FieldsHandle", "FieldHandle",
+    "Model", "PhysicsModel", "Invariant", "FluxHandle", "SourceHandle", "FieldsHandle", "FieldHandle",
     "LocalLinearOperatorExpr", "CallableOperator", "StateHandle", "VectorHandle",
     # aux + roles
     "AUX_CANONICAL", "AUX_BASE_COMPS", "AUX_NAMED_BASE", "AUX_NAMED_MAX", "CANONICAL_ROLES",
