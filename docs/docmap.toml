@@ -278,10 +278,12 @@ mode = "warning"
 depends_on = ["python/pops/numerics", "python/pops/fields", "python/pops/mesh",
               "python/pops/params", "python/pops/output", "python/pops/external",
               "python/pops/diagnostics", "python/pops/descriptors.py",
-              "python/pops/codegen/optimization.py", "python/pops/codegen/math_options.py"]
+              "python/pops/codegen/optimization.py", "python/pops/codegen/math_options.py",
+              "python/pops/codegen/backends.py", "python/pops/runtime/platforms.py",
+              "python/pops/runtime/profile.py"]
 tested_by = []
 testable = false
-reviewed = "cd88a898"
+reviewed = "b2c91f24222a7cb194471c6dfbfc215e7c7cf757"
 
 [docs."docs/sphinx/reference/migration-strings-to-typed.md"]
 owner = "Romain"
