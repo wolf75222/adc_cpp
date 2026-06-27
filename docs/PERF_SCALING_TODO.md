@@ -67,7 +67,7 @@ therefore does not always mean "satisfactory performance"; it means
 - [x] Implement a `python-bricks` Python driver:
   `pops.Model(FluidState, CompressibleFlux, NoSource, ...)`.
 - [x] Implement a `python-dsl-production` Python driver:
-  `dsl.Model(...).compile(backend="production")`.
+  `pops.physics.facade.Model(...).compile(backend="production")`.
 - [x] Check explicitly:
   `compiled.backend == "production"` and `compiled.adder == "add_native_block"`.
 - [x] Measure `T_import`.

@@ -15,14 +15,14 @@ import tempfile
 import numpy as np
 
 import pops
-from pops import dsl
+from pops.physics.model import HyperbolicModel
 
 INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "include"))
 
 
 def build_te_scalar():
     """Scalaire transporte sans flux, source = T_e * n (lit aux('T_e') -> n_aux=5)."""
-    m = dsl.HyperbolicModel("tescalar")
+    m = HyperbolicModel("tescalar")
     (nn,) = m.conservative_vars("n")
     zero = 0.0 * nn                        # expression nulle (set_flux n'enrobe pas les floats bruts)
     m.set_flux(x=[zero], y=[zero])         # flux nul -> R = source

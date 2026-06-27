@@ -201,13 +201,13 @@ def _run_section_b(t):
         print("-- (B) skipped: _pops lacks the install_program binding (rebuild _pops) --")
         return None
 
-    from pops import dsl
+    from pops.physics.facade import Model
 
     # A minimal 1-variable model with NO flux and NO Poisson coupling: the Program never runs a rhs or
     # solve_fields; the block's single conservative variable (rho) doubles as the scalar field the
     # matrix-free solve writes. A complete compilable block (flux + primitive + eigenvalue).
     def passive_model(name):
-        m = dsl.Model(name)
+        m = Model(name)
         (rho,) = m.conservative_vars("rho")
         u = m.primitive("u", 0.0 * rho)
         m.primitive_vars(rho=rho, u=u)

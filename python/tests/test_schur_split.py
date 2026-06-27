@@ -29,7 +29,8 @@ import tempfile
 import numpy as np
 
 import pops
-from pops import dsl
+from pops.ir.ops import sqrt
+from pops.physics.facade import Model
 
 INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "include"))
 
@@ -47,13 +48,13 @@ def isothermal_magnetized(cs2=1.0):
     """Fluide isotherme 2D (rho, mx, my) magnetise : flux d'Euler isotherme (pression cs2*rho), roles
     canoniques Density/MomentumX/MomentumY, lit le champ aux B_z (-> n_aux=4, canal B_z present). La
     source LOCALE est nulle : l'etage SOURCE est porte par pops.CondensedSchur (electrostatique + Lorentz)."""
-    m = dsl.Model("iso_mag")
+    m = Model("iso_mag")
     rho, mx, my = m.conservative_vars("rho", "mx", "my",
                                       roles=["Density", "MomentumX", "MomentumY"])
     u = m.primitive("u", mx / rho)
     v = m.primitive("v", my / rho)
     p = cs2 * rho                       # pression isotherme p = cs2 rho
-    c = dsl.sqrt(cs2)                   # vitesse du son isotherme (constante)
+    c = sqrt(cs2)                   # vitesse du son isotherme (constante)
     m.flux(x=[mx, mx * u + p, mx * v],
            y=[my, my * u, my * v + p])
     m.eigenvalues(x=[u - c, u, u + c], y=[v - c, v, v + c])
@@ -262,7 +263,7 @@ def main():
     # (c) ERREURS CLAIRES.
     # ------------------------------------------------------------------------------------------
     # (c1) role manquant : un modele scalaire (pas de MomentumX/MomentumY) -> erreur a add_equation.
-    scal = dsl.Model("scal_mag")
+    scal = Model("scal_mag")
     (q,) = scal.conservative_vars("q")     # un seul champ : aucun role Density/Momentum canonique
     scal.flux(x=[0.0 * q], y=[0.0 * q])
     scal.eigenvalues(x=[0.0 * q], y=[0.0 * q])

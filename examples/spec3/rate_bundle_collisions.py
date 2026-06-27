@@ -9,7 +9,7 @@ Run: python3 examples/spec3/rate_bundle_collisions.py
 """
 import pops.model as model
 import pops.time as adctime
-from pops import dsl
+from pops.ir.expr import Var
 
 
 def build_bundle():
@@ -31,7 +31,7 @@ def coupled_module():
     e = mod.state_space("electron_state", ("ne", "mex", "mey"))
     i = mod.state_space("ion_state", ("ni", "mix", "miy"))
     bundle = model.RateBundle({"electrons": model.Rate(e), "ions": model.Rate(i)})
-    ne, ni = dsl.Var("ne", "cons"), dsl.Var("ni", "cons")
+    ne, ni = Var("ne", "cons"), Var("ni", "cons")
     mod.operator(name="collision", signature=model.Signature((e, i), bundle),
                  kind="coupled_rate",
                  expr={"electrons": [ni - ne, ne, ne], "ions": [ne - ni, ni, ni]})

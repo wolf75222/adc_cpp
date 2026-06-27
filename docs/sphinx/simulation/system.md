@@ -109,7 +109,7 @@ sim.add_thermal_exchange("a", "b", rate=1.0)                           # energy 
 ```
 
 For a generic inter-species source (described in formulas rather than fixed), the DSL
-`pops.dsl.CoupledSource(...).compile(...)` produces a descriptor that `sim.add_coupling(...)`
+`pops.physics.multispecies.CoupledSource(...).compile(...)` produces a descriptor that `sim.add_coupling(...)`
 plugs in too (interpreted bytecode on the C++ side, no per-cell Python callback, MPI-safe). The
 detail of the multi-species / plasma case is in
 [ALGORITHMS.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/ALGORITHMS.md) (section 18, "composition runtime and multi-species

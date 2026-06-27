@@ -1,4 +1,4 @@
-# Design of the Python DSL model API (`dsl.Model`)
+# Design of the Python DSL model API (`pops.physics.facade.Model`)
 
 > Short user API: see [docs/DSL_API.md](DSL_API.md) ; this document = design + history.
 
@@ -15,7 +15,7 @@ RECOMMENDED public API (main user entry point):
 - `pops.Model(state, transport, source, elliptic)` (`__init__.py:Model`): COMPOSE a model from
   already-compiled NATIVE bricks (`add_block` path, full production parity). This is
   the default route to assemble an existing model.
-- `pops.dsl.Model(...)` (`dsl.py:Model`): WRITE a model as symbolic FORMULAS, then
+- `pops.physics.facade.Model(...)` (`dsl.py:Model`): WRITE a model as symbolic FORMULAS, then
   compile it. RECOMMENDED default: `backend="production"` (zero-copy native path, GPU/MPI validated).
 - ADVANCED / LEGACY / TEST paths (NOT the main user route): `backend="prototype"`
   (JIT proto), `backend="aot"` (`.so` single-rank with marshaling), `add_dynamic_block`,
@@ -27,7 +27,7 @@ RECOMMENDED public API (main user entry point):
 Quick recap; the per-section detail follows (the SHIPPED/GAP tags are repeated there).
 
 SHIPPED (no longer read as "target"):
-- **Phase A** (#89/#90): `dsl.Model` facade (`dsl.py:Model`), named `Param` (`dsl.py:Param`,
+- **Phase A** (#89/#90): `pops.physics.facade.Model` facade (`dsl.py:Model`), named `Param` (`dsl.py:Param`,
   `const` mode inline; `runtime` mode SHIPPED on `aot`, P7-b, cf. bullet "Runtime params"),
   `CompiledModel` (`dsl.py:CompiledModel`,
   carries `abi_key`/`model_hash`/`cxx`/`std`), `System.add_equation` (`__init__.py:add_equation`,
@@ -168,28 +168,28 @@ Three execution paths exist on the C++ side:
 > (#92): `pops.AmrSystem.add_native_block` + `m.compile(target="amr_system")`; parity
 > `add_native_block` == `add_compiled_model` == `add_block` (#105, `dmax=0`).
 
-> SHIPPED (#89). `dsl.Model` now EXISTS (`dsl.py:Model`, module `pops.dsl`). It is the facade
+> SHIPPED (#89). `pops.physics.facade.Model` now EXISTS (`dsl.py:Model`, module `pops.dsl`). It is the facade
 > that COMPOSES a private `HyperbolicModel` (`_m`) and delegates each call. The name `pops.Model`
 > (`__init__.py:Model`) remains the distinct function that composes a `ModelSpec` of NATIVE bricks
 > (path (a)); the two coexist as planned (one in `pops.dsl`, the other in `pops`).
 
 
-## 1. Stable `dsl.Model` facade
+## 1. Stable `pops.physics.facade.Model` facade
 
-> SHIPPED (#89). This section is DELIVERED: `dsl.Model`, `m.flux`/`m.eval_flux`,
+> SHIPPED (#89). This section is DELIVERED: `pops.physics.facade.Model`, `m.flux`/`m.eval_flux`,
 > `m.primitive_vars(**kwargs)`, `m.param`, `m.compile(backend, target)` exist
 > (`dsl.py:Model`). The mapping table below describes the actual implementation.
 
-TARGET: `dsl.Model` is the stable SURFACE; `HyperbolicModel` remains the unchanged
-internal BACKEND. `dsl.Model` delegates each call to an existing method of
-`HyperbolicModel` (composition, not inheritance: `dsl.Model` holds a private
+TARGET: `pops.physics.facade.Model` is the stable SURFACE; `HyperbolicModel` remains the unchanged
+internal BACKEND. `pops.physics.facade.Model` delegates each call to an existing method of
+`HyperbolicModel` (composition, not inheritance: `pops.physics.facade.Model` holds a private
 `HyperbolicModel` `_m`). No numerics is touched.
 
-Construction: `m = dsl.Model("euler")` creates the internal `HyperbolicModel("euler")`.
+Construction: `m = pops.physics.facade.Model("euler")` creates the internal `HyperbolicModel("euler")`.
 
 Mapping of target method -> backing `HyperbolicModel`:
 
-| `dsl.Model` (target) | backed by `HyperbolicModel` (`dsl.py`) | note |
+| `pops.physics.facade.Model` (target) | backed by `HyperbolicModel` (`dsl.py`) | note |
 |---|---|---|
 | `m.conservative_vars(*names, roles=)` | `conservative_vars(*names, roles=)` `:291` | identical (forwards `roles=`) |
 | `m.primitive_vars(rho=expr, u=expr, ...)` (kwargs) or `(*vars, roles=)` | `set_primitive_state(*vars_or_names, roles=)` `:323` + `primitive(name, expr)` `:301` | TARGET STYLE = KWARGS `name=expr`: each kwarg defines a primitive (`_m.primitive(name, expr)`) AND fixes the ORDERED layout of `Prim` in kwarg order (Python 3.7+: insertion order guaranteed). The positional form `(*vars, roles=)` remains accepted. The `roles=` (kwarg or list) remain supported for the role->index mapping |
@@ -208,7 +208,7 @@ Mapping of target method -> backing `HyperbolicModel`:
 
 NAME COLLISION: SETTLED. In `HyperbolicModel`, `flux(U, aux, dir)` `:354` is
 the numpy EVALUATOR (CPU interpreter) and `set_flux` `:311` is the DECLARATOR. The target
-plan names the declarator `m.flux`. DECISION: on `dsl.Model`, `m.flux(x=, y=)` is the
+plan names the declarator `m.flux`. DECISION: on `pops.physics.facade.Model`, `m.flux(x=, y=)` is the
 symbolic DECLARATOR (delegates to `set_flux`); the numpy evaluator is exposed under the
 DISTINCT name `m.eval_flux(U, aux, dir)` (delegates to `_m.flux`). The declarative surface
 prevails; no name carries both senses. (No `m.set_flux` alias on the facade: a
@@ -487,7 +487,7 @@ Grouped by dependency. Each step notes its file WRITE-SET.
 Delivered. Edits only Python; touches neither `include/**` nor `python/bindings/system/base/system.cpp`/`bindings.cpp`.
 Items 1-6 below: all SHIPPED.
 
-1. `dsl.Model` (section 1): delegation to `HyperbolicModel`. WRITE-SET:
+1. `pops.physics.facade.Model` (section 1): delegation to `HyperbolicModel`. WRITE-SET:
    `python/pops/dsl.py` (adding a class; do not modify `HyperbolicModel`).
 2. `m.param` mode (a) constant (section 2a) + `gamma` case -> `set_gamma`. WRITE-SET:
    `python/pops/dsl.py`. Relies on `_wrap`/`Const` unchanged.
@@ -552,11 +552,11 @@ Delivered. It is dispatch wiring (no new numerics).
 
 ### Phase F: HYBRID composition native + DSL within ONE model -- prototype
 
-12. `pops.Model(...)` composes 100% NATIVE bricks (ModelSpec, C++ tags); `dsl.Model(...)` generates
+12. `pops.Model(...)` composes 100% NATIVE bricks (ModelSpec, C++ tags); `pops.physics.facade.Model(...)` generates
     a 100% DSL model. Phase F fills the in-between: MIXING, within a SINGLE model, NATIVE
     bricks and PARTIAL DSL bricks.
 
-    **API**: `dsl.HyperbolicBrick` / `dsl.SourceBrick` / `dsl.EllipticBrick` -> `.compile()` ->
+    **API**: `pops.physics.bricks.HyperbolicBrick` / `pops.physics.bricks.SourceBrick` / `pops.physics.bricks.EllipticBrick` -> `.compile()` ->
     `CompiledHyperbolicBrick` / `...Source...` / `...Elliptic...` (the C++ of ONE brick + metadata,
     no .so per brick). Then `pops.CompositeModel(transport=, source=, elliptic=)` accepts, per slot,
     EITHER a native brick (`pops.ExB`/`PotentialForce`/`ChargeDensity`...), OR a compiled DSL brick
@@ -587,7 +587,7 @@ Delivered. It is dispatch wiring (no new numerics).
 
 ### Dependency summary
 
-- A (1-6): SHIPPED (#89/#90). The bulk of the value (`dsl.Model` stable, `CompiledModel`,
+- A (1-6): SHIPPED (#89/#90). The bulk of the value (`pops.physics.facade.Model` stable, `CompiledModel`,
   `add_equation`, runtime sugar, errors). `compile()` ergonomics + `model_hash` cache (#103).
 - B (7-8): SHIPPED (#85 `System`, #92 `AmrSystem`). Native `production` backend -> `add_native_block`;
   WENO5 now on all paths (.so #102, native AMR #105).

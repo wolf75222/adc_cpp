@@ -261,7 +261,7 @@ Run exactly the same smooth periodic Euler case in three variants:
 
 1. `cpp-native`: native C++, without Python.
 2. `python-bricks`: `pops.Model(FluidState, CompressibleFlux, NoSource, ...)`.
-3. `python-dsl-production`: `dsl.Model(...).compile(backend="production")`.
+3. `python-dsl-production`: `pops.physics.facade.Model(...).compile(backend="production")`.
 
 Required controls:
 

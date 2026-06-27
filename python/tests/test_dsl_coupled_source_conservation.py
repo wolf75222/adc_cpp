@@ -20,7 +20,7 @@ Invariants verifies :
 import numpy as np
 
 import pops
-from pops import dsl
+from pops.physics.multispecies import CoupledSource
 
 
 def chk(cond, msg, fails):
@@ -33,7 +33,7 @@ def chk(cond, msg, fails):
 def build_exchange(k):
     """Echange conservatif de densite de 'beta' vers 'alpha' : alpha GAGNE +k*na*nb, beta PERD
     -k*na*nb (transfert proportionnel au produit des densites). Conservatif par add_pair."""
-    src = dsl.CoupledSource("exchange")
+    src = CoupledSource("exchange")
     na = src.block("alpha").role("density")
     nb = src.block("beta").role("density")
     kp = src.param("Kx", k)
@@ -131,7 +131,7 @@ def main():
     chk(sim.density("beta").mean() < nb0 - 1e-6, "beta a perdu (-expr)", fails)
 
     # --- (C) verify_conservation=True attrape un couplage manuel NON conservatif ---
-    bad = dsl.CoupledSource("bad")
+    bad = CoupledSource("bad")
     na2 = bad.block("alpha").role("density")
     nb2 = bad.block("beta").role("density")
     k1 = bad.param("k1", 0.5)
@@ -164,7 +164,7 @@ def main():
     # --- (D) add_pair refuse block_a == block_b ---
     raised_same = False
     try:
-        s2 = dsl.CoupledSource("degenere")
+        s2 = CoupledSource("degenere")
         f = s2.block("alpha").role("density")
         s2.add_pair("alpha", "alpha", role="density", expr=f)
     except ValueError:

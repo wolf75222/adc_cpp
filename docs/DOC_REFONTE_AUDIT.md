@@ -121,7 +121,7 @@ Merge of `claim_findings` + adversarial pass. Verdict column: inventory verdict;
 | Claim | Source doc | Verdict | Evidence |
 |---|---|---|---|
 | AmrSystem is single-block / explicit-only / no Roe / no primitive recon / NOT at parity with System | ARCHITECTURE Sec. 8 (l.26,379-382,547), README:130-132, DSL_MODEL_DESIGN Sec. 0bis/Sec. 5/Phase D | **obsolete -- CONFIRMED (high)** | `amr_system.cpp:202 multi_block()`, `:208 build_multi()`, `:300 if(multi_block())`, parse `recon in {conservative,primitive}` `:343-345`, `riemann in {rusanov,hllc,roe}` `:135`, IMEX `:340-346`; 7 capstone tests (`test_amr_system_twoblock`, `test_amr_multiblock_*`); union regrid #199. No "single block only" throw. |
-| `m.u[0]`/`m.a.grad_x` to access conservative/aux vars in dsl.Model | DSL_API.md Sec. 1 (l.21-22,29) | **false -- CONFIRMED (high)** | `dsl.Model` has neither `.u` nor `.a`; real API = `conservative_vars(...)->Vars` (`dsl.py:1543`), aux via `m.aux('grad_x')` (`:1585`). Crashes with AttributeError. |
+| `m.u[0]`/`m.a.grad_x` to access conservative/aux vars in pops.physics.facade.Model | DSL_API.md Sec. 1 (l.21-22,29) | **false -- CONFIRMED (high)** | `pops.physics.facade.Model` has neither `.u` nor `.a`; real API = `conservative_vars(...)->Vars` (`dsl.py:1543`), aux via `m.aux('grad_x')` (`:1585`). Crashes with AttributeError. |
 | Runtime params: `param(kind='runtime')` raises NotImplementedError (Phase E) | DSL_API.md Sec. 5 (l.104-106) **AND** `dsl.py:1623/1627` (docstring+comment) | **false -- CONFIRMED (high)** | `Param.__init__` (`dsl.py:1420-1432`) implements kind='runtime' (`RuntimeParamRef`), raises ValueError only for unknown kinds. `test_dsl_runtime_params.py` compiles+runs+`set_block_params` end-to-end. **The source docstring would propagate the false claim via autodoc.** |
 | `sim.set_poisson("geometric_mg")` (positional) | DSL_API.md Sec. 3 (l.70) | **false -- CONFIRMED (high)** | 1st positional arg = `rhs` (`bindings.cpp:153`), valid in {charge_density,composite} (`system_field_solver.hpp:197-199`) -> throw "unknown rhs". Correct: `set_poisson(solver='geometric_mg')`. |
 | Tutorials gallery wired into a toctree (reachable pages) | sphinx/tutorials_index.md, index.md | **false -- CONFIRMED (high)** | No `.md` references `_generated/tutorials/`; `tutorials_index.md` = prose stub without toctree; `index.md` Tutorials toctree only lists `tutorials_index`. Pre-194c63f had a real toctree. Clean build -> empty section. |
@@ -213,7 +213,7 @@ Real public surface from `api_entries`. Python symbols = `python/pops/__init__.p
 | Symbol | doc_status | Test evidence |
 |---|---|---|
 | `Model(state,transport,source,elliptic)->ModelSpec`, `ModelSpec` | documented | `test_bindings.py` |
-| `CompositeModel(...)->dsl.HybridModel` | documented | `test_dsl_hybrid.py` |
+| `CompositeModel(...)->pops.physics.hybrid.HybridModel` | documented | `test_dsl_hybrid.py` |
 | `Scalar`/`FluidState`, `ExB`/`CompressibleFlux`/`IsothermalFlux` | documented | `test_bindings.py` |
 | `NoSource`/`PotentialForce`/`GravityForce`, `ChargeDensity`/`BackgroundDensity`/`GravityCoupling` | documented | `test_bindings.py` |
 | `Spatial(limiter,flux,recon)` / `FiniteVolume(...)` | documented | `test_weno5_compiledmodel.py`, `test_dsl_recon.py` |
@@ -227,12 +227,12 @@ Real public surface from `api_entries`. Python symbols = `python/pops/__init__.p
 
 | Symbol | doc_status | Test evidence |
 |---|---|---|
-| `dsl.Model` (conservative_vars/primitive/aux/flux/eigenvalues/source/elliptic_rhs/param/compile) | documented (but `param` runtime docstring = **wrong**) | `test_dsl_phase_a.py`, `test_dsl_production.py` |
-| `dsl.Model.compile(backend='aot'|'production'|'prototype', target='system'|'amr_system', ...)` | documented (real default = `aot`) | `test_dsl_compile_facade.py`, `test_dsl_compile_cache.py` |
-| `dsl.CompiledModel` (backend/adder/so_path/caps/abi_key/runtime_param_*) | documented | `test_dsl_compile_facade.py` |
-| `dsl.HyperbolicModel`, `dsl.Param`/`RuntimeParam`, `dsl.sqrt`/`Expr` | documented (Param: see wrong-docstring) | `test_dsl_codegen.py`, `test_dsl_runtime_params.py`, `test_dsl_cse.py` |
-| `dsl.HyperbolicBrick`/`SourceBrick`/`EllipticBrick`, `dsl.HybridModel`, `dsl.NativeBrick`/`CompiledBrick` | documented | `test_dsl_brick.py`, `test_dsl_hybrid*.py` |
-| `dsl.CoupledSource`/`CompiledCoupledSource` (bytecode couplings) | documented | `test_dsl_coupled_source*.py` |
+| `pops.physics.facade.Model` (conservative_vars/primitive/aux/flux/eigenvalues/source/elliptic_rhs/param/compile) | documented (but `param` runtime docstring = **wrong**) | `test_dsl_phase_a.py`, `test_dsl_production.py` |
+| `pops.physics.facade.Model.compile(backend='aot'|'production'|'prototype', target='system'|'amr_system', ...)` | documented (real default = `aot`) | `test_dsl_compile_facade.py`, `test_dsl_compile_cache.py` |
+| `pops.codegen.loader.CompiledModel` (backend/adder/so_path/caps/abi_key/runtime_param_*) | documented | `test_dsl_compile_facade.py` |
+| `pops.physics.model.HyperbolicModel`, `pops.physics.model.Param`/`RuntimeParam`, `pops.ir.ops.sqrt`/`Expr` | documented (Param: see wrong-docstring) | `test_dsl_codegen.py`, `test_dsl_runtime_params.py`, `test_dsl_cse.py` |
+| `pops.physics.bricks.HyperbolicBrick`/`SourceBrick`/`EllipticBrick`, `pops.physics.hybrid.HybridModel`, `pops.physics.bricks.NativeBrick`/`CompiledBrick` | documented | `test_dsl_brick.py`, `test_dsl_hybrid*.py` |
+| `pops.physics.multispecies.CoupledSource`/`CompiledCoupledSource` (bytecode couplings) | documented | `test_dsl_coupled_source*.py` |
 | `integrate.euler_step` / `ssprk2_step` | documented | `test_dsl.py` |
 | `abi_key` (module-level) | documented | `test_dsl_abi_metadata.py` |
 

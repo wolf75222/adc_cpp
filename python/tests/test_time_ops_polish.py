@@ -269,10 +269,11 @@ def test_ir_hash_distinguishes_new_ops(t):
 
 
 # ---- shared engine setup for (B) ----
-def _const_source_model(dsl, name, c):
+def _const_source_model(name, c):
     """A 1-variable model (rho), ZERO flux, default source S(rho) = c (a CONSTANT source, so R = c is
     spatially uniform and analytic). A complete compilable block (flux + primitive + eigenvalue + src)."""
-    m = dsl.Model(name)
+    from pops.physics.facade import Model
+    m = Model(name)
     (rho,) = m.conservative_vars("rho")
     u = m.primitive("u", 0.0 * rho)
     m.primitive_vars(rho=rho, u=u)
@@ -313,17 +314,17 @@ def _run_section_b(t):
               "(rebuild _pops) --")
         return None
 
-    from pops import dsl
+    from pops.physics.facade import Model
 
     c = 0.5
     P = _reductions_program(t)
     try:
-        compiled = pops.compile_problem(model=_const_source_model(dsl, "red_prog", c), time=P)
+        compiled = pops.compile_problem(model=_const_source_model("red_prog", c), time=P)
     except RuntimeError as exc:  # no compiler / no Kokkos visible / .so compile failed
         print("-- (B) skipped: compile_problem could not build the .so: %s --" % str(exc)[:200])
         return None
     try:
-        compiled_model = _const_source_model(dsl, "red_block", c).compile(backend="production")
+        compiled_model = _const_source_model("red_block", c).compile(backend="production")
     except RuntimeError as exc:
         print("-- (B) skipped: model compile could not build the .so: %s --" % str(exc)[:200])
         return None
@@ -398,15 +399,15 @@ def _run_section_b2(t):
     if not hasattr(sim, "install_program"):
         print("-- (B.2) skipped: _pops lacks the install_program binding (rebuild _pops) --")
         return None
-    from pops import dsl
+    from pops.physics.facade import Model
     P = _fill_project_program(t)
     try:
-        compiled = pops.compile_problem(model=_const_source_model(dsl, "fp_prog", 0.0), time=P)
+        compiled = pops.compile_problem(model=_const_source_model("fp_prog", 0.0), time=P)
     except RuntimeError as exc:
         print("-- (B.2) skipped: compile_problem could not build the .so: %s --" % str(exc)[:200])
         return None
     try:
-        compiled_model = _const_source_model(dsl, "fp_block", 0.0).compile(backend="production")
+        compiled_model = _const_source_model("fp_block", 0.0).compile(backend="production")
     except RuntimeError as exc:
         print("-- (B.2) skipped: model compile could not build the .so: %s --" % str(exc)[:200])
         return None

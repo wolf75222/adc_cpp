@@ -91,11 +91,11 @@ Summary: **layers 1-12 of the OO design are ~80% in place** (different organizat
 Goal: Python WRITES the formulas (not a function called per cell), PoPS turns them into a solver.
 
 ```python
-e = pops.dsl.HyperbolicModel("electrons")
+e = pops.physics.model.HyperbolicModel("electrons")
 rho, rhou, rhov, E = e.conservative_vars("rho", "rho_u", "rho_v", "E")
 u = e.primitive("u", rhou / rho)
 p = e.primitive("p", (gamma - 1) * (E - 0.5 * rho * (u*u + v*v)))
-c = pops.dsl.sqrt(gamma * p / rho)
+c = pops.ir.ops.sqrt(gamma * p / rho)
 e.set_flux(x=[rhou, rhou*u + p, rhou*v, rho*H*u], y=[...])
 e.set_eigenvalues(x=[u - c, u, u + c], y=[...])
 e.set_source([...]); e.set_elliptic_rhs(-qe * rho / me)
@@ -183,7 +183,7 @@ the `Cuda` execution space (GH200; Kokkos 4.4 + CUDA 12.6, `HOPPER90`), == `pops
 (a) DONE: TYPE-ERASED interface `pops::IModel<NV>` + `ModelAdapter` (include/pops/runtime/dynamic/dynamic_model.hpp)
 AND wiring into the runtime. `System::add_dynamic_block(name, so)` loads at runtime (dlopen) a generated
 brick compiled into a `.so` and creates a block driven by the IModel (host Rusanov order 1), advanced via
-eval_rhs / step / step_cfl like any block; `dsl.HyperbolicModel.compile_so` does the JIT.
+eval_rhs / step / step_cfl like any block; `pops.physics.model.HyperbolicModel.compile_so` does the JIT.
 End-to-end verified: `test_dsl_block` (DSL -> .so -> add_dynamic_block; eval_rhs == pops.PythonFlux to
 9e-16; 25 steps in the System, mass conserved); `test_dynamic_model` (C++) and `test_dsl_dynamic`
 (dlopen from a main ignorant of the type) lock down the mechanism. HOST path (vtable, off GPU;

@@ -147,7 +147,7 @@ def _compile_wrong_abi(model, dst_so, cxx):
     ce qui doit declencher le rejet d'add_native_block. Renvoie le chemin du .so."""
     import subprocess
     import tempfile
-    from pops.dsl import pops_loader_build_flags
+    from pops.codegen.toolchain import pops_loader_build_flags
     src = model.emit_cpp_native_loader()
     # adc_cpp est Kokkos-only : le loader inclut les en-tetes pops (for_each), il faut donc Kokkos +
     # (macOS) -undefined dynamic_lookup. pops_loader_build_flags fournit compilateur + flags ; on garde

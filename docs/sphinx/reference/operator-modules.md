@@ -2,7 +2,7 @@
 
 A **module** is the *model-free* description of a model: typed spaces plus a registry of
 typed operators. It is the generalization of the physical DSL ({doc}`symbolic-dsl`): where
-`pops.dsl.Model` describes a PDE with flux, sources and elliptic fields, `pops.model.Module`
+`pops.physics.facade.Model` describes a PDE with flux, sources and elliptic fields, `pops.model.Module`
 describes any model as **operators with signatures**, and a compiled time program
 ({doc}`time-program`) composes those operators *by signature*, never by a hardcoded PDE
 category.
@@ -89,9 +89,9 @@ same macro runs against any module that provides operators with the expected sig
 
 ## Compiling a Module
 
-A Module authored directly -- typed spaces, operators with IR (`dsl.Expr`) bodies, the Riemann wave
+A Module authored directly -- typed spaces, operators with IR (`pops.ir.expr.Expr`) bodies, the Riemann wave
 speeds via `module.eigenvalues(x, y)`, and a composite rate via `module.rate_operator` -- is a
-self-contained, compilable model. `module.to_dsl()` lowers it to a `dsl.Model` (each operator mapped
+self-contained, compilable model. `module.to_dsl()` lowers it to a `pops.physics.facade.Model` (each operator mapped
 to the dsl method of its kind: `grid_operator` to `flux`, `local_source` to `source_term`,
 `local_linear_operator` to `linear_source`, `field_operator` to `elliptic_rhs`, `local_rate` to
 `rate_operator`), so it reuses the dsl codegen engine -- a translation, not a second backend.
@@ -119,17 +119,17 @@ Scope (what is and is not checked):
   uses it.
 - The validated requirements are **inferred** from operator bodies (the aux a body reads). A
   hand-authored `Module.operator(..., requirements=...)` dict is re-inferred when the Module lowers
-  to a `dsl.Model`, so explicit `requirements=` affects `module_hash`/introspection, not this check.
+  to a `pops.physics.facade.Model`, so explicit `requirements=` affects `module_hash`/introspection, not this check.
 - POSIX only (the descriptor reader uses `dlsym`); a pre-Spec-2 `.so` carries no descriptor and is
   unaffected.
 
-## Compatibility with `pops.dsl.Model`
+## Compatibility with `pops.physics.facade.Model`
 
-`pops.dsl.Model` is the **PDE convenience facade** over a module: its `flux` / `source_term` /
+`pops.physics.facade.Model` is the **PDE convenience facade** over a module: its `flux` / `source_term` /
 `linear_source` / `elliptic_field` / `projection` lower into typed operators, exposed via
 `m.operator_registry()` and `m.module`:
 
-| dsl.Model API                | typed operator              | signature                                   |
+| pops.physics.facade.Model API                | typed operator              | signature                                   |
 | ---------------------------- | --------------------------- | ------------------------------------------- |
 | `m.flux(...)`                | `flux_default` grid_operator| `(U) -> Rate(U)`                            |
 | `m.source_term("electric", ...)` | `electric` local_source | `(U[, Fields]) -> Rate(U)`                  |
@@ -148,7 +148,7 @@ does not change the model hash or the codegen.
 The PDE shortcuts (`P.rhs`, `P.solve_fields`, `P.apply`, `P.source`) remain valid; they are
 sugar that lowers to the same IR as `P.call`. To move a model toward the operator-first style:
 
-1. Keep your `dsl.Model`.
+1. Keep your `pops.physics.facade.Model`.
 2. Add `m.rate_operator("explicit_rhs", flux=True, sources=[...])` for the rate the program uses.
 3. Replace `P.rhs(state=U, fields=f, sources=[...])` with `P.call("explicit_rhs", U, f)` and
    `P.solve_fields(U)` with `P.call("fields_from_state", U)` (after `P.bind_operators(m)`).

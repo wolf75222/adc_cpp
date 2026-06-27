@@ -32,7 +32,8 @@ def _skip(msg):
 
 
 try:
-    from pops import dsl, model
+    from pops import model
+    from pops.ir.expr import Var
     from pops import time as adctime
 except Exception as exc:  # noqa: BLE001  -- _pops unavailable in this interpreter
     _skip("pops unavailable: %s" % exc)
@@ -44,7 +45,7 @@ def _field_program(schedule):
     mod = model.Module("sched_fields")
     u = mod.state_space("U", ("rho", "mx", "my"))
     fields = mod.field_space("fields", ("phi",))
-    rho = dsl.Var("rho", "cons")
+    rho = Var("rho", "cons")
     mod.operator(name="fields_from_state", signature=(u,) >> fields, kind="field_operator", expr=rho)
     mod.operator_capabilities("fields_from_state", cacheable=True)
     P = adctime.Program("sched").bind_operators(mod)

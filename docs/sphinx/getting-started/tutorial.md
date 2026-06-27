@@ -101,7 +101,7 @@ and the right-hand side of the Poisson.
 
 ## Step 7: Write the model as formulas (DSL) and compile it
 
-We write the model symbolically with `pops.dsl.Model`: the conservative variable `n`, the
+We write the model symbolically with `pops.physics.facade.Model`: the conservative variable `n`, the
 auxiliary fields `phi` / `grad_x` / `grad_y` provided by the solver, the E x B advection flux, the
 eigenvalues, and the elliptic right-hand side `alpha (n - n_i0)`. `m.check()` verifies that every
 referenced variable is declared.
@@ -200,7 +200,7 @@ PDF/print exports:*
 
 ## Step 14bis: The same physics, two fronts (bricks == DSL)
 
-The model was written here as formulas (`pops.dsl.Model`, Step 7). But the core can also
+The model was written here as formulas (`pops.physics.facade.Model`, Step 7). But the core can also
 compose a model from native bricks: `pops.Model(state, transport, source, elliptic)`.
 The two writing fronts are interchangeable: they are two ways of describing the same
 physics, and they produce an identical numerical kernel. We write it in bricks:

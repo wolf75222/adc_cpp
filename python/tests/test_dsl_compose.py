@@ -13,7 +13,8 @@ import shutil
 import subprocess
 import tempfile
 
-from pops import dsl
+from pops.ir.ops import sqrt
+from pops.physics.model import HyperbolicModel
 
 GAMMA = 1.4
 INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "include"))
@@ -24,13 +25,13 @@ def build_euler_brick():
 
     Identique au montage de test_dsl_brick.py : layout de Prim = (rho, u, v, p), inverse explicite
     fourni via set_conservative_from (le DSL ne sait pas inverser symboliquement)."""
-    e = dsl.HyperbolicModel("euler")
+    e = HyperbolicModel("euler")
     rho, rhou, rhov, E = e.conservative_vars("rho", "rho_u", "rho_v", "E")
     u = e.primitive("u", rhou / rho)
     v = e.primitive("v", rhov / rho)
     p = e.primitive("p", (GAMMA - 1.0) * (E - 0.5 * rho * (u * u + v * v)))
     H = (E + p) / rho
-    c = dsl.sqrt(GAMMA * p / rho)
+    c = sqrt(GAMMA * p / rho)
     e.set_flux(x=[rhou, rhou * u + p, rhou * v, rho * H * u],
                y=[rhov, rhov * u, rhov * v + p, rho * H * v])
     e.set_eigenvalues(x=[u - c, u, u + c], y=[v - c, v, v + c])

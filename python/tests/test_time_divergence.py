@@ -237,10 +237,10 @@ def _run_section_b(t):
         print("-- (B) skipped: _pops lacks the install_program binding (rebuild _pops) --")
         return None
 
-    from pops import dsl
+    from pops.physics.facade import Model
 
     def passive_model(name):  # 1-variable block, no flux, no Poisson coupling
-        m = dsl.Model(name)
+        m = Model(name)
         (rho,) = m.conservative_vars("rho")
         u = m.primitive("u", 0.0 * rho)
         m.primitive_vars(rho=rho, u=u)

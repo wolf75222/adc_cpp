@@ -18,7 +18,6 @@ import tempfile
 import numpy as np
 
 import pops
-from pops import dsl
 from test_dsl_hybrid import build_iso_transport, CS2
 
 RATE = 3.0

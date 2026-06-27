@@ -17,7 +17,10 @@ try:
     import numpy as np
 
     import pops
-    from pops import dsl
+    from pops.codegen.loader import CompiledModel
+    from pops.ir.ops import sqrt
+    from pops.physics.facade import Model
+    from pops.physics.model import Param
     from pops import time as adctime
 except Exception as exc:  # noqa: BLE001
     print("skip test_unified_install (pops/numpy unavailable: %s)" % exc)
@@ -31,7 +34,7 @@ def _fake_compiled(*, hllc=False, roe=False, prim_names=("rho", "u", "v"), wave_
     """A real pops.dsl.CompiledModel object (the engine class) carrying only metadata -- NOT a built
     .so. Used to exercise the host-testable section-24 capability check and the params routing
     WITHOUT compiling (which needs Kokkos). It is never install_program'd."""
-    return dsl.CompiledModel(
+    return CompiledModel(
         so_path="/nonexistent/problem.so", backend="production", adder="add_native_block",
         cons_names=["rho", "mx", "my"], cons_roles=["density", "momentum_x", "momentum_y"],
         prim_names=list(prim_names), n_vars=3, gamma=None, n_aux=3, params=params or {},
@@ -134,7 +137,7 @@ def test_install_aux_derived_rejected():
 
 def test_install_params_routing():
     """install routes a flat params dict to set_block_params per instance (keyed by the RESOLVED
-    CompiledModel's runtime_param_names, NOT the raw dsl.Model), and rejects a param name declared by
+    CompiledModel's runtime_param_names, NOT the raw Model), and rejects a param name declared by
     no instance (no silent drop). Host-testable via _install_params (which takes resolved models)."""
     sim = pops.System(n=N, L=1.0, periodic=True)
     # An instance whose RESOLVED model declares no runtime params: a stray param name must raise.
@@ -151,15 +154,15 @@ def test_install_params_routing():
 def test_install_params_routes_declared_runtime_param():
     """install ROUTES a DECLARED runtime param to set_block_params in sorted-name order -- the
     positive branch test_install_params_routing leaves to here. The fix reads the RESOLVED
-    CompiledModel's runtime_param_names; a raw dsl.Model has none, so routing it UNRESOLVED would drop
+    CompiledModel's runtime_param_names; a raw Model has none, so routing it UNRESOLVED would drop
     the param into 'unknown' (surfaced as 'declared by no instance') -- exactly the bug install's
     resolve step (install step 2) prevents. Host-testable via the pure router
     System._route_block_params (no compile, no engine call)."""
     # A RESOLVED model declaring two runtime params + one const (const excluded; names SORTED).
     resolved = _fake_compiled(params={
-        "nu": dsl.Param("nu", 0.0, kind="runtime"),
-        "cs2": dsl.Param("cs2", 1.0, kind="runtime"),
-        "g": dsl.Param("g", 9.8, kind="const")})
+        "nu": Param("nu", 0.0, kind="runtime"),
+        "cs2": Param("cs2", 1.0, kind="runtime"),
+        "g": Param("g", 9.8, kind="const")})
     assert resolved.runtime_param_names == ["cs2", "nu"], \
         "runtime params SORTED, const excluded (got %r)" % resolved.runtime_param_names
     # Positive: a declared param is routed (NOT 'unknown'); the vector handed to set_block_params is in
@@ -171,24 +174,24 @@ def test_install_params_routes_declared_runtime_param():
         % per_block
     print("OK  install routes a declared runtime param to set_block_params in sorted-name order")
 
-    # Contrast (the bug): the SAME param via a RAW dsl.Model (no runtime_param_names accessor) is
+    # Contrast (the bug): the SAME param via a RAW Model (no runtime_param_names accessor) is
     # dropped into 'unknown' -- which install would surface as 'declared by no instance'. This is why
     # install RESOLVES each model before routing (install step 2 -> _route_block_params).
-    raw = dsl.Model("adc466_raw_rt")
+    raw = Model("adc466_raw_rt")
     raw.param("cs2", 1.0, kind="runtime")
     raw.param("nu", 0.0, kind="runtime")
     _, unknown_raw = pops.System._route_block_params({"plasma": raw}, {"nu": 2.5})
     assert unknown_raw == ["nu"], \
-        "a RAW dsl.Model exposes no runtime_param_names -> the param is dropped (the bug)"
-    print("OK  routing a RAW dsl.Model drops the param (the bug install's resolve step prevents)")
+        "a RAW Model exposes no runtime_param_names -> the param is dropped (the bug)"
+    print("OK  routing a RAW Model drops the param (the bug install's resolve step prevents)")
 
 
 def _lorentz_model(name="adc466_model"):
     """An isothermal fluid whose Lorentz linear source reads the aux field B_z (a hard requirement),
     same shape as test_install_requirement_validation -- used for the Kokkos-gated end-to-end."""
-    m = dsl.Model(name)
+    m = Model(name)
     rho, mx, my = m.conservative_vars("rho", "mx", "my")
-    cs = dsl.sqrt(0.5)
+    cs = sqrt(0.5)
     m.flux(x=[mx, mx * mx / rho + 0.5 * rho, mx * my / rho],
            y=[my, mx * my / rho, my * my / rho + 0.5 * rho])
     m.eigenvalues(x=[mx / rho - cs, mx / rho, mx / rho + cs],
@@ -261,12 +264,12 @@ def test_install_end_to_end_kokkos():
 
 def _iso_runtime_model(name="adc466_rt_model"):
     """An isothermal fluid with a DECLARED RUNTIME param cs2 (sound speed^2), no required aux. install
-    resolves a runtime-param dsl.Model via AOT (production/native FREEZES runtime params; cf.
+    resolves a runtime-param Model via AOT (production/native FREEZES runtime params; cf.
     System._resolve_instance_model), so set_block_params can change cs2 at runtime."""
-    m = dsl.Model(name)
+    m = Model(name)
     rho, mx, my = m.conservative_vars("rho", "mx", "my")
     cs2 = m.param("cs2", 0.5, kind="runtime")
-    cs = dsl.sqrt(cs2)
+    cs = sqrt(cs2)
     m.flux(x=[mx, mx * mx / rho + cs2 * rho, mx * my / rho],
            y=[my, mx * my / rho, my * my / rho + cs2 * rho])
     m.eigenvalues(x=[mx / rho - cs, mx / rho, mx / rho + cs],
@@ -279,11 +282,11 @@ def _iso_runtime_model(name="adc466_rt_model"):
 
 
 def test_install_routes_runtime_param_kokkos():
-    """End-to-end (Kokkos-gated): the HEADLINE unified-install path -- compile_problem(model=<dsl.Model
+    """End-to-end (Kokkos-gated): the HEADLINE unified-install path -- compile_problem(model=<Model
     declaring a runtime param>) + install(params={...}) with NO explicit instance model and the
     default SSPRK2 time -- routes the param to set_block_params on the real block. install resolves a
-    runtime-param dsl.Model via AOT (production freezes runtime params; cf. _resolve_instance_model),
-    so the param is settable; the pre-fix router (reading the raw dsl.Model's absent
+    runtime-param Model via AOT (production freezes runtime params; cf. _resolve_instance_model),
+    so the param is settable; the pre-fix router (reading the raw Model's absent
     runtime_param_names) raised 'declared by no instance' here. Self-skips without a compiler / Kokkos
     (mirrors test_install_end_to_end_kokkos)."""
     if not hasattr(pops.System(n=8, L=1.0, periodic=True), "install_program"):
@@ -291,7 +294,7 @@ def test_install_routes_runtime_param_kokkos():
         return
     m = _iso_runtime_model()
     try:
-        compiled = pops.compile_problem(model=m, time=_lie_program())  # compiled.model is the raw dsl.Model
+        compiled = pops.compile_problem(model=m, time=_lie_program())  # compiled.model is the raw Model
     except RuntimeError as exc:
         print("skip test_install_routes_runtime_param_kokkos (no Kokkos to build the .so: %s)"
               % str(exc)[:120])
@@ -305,7 +308,7 @@ def test_install_routes_runtime_param_kokkos():
     sim = pops.System(n=N, L=1.0, periodic=True)
     sim.install(
         compiled,
-        # No "model" key -> install uses compiled.model (the raw dsl.Model) and AUTO-resolves it via
+        # No "model" key -> install uses compiled.model (the raw Model) and AUTO-resolves it via
         # AOT (it declares a runtime param); the default pops.Explicit() == SSPRK2 is AOT-compatible.
         instances={"plasma": {"state": "U", "initial": u0,
                               "spatial": pops.FiniteVolume(limiter="none", riemann="rusanov"),
@@ -313,7 +316,7 @@ def test_install_routes_runtime_param_kokkos():
         params={"cs2": 1.0},
         solvers={"phi": pops.lib.fields.GeometricMG()})
     assert "plasma" in sim.block_names(), "instance bound by name (no 'declared by no instance' raise)"
-    print("OK  headline install(params=) routes a runtime param (raw dsl.Model auto-resolved via AOT)")
+    print("OK  headline install(params=) routes a runtime param (raw Model auto-resolved via AOT)")
 
     # The routed param is LIVE on the block: with u=0 the momentum residual is -div(cs2*rho), so cs2
     # 1 -> 4 scales it x4 -- proof set_block_params reached the real block (P7-b).

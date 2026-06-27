@@ -14,7 +14,8 @@ try:
     import numpy as np
 
     import pops
-    from pops import dsl
+    from pops.ir.ops import sqrt
+    from pops.physics.facade import Model
     from pops import time as adctime
 except Exception as exc:  # noqa: BLE001
     print("skip test_install_requirement_validation (pops/numpy unavailable: %s)" % exc)
@@ -25,9 +26,9 @@ N = 16
 
 def lorentz_model(name="adc446_model"):
     """An isothermal fluid whose Lorentz linear source reads the aux field B_z (a hard requirement)."""
-    m = dsl.Model(name)
+    m = Model(name)
     rho, mx, my = m.conservative_vars("rho", "mx", "my")
-    cs = dsl.sqrt(0.5)
+    cs = sqrt(0.5)
     m.flux(x=[mx, mx * mx / rho + 0.5 * rho, mx * my / rho],
            y=[my, mx * my / rho, my * my / rho + 0.5 * rho])
     m.eigenvalues(x=[mx / rho - cs, mx / rho, mx / rho + cs],

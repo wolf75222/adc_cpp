@@ -17,7 +17,7 @@ After cleanup, each document has an exclusive scope:
 | `README.md` | Overview (what / why / GIF), links to the other docs, installation, CI status |
 | `ARCHITECTURE.md` | Five layers, seams, C++ concepts, lib/application boundary, real status of the components |
 | `ALGORITHMS.md` | Generic numerical methods: formulas, code, validation, tests by name |
-| `DSL_MODEL_DESIGN.md` (or future Sphinx) | Python user API: facade `dsl.Model`, `CompositeModel`, `add_equation`, status by phase |
+| `DSL_MODEL_DESIGN.md` (or future Sphinx) | Python user API: facade `pops.physics.facade.Model`, `CompositeModel`, `add_equation`, status by phase |
 | `GPU_RUNTIME_PORT.md` | GH200 validation log: phases, numeric results, fixed bugs, perf caveats |
 | `PAPER_ROADMAP.md` | Science: Hoffart target, O5 sweep, ring-edge blocker, baskets 1-4 |
 | `COUPLER_HIERARCHY.md` | Exhaustive reference of the couplers in `include/pops/coupling/` |
@@ -199,7 +199,7 @@ anchors, the full definition is here). OK as is.
 | Seam for_each_cell + device_fence | README + ARCHITECTURE + ALGORITHMS | ARCHITECTURE section 4 + ALGORITHMS section 20 (1 link) |
 | Backend capability matrix (GPU/MPI/AMR per path) | DSL_MODEL_DESIGN section 5 | DSL_MODEL_DESIGN section 5 AND BACKEND_COVERAGE.md (to create) |
 | Status of the GPU/MPI production paths | README + PAPER_ROADMAP + DSL_MODEL_DESIGN + GPU_RUNTIME_PORT | GPU_RUNTIME_PORT only, with links in the others |
-| Recommended public API (add_block vs dsl.Model) | README + PAPER_ROADMAP + DSL_MODEL_DESIGN | DSL_MODEL_DESIGN "settled decisions" only |
+| Recommended public API (add_block vs pops.physics.facade.Model) | README + PAPER_ROADMAP + DSL_MODEL_DESIGN | DSL_MODEL_DESIGN "settled decisions" only |
 | Cartesian ring-edge blocker, O5 sweep | PAPER_ROADMAP | PAPER_ROADMAP only |
 | SSPRK2/3, MUSCL, WENO5, multigrid formulas | ALGORITHMS | ALGORITHMS only |
 | Justification from-scratch stack vs pde_core_cpp | CHOICES | CHOICES only |

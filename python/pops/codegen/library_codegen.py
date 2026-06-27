@@ -1,9 +1,9 @@
 """pops.library_codegen -- the C++ emitter for a compiled brick library ``.so`` (Spec 3 section 21).
 
-``pops.compile_library(..., emit=True)`` lowers a :class:`pops.library.LibraryManifest`
+``pops.compile_library(..., emit=True)`` lowers a :class:`pops.codegen.library.LibraryManifest`
 to a single C++ translation unit and compiles it (via the same Kokkos toolchain a
-problem ``.so`` uses, :func:`pops.dsl.pops_loader_build_flags`). This module owns the
-SOURCE emission; :func:`pops.library.compile_library` owns the compile + cache.
+problem ``.so`` uses, :func:`pops.codegen.toolchain.pops_loader_build_flags`). This module owns the
+SOURCE emission; :func:`pops.codegen.library.compile_library` owns the compile + cache.
 
 The emitted ``.so`` exports a stable, ABI-keyed descriptor of the library:
 
@@ -44,7 +44,7 @@ def _str_table(accessor, values):
 def _requirements_json(brick):
     """The brick's requirements as compact JSON (the wire form the reader parses back).
 
-    Mirrors :meth:`pops.library.LibraryManifest` entries: a dict of named requirement lists
+    Mirrors :meth:`pops.codegen.library.LibraryManifest` entries: a dict of named requirement lists
     (e.g. ``{"capabilities": ["physical_flux", "wave_speeds"]}``). Empty dict -> ``{}``."""
     return json.dumps(brick.get("requirements", {}), sort_keys=True)
 
@@ -105,7 +105,7 @@ def _brick_manifest_json(name, bricks):
 
 def emit_library_cpp(manifest):
     """C++ source of a compiled brick library ``.so`` for @p manifest (a
-    :class:`pops.library.LibraryManifest`).
+    :class:`pops.codegen.library.LibraryManifest`).
 
     The TU includes only ``external_brick.hpp`` (the ``BrickRegistry`` + ``POPS_REGISTER_BRICK``
     machinery) and ``abi_key.hpp`` (the ``POPS_ABI_KEY_LITERAL``); it has no numerics and no

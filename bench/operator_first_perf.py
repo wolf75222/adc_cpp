@@ -26,7 +26,8 @@ try:
     import numpy as np
 
     import pops
-    from pops import dsl
+    from pops.ir.ops import sqrt
+    from pops.physics.facade import Model
     from pops import time as adctime
 except Exception as exc:  # noqa: BLE001
     print("skip operator_first_perf (pops/numpy unavailable: %s)" % exc)
@@ -40,7 +41,7 @@ DT = 1.0e-4
 
 
 def euler_model(name):
-    m = dsl.Model(name)
+    m = Model(name)
     rho, rhou, rhov, e = m.conservative_vars(
         "rho", "rho_u", "rho_v", "E",
         roles=["Density", "MomentumX", "MomentumY", "Energy"])
@@ -49,7 +50,7 @@ def euler_model(name):
     v = m.primitive("v", rhov / rho)
     p = m.primitive("p", (g - 1.0) * (e - 0.5 * rho * (u * u + v * v)))
     h = (e + p) / rho
-    c = dsl.sqrt(g * p / rho)
+    c = sqrt(g * p / rho)
     m.flux(x=[rhou, rhou * u + p, rhou * v, rho * h * u],
            y=[rhov, rhov * u, rhov * v + p, rho * h * v])
     m.eigenvalues(x=[u - c, u, u + c], y=[v - c, v, v + c])

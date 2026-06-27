@@ -36,7 +36,6 @@ On verifie :
  (7) CSE : deux eig_all_real de la MEME matrice mais im_tol DIFFERENT ne partagent PAS la locale (la
      cle CSE inclut im_tol) ; im_tol identique -> partagee.
 """
-import importlib.util
 import os
 import shutil
 import subprocess
@@ -45,12 +44,17 @@ import tempfile
 
 import numpy as np
 
-# Import DIRECT du module dsl (pur Python) : le predicat, son eval numpy et son codegen ne dependent
-# pas de l'extension compilee _pops.
-_DSL_PATH = os.path.join(os.path.dirname(__file__), "..", "pops", "dsl.py")
-_spec = importlib.util.spec_from_file_location("pops_dsl_eig_pred", os.path.abspath(_DSL_PATH))
-dsl = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(dsl)
+# Import DIRECT des symboles DSL (pur Python) : le predicat, son eval numpy et son codegen ne
+# dependent pas de l'extension compilee _pops.
+from types import SimpleNamespace
+
+from pops.ir.expr import Const, Var
+from pops.ir.ops import abs_, eig_all_real
+from pops.ir.visitors import _key
+from pops.physics.model import HyperbolicModel
+
+dsl = SimpleNamespace(Const=Const, Var=Var, abs_=abs_, eig_all_real=eig_all_real, _key=_key,
+                      HyperbolicModel=HyperbolicModel)
 
 INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "include"))
 TOL_EVAL = 1e-12

@@ -22,7 +22,9 @@ import tempfile
 import numpy as np
 
 import pops
-from pops import dsl
+from pops.physics.aux import AUX_NAMED_BASE, AUX_NAMED_MAX, aux_total_n_aux
+from pops.physics.facade import Model
+from pops.physics.model import HyperbolicModel
 
 INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "include"))
 
@@ -30,7 +32,7 @@ INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "i
 def build_decay_model():
     """Scalaire 'n' sans flux, source S = -kappa * n ou kappa est un champ aux NOMME (aux_field).
     flux nul -> eval_rhs = source = -kappa * n (verifiable exactement)."""
-    m = dsl.Model("kappadecay")
+    m = Model("kappadecay")
     (nn,) = m.conservative_vars("n")
     zero = 0.0 * nn                      # expression nulle (flux/eig n'enrobent pas un float brut)
     m.flux(x=[zero], y=[zero])
@@ -45,15 +47,15 @@ def build_decay_model():
 def test_form():
     """Garde-fous PUR-PYTHON (aucun compilateur) : largeurs, emission, retro-compat, rejets DSL."""
     # (1) largeur totale du canal : base seule = 3 ; un champ nomme -> AUX_NAMED_BASE + 1 = 6.
-    assert dsl.aux_total_n_aux([], []) == 3
-    assert dsl.aux_total_n_aux([], ["kappa"]) == 6
-    assert dsl.aux_total_n_aux([], ["kappa", "sigma"]) == 7
-    assert dsl.aux_total_n_aux(["B_z"], ["kappa"]) == 6  # max(4, 6)
-    assert dsl.AUX_NAMED_BASE == 5
+    assert aux_total_n_aux([], []) == 3
+    assert aux_total_n_aux([], ["kappa"]) == 6
+    assert aux_total_n_aux([], ["kappa", "sigma"]) == 7
+    assert aux_total_n_aux(["B_z"], ["kappa"]) == 6  # max(4, 6)
+    assert AUX_NAMED_BASE == 5
     print("OK  aux_total_n_aux : base=3, 1 nomme=6 (AUX_NAMED_BASE=5), 2 nommes=7")
 
     # (2) emission : un modele lisant aux_field('kappa') declare n_aux=6 et lit a.extra_field(0).
-    m = dsl.HyperbolicModel("decay")
+    m = HyperbolicModel("decay")
     (nn,) = m.conservative_vars("n")
     kappa = m.aux_field("kappa")
     m.set_source([-(kappa * nn)])
@@ -63,7 +65,7 @@ def test_form():
     print("OK  emit_cpp_source(aux_field) : n_aux=6 + a.extra_field(0)")
 
     # (3) retro-compat : un modele SANS aux_field n'emet PAS de n_aux (bit-identique a l'historique).
-    m2 = dsl.HyperbolicModel("plain")
+    m2 = HyperbolicModel("plain")
     (n2,) = m2.conservative_vars("n")
     m2.set_source([0.0 * n2])
     src2 = m2.emit_cpp_source(name="GenPlainSrc")
@@ -72,7 +74,7 @@ def test_form():
     print("OK  modele sans aux_field : pas de n_aux emis, largeur 3 (defaut)")
 
     # (4) rejets DSL : nom canonique, doublon, depassement de la borne kAuxMaxExtra.
-    m3 = dsl.HyperbolicModel("rej")
+    m3 = HyperbolicModel("rej")
     m3.conservative_vars("n")
     for bad in ("B_z", "T_e", "phi", "grad_x"):
         try:
@@ -98,7 +100,7 @@ def test_form():
         pass
     else:
         raise AssertionError("aux_field au-dela de AUX_NAMED_MAX aurait du lever")
-    print("OK  aux_field rejette : nom canonique, doublon, > %d champs" % dsl.AUX_NAMED_MAX)
+    print("OK  aux_field rejette : nom canonique, doublon, > %d champs" % AUX_NAMED_MAX)
 
 
 def test_facade_rejects():
@@ -325,7 +327,7 @@ def test_amr_named_aux_single_block_regrid():
 def build_const_decay_model(name, c0):
     """Scalaire 'n', flux nul, source CONSTANTE S = -c0*n (c0 fige a la compilation), SANS aux_field
     (n_aux=3) : decroit a un taux FIXE c0, INDEPENDANT du canal aux partage -> temoin d'isolation."""
-    m = dsl.Model(name)
+    m = Model(name)
     (nn,) = m.conservative_vars("n")
     zero = 0.0 * nn
     m.flux(x=[zero], y=[zero]); m.eigenvalues(x=[zero], y=[zero])

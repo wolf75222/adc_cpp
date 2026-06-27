@@ -7,7 +7,8 @@ pure-Python: only pops.time / pops.model are needed, no compiled step is run.
 """
 import pytest
 
-from pops import dsl, model
+from pops import model
+from pops.ir.expr import Var
 
 adctime = pytest.importorskip("pops.time")
 
@@ -17,7 +18,7 @@ def _module(cacheable=True):
     mod = model.Module("sched_demo")
     u = mod.state_space("U", ("rho", "mx", "my"))
     fields = mod.field_space("fields", ("phi",))
-    rho = dsl.Var("rho", "cons")
+    rho = Var("rho", "cons")
     mod.operator(name="fields_from_state", signature=(u,) >> fields,
                  kind="field_operator", expr=rho)
     mod.operator(name="flux", signature=(u,) >> model.Rate(u), kind="grid_operator",

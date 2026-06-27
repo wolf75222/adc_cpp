@@ -79,7 +79,7 @@ elliptic brick for `GravityCoupling`, and the same machinery describes a self-gr
 scenario lives in the choice of bricks, never in the core.
 
 From Python you assemble the same object three ways, all producing the same compiled C++ model: native
-bricks (`pops.Model`), symbolic formulas compiled to a `.so` (`pops.dsl.Model`), or a mix of the two
+bricks (`pops.Model`), symbolic formulas compiled to a `.so` (`pops.physics.facade.Model`), or a mix of the two
 within one model (`pops.CompositeModel`). The cell-by-cell computation stays compiled either way, so
 MPI, AMR, and GPU are preserved.
 

@@ -22,7 +22,8 @@ import numpy as np
 sys.path.insert(0, os.path.dirname(__file__))
 
 import pops  # noqa: E402  (the .so paths require the native module, like the neighboring AOT tests)
-from pops import dsl  # noqa: E402
+from pops.codegen.cache import _cache_so_path, _platform_cache_key, pops_cache_dir
+from pops.codegen.toolchain import _native_kokkos_root
 from pops.codegen import compile as _cg_compile  # noqa: E402  (compile_aot + its toolchain helpers live here)
 from test_dsl_phase_a import INCLUDE, build_euler, initial_state  # noqa: E402
 
@@ -96,9 +97,9 @@ def check_env_override_honored():
 def _old_cache_path(model_hash, abi_key, backend, target, name):
     """Rebuilds the .so file name BEFORE the aot schema marker (5-component key)."""
     rest = "|".join((abi_key or "", backend or "", target or "", name or "",
-                     dsl._platform_cache_key())).encode()
+                     _platform_cache_key())).encode()
     tag = hashlib.sha256(rest).hexdigest()[:16]
-    return os.path.join(dsl.pops_cache_dir(), "%s-%s.so" % ((model_hash or "nohash")[:16], tag))
+    return os.path.join(pops_cache_dir(), "%s-%s.so" % ((model_hash or "nohash")[:16], tag))
 
 
 def check_cache_key():
@@ -110,17 +111,17 @@ def check_cache_key():
     try:
         # (1) the optflags change the aot .so name -> a binary built with other flags is distinct
         os.environ.pop("POPS_DSL_OPTFLAGS", None)
-        p_o3 = dsl._cache_so_path("mh", "abi", aot_be, "system", None)
+        p_o3 = _cache_so_path("mh", "abi", aot_be, "system", None)
         os.environ["POPS_DSL_OPTFLAGS"] = "-O2"
-        p_o2 = dsl._cache_so_path("mh", "abi", aot_be, "system", None)
+        p_o2 = _cache_so_path("mh", "abi", aot_be, "system", None)
         assert p_o3 != p_o2, "aot cache key insensitive to optflags (%s == %s)" % (p_o3, p_o2)
         # (2) an aot .so built before aligning the flags (5-component key) no longer collides
         os.environ.pop("POPS_DSL_OPTFLAGS", None)
-        assert dsl._cache_so_path("mh", "abi", aot_be, "system", None) \
+        assert _cache_so_path("mh", "abi", aot_be, "system", None) \
             != _old_cache_path("mh", "abi", aot_be, "system", None), \
             "the pre-fix -O2 aot .so would still be served (key not invalidated)"
         # (3) native (key already faithful to its binary) keeps its file name: no invalidation
-        assert dsl._cache_so_path("mh", "abi", prod_be, "system", None) \
+        assert _cache_so_path("mh", "abi", prod_be, "system", None) \
             == _old_cache_path("mh", "abi", prod_be, "system", None), \
             "the native backend key changed (collateral invalidation)"
     finally:
@@ -150,7 +151,7 @@ def check_numeric_parity():
     second part depends on the environment (native: headers == module; aot: .so loadable) and SKIPS
     cleanly if the local env does not allow it. Auto-skip too without compiler / Kokkos."""
     cxx = shutil.which("c++") or shutil.which("g++") or shutil.which("clang++")
-    if not cxx or not os.path.isdir(INCLUDE) or dsl._native_kokkos_root() is None:
+    if not cxx or not os.path.isdir(INCLUDE) or _native_kokkos_root() is None:
         print("skip  numeric parity (compiler, pops headers or Kokkos absent)")
         return
     n = 32

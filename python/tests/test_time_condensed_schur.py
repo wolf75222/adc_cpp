@@ -319,7 +319,8 @@ def _run_section_b(t):
         import numpy as np
 
         import pops
-        from pops import dsl
+        from pops.ir.ops import sqrt
+        from pops.physics.facade import Model
     except Exception as exc:  # noqa: BLE001  -- numpy / _pops unavailable here
         print("-- (B) skipped: pops/numpy unavailable: %s --" % exc)
         return None
@@ -335,7 +336,7 @@ def _run_section_b(t):
     def schur_model(name):
         """Isothermal 2D fluid block (rho, mx, my) with a Poisson coupling + a B_z aux: the canonical
         condensed-Schur block (Density / MomentumX / MomentumY roles + B_z)."""
-        m = dsl.Model(name)
+        m = Model(name)
         rho, mx, my = m.conservative_vars("rho", "mx", "my")
         cs2 = m.param("cs2", 0.5)
         u = m.primitive("u", mx / rho)
@@ -344,7 +345,7 @@ def _run_section_b(t):
         m.primitive_vars(rho=rho, u=u, v=v, p=p)
         m.conservative_from([rho, rho * u, rho * v])
         m.flux(x=[mx, mx * u + p, my * u], y=[my, mx * v, my * v + p])
-        cs = dsl.sqrt(cs2)
+        cs = sqrt(cs2)
         m.eigenvalues(x=[u - cs, u, u + cs], y=[v - cs, v, v + cs])
         m.elliptic_rhs(rho)
         m.aux("grad_x")

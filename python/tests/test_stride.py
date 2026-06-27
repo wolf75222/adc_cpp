@@ -23,6 +23,7 @@ Semantique verifiee = HOLD-THEN-CATCH-UP (rattrapage en FIN de fenetre) :
 import sys
 import numpy as np
 import pops
+from pops.codegen.loader import CompiledModel
 
 fails = 0
 
@@ -294,7 +295,7 @@ chk(changed(state_before_1, state_after_1),
 # leve AVANT le dlopen du .so : un CompiledModel FACTICE (backend='aot', .so inexistant) suffit, donc
 # le sous-test ne depend PAS d'un compilateur (deterministe en CI minimale).
 print("== AOT : stride>1 + backend='aot' rejete explicitement ==")
-fake_aot = pops.dsl.CompiledModel(
+fake_aot = CompiledModel(
     so_path="/inexistant.so", backend="aot", adder="add_compiled_block",
     cons_names=["rho", "rho_u", "rho_v", "E"],
     cons_roles=["Density", "MomentumX", "MomentumY", "Energy"],

@@ -22,7 +22,8 @@ import tempfile
 import numpy as np
 
 import pops
-from pops import dsl
+from pops.ir.ops import sqrt
+from pops.physics.facade import Model
 
 fails = 0
 INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "include"))
@@ -43,7 +44,7 @@ def gaussian(n, amp=0.4):
 
 
 def euler4_dsl(name, roe=False):
-    m = dsl.Model(name)
+    m = Model(name)
     rho, rhou, rhov, E = m.conservative_vars(
         "rho", "rho_u", "rho_v", "E",
         roles=["Density", "MomentumX", "MomentumY", "Energy"])
@@ -52,7 +53,7 @@ def euler4_dsl(name, roe=False):
     v = rhov / rho
     p = (g - 1.0) * (E - 0.5 * rho * (u * u + v * v))
     H = (E + p) / rho
-    c = dsl.sqrt(g * p / rho)
+    c = sqrt(g * p / rho)
     m.flux(x=[rhou, rhou * u + p, rhou * v, rho * H * u],
            y=[rhov, rhov * u, rhov * v + p, rho * H * v])
     m.eigenvalues(x=[u - c, u, u + c], y=[v - c, v, v + c])
@@ -66,7 +67,7 @@ def euler4_dsl(name, roe=False):
 
 
 def iso3_dsl(name, roe=False, p_decl=True):
-    m = dsl.Model(name)
+    m = Model(name)
     rho, mx, my = m.conservative_vars("rho", "mx", "my",
                                       roles=["Density", "MomentumX", "MomentumY"])
     cs2 = 0.5
@@ -74,7 +75,7 @@ def iso3_dsl(name, roe=False, p_decl=True):
     v = m.primitive("v", my / rho)
     if p_decl:
         m.primitive("p", cs2 * rho)
-    c = dsl.sqrt(cs2)
+    c = sqrt(cs2)
     m.flux(x=[mx, mx * u + cs2 * rho, mx * v], y=[my, my * u, my * v + cs2 * rho])
     m.eigenvalues(x=[u - c, u, u + c], y=[v - c, v, v + c])
     m.primitive_vars(rho, u, v)
@@ -158,7 +159,7 @@ try:
     except ValueError as e:
         chk("'p'" in str(e) or "pression" in str(e), f"sans 'p' rejete : {str(e)[:70]}")
     try:
-        mm = dsl.Model("noroles")
+        mm = Model("noroles")
         a, b, c_ = mm.conservative_vars("a", "b", "c")
         mm.primitive("p", a)
         mm.flux(x=[b, a, c_], y=[c_, a, b])

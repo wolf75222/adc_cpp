@@ -9,9 +9,8 @@ see [docs/DSL_MODEL_DESIGN.md](DSL_MODEL_DESIGN.md).
 
 ```python
 import pops
-from pops import dsl
 
-m = dsl.Model("mon_modele")
+m = pops.physics.facade.Model("mon_modele")
 
 # Variables conservatives : conservative_vars(...) RENVOIE un tuple de Var a depacker
 # (roles physiques optionnels).
@@ -112,7 +111,7 @@ Important points :
   on the `aot` backend : the value is modifiable WITHOUT recompiling via `System.set_block_params`.
 
   ```python
-  m = dsl.Model("iso")
+  m = pops.physics.facade.Model("iso")
   rho, mx, my = m.conservative_vars("rho", "rho_u", "rho_v")
   cs2 = m.param("cs2", 1.0, kind="runtime")          # param RUNTIME (defaut = 1.0)
   u, v = m.primitive("u", mx/rho), m.primitive("v", my/rho)
@@ -120,7 +119,7 @@ Important points :
   m.primitive_vars(rho=rho, u=u, v=v, p=p)
   m.conservative_from([rho, rho*u, rho*v])
   m.flux(x=[mx, mx*u+p, my*u], y=[my, mx*v, my*v+p])
-  cs = dsl.sqrt(cs2)
+  cs = pops.ir.ops.sqrt(cs2)
   m.eigenvalues(x=[u-cs, u, u+cs], y=[v-cs, v, v+cs])
 
   compiled = m.compile(backend="aot")                 # cache key inclut les params
@@ -143,7 +142,7 @@ Important points :
   never per RK stage, including under Strang), on the VALID cells only (the ghosts are rebuilt by
   the head `fill_ghosts` of the next step -- no `fill_boundary` in the hook). CONTRACT: P idempotent
   (a true projection) and pointwise (no neighbor); the clamps are written BRANCH-FREE, in max/min
-  via `dsl.abs_` / `dsl.sign` (differentiable through `dsl.diff`), e.g. positivity `(q + abs_(q))/2`.
+  via `pops.ir.ops.abs_` / `pops.ir.ops.sign` (differentiable through `pops.ir.lowering.diff`), e.g. positivity `(q + abs_(q))/2`.
   Backends: `aot` and `production`, on BOTH the flat `System` and `AmrSystem` (ADC-312: on AMR the
   projection is applied PER LEVEL at the end of each macro-step, AFTER the reflux and cascade --
   cell-local and idempotent, so the conservative flux correction is preserved). Only `prototype`

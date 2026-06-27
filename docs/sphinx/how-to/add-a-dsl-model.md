@@ -1,6 +1,6 @@
 # Add a DSL model
 
-Express a model's physics as symbolic formulas with `pops.dsl.Model`, compile it into a `.so`,
+Express a model's physics as symbolic formulas with `pops.physics.facade.Model`, compile it into a `.so`,
 and attach it to a `System`. Use this when you want to declare the flux, eigenvalues, source and
 elliptic right-hand side directly, instead of composing native bricks. This page assumes you can
 already build the Python module and run a case. For the syntax of every declarator, see the
@@ -29,9 +29,9 @@ generated `.so` between runs (default `~/.cache/pops/dsl`).
    couplings by role.
 
    ```python
-   from pops import dsl
+   import pops
 
-   m = dsl.Model("euler_poisson")
+   m = pops.physics.facade.Model("euler_poisson")
    rho, rhou, rhov, E = m.conservative_vars(
        "rho", "rho_u", "rho_v", "E",
        roles=["Density", "MomentumX", "MomentumY", "Energy"])
@@ -47,12 +47,12 @@ generated `.so` between runs (default `~/.cache/pops/dsl`).
    ```
 
 3. Declare the flux and the eigenvalues, one `Expr` per component and direction. Use
-   `dsl.sqrt` for the sound speed. The named math functions in the algebra are `dsl.sqrt` and
-   `dsl.abs_` (absolute value).
+   `pops.ir.ops.sqrt` for the sound speed. The named math functions in the algebra are `pops.ir.ops.sqrt` and
+   `pops.ir.ops.abs_` (absolute value).
 
    ```python
    H = (E + p) / rho
-   c = dsl.sqrt(g * p / rho)
+   c = pops.ir.ops.sqrt(g * p / rho)
    m.flux(x=[rhou, rhou*u + p, rhou*v, rho*H*u],
           y=[rhov, rhov*u, rhov*v + p, rho*H*v])
    m.eigenvalues(x=[u-c, u, u+c], y=[v-c, v, v+c])

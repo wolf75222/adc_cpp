@@ -1,6 +1,6 @@
 # Write a model with the symbolic DSL
 
-Write the reduced diocotron model as symbolic formulas with `pops.dsl.Model`, compile it to a `.so`,
+Write the reduced diocotron model as symbolic formulas with `pops.physics.facade.Model`, compile it to a `.so`,
 run it, and confirm it produces a result bit-identical to the same model built from native bricks.
 
 ## Prerequisites
@@ -65,7 +65,7 @@ module built in CI runs Kokkos Serial).
 
 ## Step 3: Write the model as formulas
 
-Declare the physics with `pops.dsl.Model`. You declare the conservative variable `n`, the auxiliary
+Declare the physics with `pops.physics.facade.Model`. You declare the conservative variable `n`, the auxiliary
 fields `phi` / `grad_x` / `grad_y` that the solver fills in (the `pops::Aux` channel), the E x B
 advection flux, the eigenvalues (here a single wave, the drift speed), and the elliptic right-hand
 side $\alpha (n - n_{i0})$ that couples the block to the system Poisson. The trailing `m.check()`

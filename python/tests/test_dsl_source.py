@@ -12,7 +12,7 @@ import shutil
 import subprocess
 import tempfile
 
-from pops import dsl
+from pops.physics.model import HyperbolicModel
 
 QOM = -1.0
 INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "include"))
@@ -28,7 +28,7 @@ def build_force_model():
       S[3] = qom * (rho_u Ex + rho_v Ey)   (travail sur l'energie)
     Identique a pops::PotentialForce{qom} sur 4 variables.
     """
-    m = dsl.HyperbolicModel("force")
+    m = HyperbolicModel("force")
     rho, rho_u, rho_v, E = m.conservative_vars("rho", "rho_u", "rho_v", "E")
     gx = m.aux("grad_x")
     gy = m.aux("grad_y")

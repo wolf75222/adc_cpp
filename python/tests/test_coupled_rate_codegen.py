@@ -22,7 +22,8 @@ import sys
 import pytest
 
 adctime = pytest.importorskip("pops.time")
-from pops import dsl, model  # noqa: E402 (after importorskip so a missing pops skips cleanly)
+from pops import model
+from pops.ir.expr import Var
 
 
 def _two_fluid_module(electron_expr=None):
@@ -34,7 +35,7 @@ def _two_fluid_module(electron_expr=None):
     e = mod.state_space("electron_state", ("ne", "mex", "mey"))
     i = mod.state_space("ion_state", ("ni", "mix", "miy"))
     bundle = model.RateBundle({"electrons": model.Rate(e), "ions": model.Rate(i)})
-    ne, ni = dsl.Var("ne", "cons"), dsl.Var("ni", "cons")
+    ne, ni = Var("ne", "cons"), Var("ni", "cons")
     e_comps = electron_expr if electron_expr is not None else [ni - ne, ne, ne]
     mod.operator(name="collision", signature=model.Signature((e, i), bundle),
                  kind="coupled_rate",
@@ -114,8 +115,8 @@ def test_per_block_out_composes_in_a_forward_step():
 def test_coupled_rate_with_prim_var_is_deferred():
     # cons-only MVP: a component formula referencing a PRIM var raises the ADC-457 NotImplementedError
     # (never silently emits an undefined `ue` local), naming the deferral precisely.
-    ne, ni = dsl.Var("ne", "cons"), dsl.Var("ni", "cons")
-    ue = dsl.Var("ue", "prim")  # a PRIM reference -> deferred
+    ne, ni = Var("ne", "cons"), Var("ni", "cons")
+    ue = Var("ue", "prim")  # a PRIM reference -> deferred
     mod, e, i, _ = _two_fluid_module(electron_expr=[ni - ne + ue, ne, ne])
     P = adctime.Program("two_fluid_collision_prim").bind_operators(mod)
     e_n = P.state("electrons", space=e)
@@ -154,7 +155,7 @@ def test_read_only_catalyst_input_is_bound():
     i = mod.state_space("i_st", ("ni",))
     n = mod.state_space("n_st", ("nn",))  # the catalyst: an input, NOT an output block
     bundle = model.RateBundle({"e": model.Rate(e), "i": model.Rate(i)})
-    ne, ni, nn = dsl.Var("ne", "cons"), dsl.Var("ni", "cons"), dsl.Var("nn", "cons")
+    ne, ni, nn = Var("ne", "cons"), Var("ni", "cons"), Var("nn", "cons")
     mod.operator(name="ioniz", signature=model.Signature((e, i, n), bundle), kind="coupled_rate",
                  expr={"e": [ni + nn], "i": [ne + nn]})  # both rates read the catalyst nn
     P = adctime.Program("ioniz_step").bind_operators(mod)
@@ -173,7 +174,7 @@ def test_undefined_cons_var_is_rejected():
     # A cons var a formula references but that is a component of NO input state (a typo, or a name the
     # author forgot to add to a P.state space) must raise the ADC-457 deferral at emit -- never emit an
     # undefined C++ identifier that only fails at the AOT compile, far from the authoring site.
-    ne, ni, zzz = dsl.Var("ne", "cons"), dsl.Var("ni", "cons"), dsl.Var("ZZZ", "cons")
+    ne, ni, zzz = Var("ne", "cons"), Var("ni", "cons"), Var("ZZZ", "cons")
     mod, e, i, _ = _two_fluid_module(electron_expr=[ni - ne + zzz, ne, ne])  # ZZZ is in no state
     P = adctime.Program("two_fluid_typo").bind_operators(mod)
     e_n, i_n = P.state("electrons", space=e), P.state("ions", space=i)

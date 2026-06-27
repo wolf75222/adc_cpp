@@ -14,13 +14,13 @@ import tempfile
 
 import numpy as np
 
-from pops import dsl
+from pops.physics.model import HyperbolicModel
 
 GAMMA = 1.4
 
 
 def build_euler():
-    e = dsl.HyperbolicModel("euler")
+    e = HyperbolicModel("euler")
     rho, rhou, rhov, E = e.conservative_vars("rho", "rho_u", "rho_v", "E")
     u = e.primitive("u", rhou / rho)
     v = e.primitive("v", rhov / rho)

@@ -21,7 +21,8 @@ import tempfile
 import numpy as np
 
 import pops
-from pops import dsl
+from pops.ir.ops import sqrt
+from pops.physics.bricks import HyperbolicBrick, SourceBrick
 
 CS2 = 1.0     # vitesse du son au carre (isotherme)
 QOM = -1.0    # q/m de la force du potentiel (non trivial : exerce le cuisson du parametre natif)
@@ -31,11 +32,11 @@ INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "i
 
 def build_iso_transport(cs2):
     """Brique hyperbolique DSL repliquant pops::IsothermalFlux{cs2} (3 variables)."""
-    b = dsl.HyperbolicBrick("iso")
+    b = HyperbolicBrick("iso")
     rho, rho_u, rho_v = b.conservative_vars("rho", "rho_u", "rho_v")
     u = b.primitive("u", rho_u / rho)
     v = b.primitive("v", rho_v / rho)
-    c = dsl.sqrt(cs2)
+    c = sqrt(cs2)
     b.flux(x=[rho_u, rho_u * u + cs2 * rho, rho_v * u],
            y=[rho_v, rho_u * v, rho_v * v + cs2 * rho])
     b.eigenvalues(x=[u - c, u, u + c], y=[v - c, v, v + c])
@@ -47,7 +48,7 @@ def build_iso_transport(cs2):
 def build_force_source(qom):
     """Brique de source DSL repliquant pops::PotentialForce{qom} sur 3 variables : (q/m) rho E,
     E = -grad phi (pas de terme d'energie a 3 variables)."""
-    s = dsl.SourceBrick("force")
+    s = SourceBrick("force")
     rho, rho_u, rho_v = s.conservative_vars("rho", "rho_u", "rho_v")
     gx = s.aux("grad_x")
     gy = s.aux("grad_y")

@@ -406,7 +406,7 @@ WRITE-SET:
 - `include/pops/runtime/amr_system.hpp` + `python/bindings/amr/amr_system.cpp`: `set_compiled_block` /
   `add_native_block` stop throwing at the 2nd call (cf. 3) and stack a spec.
 - `python/bindings/core/bindings.cpp`: expose the 2nd `add_block` (already wired, `bindings.cpp:239`), validate
-  `dsl.Model(...).compile(target="amr_system", backend="production")` for TWO blocks.
+  `pops.physics.facade.Model(...).compile(target="amr_system", backend="production")` for TWO blocks.
 ACCEPTANCE: `test_dsl_production_amr.py` extended to two native compiled blocks on the same
 hierarchy; ABI key verified (`pops_native_abi_key`, `amr_system.cpp:218-235`).
 BLOCKER: NAMED device-clean functors (cf. `BlockRhsEval`/`AdvanceExplicit` of

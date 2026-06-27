@@ -10,7 +10,7 @@ reference = clamp de positivite q0 <- (q0 + |q0|)/2 et masque q1 <- q1 * (sign(q
 (les branches par cellule s'ecrivent en max/min/sign SANS if, exactement la doctrine ADC-177).
 
 On verifie :
- (1) sign() symbolique : eval numpy (-1/0/1), codegen sans branche, derivee nulle (dsl.diff) ;
+ (1) sign() symbolique : eval numpy (-1/0/1), codegen sans branche, derivee nulle (diff) ;
  (2) NO-DEFAULT-CHANGE (backend production, add_native_block) : un modele SANS projection et le
      MEME modele avec projection IDENTITE donnent des trajectoires BIT-IDENTIQUES (le hook tourne
      mais ne change rien) ;
@@ -37,7 +37,11 @@ import tempfile
 import numpy as np
 
 import pops
-from pops import dsl
+from pops.ir.expr import Const, Var
+from pops.ir.lowering import diff
+from pops.ir.ops import abs_, sign
+from pops.physics.aux import AUX_NAMED_BASE
+from pops.physics.model import HyperbolicModel
 
 INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "include"))
 A_X, A_Y = 1.0, 0.5  # vitesses d'advection constantes du transport jouet
@@ -55,18 +59,18 @@ def chk(cond, label):
 
 def build_model(tag, projection):
     """Transport jouet 2 variables. projection : None (aucun hook), 'identity' ou 'clamp'."""
-    m = dsl.HyperbolicModel("toyproj_" + tag)
+    m = HyperbolicModel("toyproj_" + tag)
     q0, q1 = m.conservative_vars("q0", "q1")
     m.set_flux(x=[A_X * q0, A_X * q1], y=[A_Y * q0, A_Y * q1])
-    m.set_eigenvalues(x=[dsl.Const(A_X)], y=[dsl.Const(A_Y)])
+    m.set_eigenvalues(x=[Const(A_X)], y=[Const(A_Y)])
     m.set_primitive_state("q0", "q1")  # primitives = conservatives (transport pur)
     m.set_conservative_from([q0, q1])
     if projection == "identity":
         m.projection([q0, q1])
     elif projection == "clamp":
         # clamp de positivite + masque par signe : branches par cellule SANS if (abs / sign).
-        m.projection([(q0 + dsl.abs_(q0)) / 2.0,
-                      q1 * 0.5 * (dsl.sign(q0) + 1.0)])
+        m.projection([(q0 + abs_(q0)) / 2.0,
+                      q1 * 0.5 * (sign(q0) + 1.0)])
     return m
 
 
@@ -76,14 +80,14 @@ def build_aux_model(tag):
     max(a, b) = (a + b + |a - b|) / 2 -> branche par cellule SANS if (idempotent : max(max,w)=max).
     Exerce le marshaling aux des DEUX chemins compiles (compiled_block_abi::pointwise_project en aot,
     fermeture project du native_loader en production) : sans aux lue, ces branches tournaient a vide."""
-    m = dsl.HyperbolicModel("toyauxproj_" + tag)
+    m = HyperbolicModel("toyauxproj_" + tag)
     q0, q1 = m.conservative_vars("q0", "q1")
     m.set_flux(x=[A_X * q0, A_X * q1], y=[A_Y * q0, A_Y * q1])
-    m.set_eigenvalues(x=[dsl.Const(A_X)], y=[dsl.Const(A_Y)])
+    m.set_eigenvalues(x=[Const(A_X)], y=[Const(A_Y)])
     m.set_primitive_state("q0", "q1")  # primitives = conservatives (transport pur)
     m.set_conservative_from([q0, q1])
-    w = m.aux_field("wfloor")  # champ aux NOMME -> composante dsl.AUX_NAMED_BASE, fixee par set_aux_field
-    floored = (q1 + w + dsl.abs_(q1 - w)) / 2.0  # max(q1, w) sans branche
+    w = m.aux_field("wfloor")  # champ aux NOMME -> composante AUX_NAMED_BASE, fixee par set_aux_field
+    floored = (q1 + w + abs_(q1 - w)) / 2.0  # max(q1, w) sans branche
     m.projection([q0, floored])
     return m
 
@@ -136,7 +140,7 @@ def run_states_aux(so, adder, w, nsteps=NSTEPS):
     """Comme run_states mais fixe d'abord le champ aux NOMME 'wfloor' (composante AUX_NAMED_BASE).
     Le champ est STATIQUE et PERSISTE d'un pas a l'autre : un seul set_aux_field_component suffit."""
     s = make_sys(so, adder)
-    s._s.set_aux_field_component(dsl.AUX_NAMED_BASE, np.asarray(w, dtype=float).reshape(-1))
+    s._s.set_aux_field_component(AUX_NAMED_BASE, np.asarray(w, dtype=float).reshape(-1))
     out = []
     for _ in range(nsteps):
         s.step(DT)
@@ -169,14 +173,14 @@ def err_msg(fn):
 
 def main():
     print("== (1) sign() symbolique ==")
-    x = dsl.Var("x", "cons")
-    sg = dsl.sign(x)
+    x = Var("x", "cons")
+    sg = sign(x)
     chk(np.array_equal(sg.eval({"x": np.array([-2.0, 0.0, 3.0])}),
                        np.array([-1.0, 0.0, 1.0])), "eval numpy = -1/0/1")
     cpp = sg.to_cpp()
     chk("> 0" in cpp and "< 0" in cpp and "?" not in cpp,
         "codegen sans branche : %s" % cpp)
-    d = dsl.diff(dsl.sign(x) * x, "x")
+    d = diff(sign(x) * x, "x")
     chk(abs(float(d.eval({"x": 5.0})) - 1.0) < 1e-15,
         "diff : d(sign(x)*x)/dx = sign(x) (derivee de sign nulle p.p.)")
 

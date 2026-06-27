@@ -2,7 +2,7 @@
 """Operator-first predictor-corrector authored as a PURE pops.model.Module (Spec 2 / ADC-447).
 
 This is the spec's "model-free example target": the model is an ``pops.model.Module`` whose operators
-are declared by signature with IR (``dsl.Expr``) bodies -- a field operator (Poisson), a flux
+are declared by signature with IR (``Expr``) bodies -- a field operator (Poisson), a flux
 (grid operator), an electric source, a Lorentz local linear operator -- plus a composite rate
 ``explicit_rhs``. No PDE method (``m.flux`` / ``m.source_term``) is called on the model; the Module
 IS the model. The time algorithm is the GENERIC macro
@@ -27,7 +27,9 @@ try:
     import numpy as np
 
     import pops
-    from pops import dsl
+    from pops.ir.expr import Const, Expr, Var
+    from pops.ir.ops import sqrt
+    from pops.physics.facade import Model
     from pops import model
     from pops import time as adctime
 except Exception as exc:  # noqa: BLE001
@@ -47,10 +49,10 @@ def operator_module(name="euler_poisson_lorentz_operator_first"):
                         roles={"rho": "density", "mx": "momentum_x", "my": "momentum_y"})
     fields = mod.field_space("fields", ("phi", "grad_x", "grad_y"))
     mod.aux_fields(B_z="cell_scalar")
-    rho, mx, my = dsl.Var("rho", "cons"), dsl.Var("mx", "cons"), dsl.Var("my", "cons")
-    gx, gy = dsl.Var("grad_x", "aux"), dsl.Var("grad_y", "aux")
-    bz = dsl.Var("B_z", "aux")
-    cs = dsl.sqrt(CS2)
+    rho, mx, my = Var("rho", "cons"), Var("mx", "cons"), Var("my", "cons")
+    gx, gy = Var("grad_x", "aux"), Var("grad_y", "aux")
+    bz = Var("B_z", "aux")
+    cs = sqrt(CS2)
     mod.operator(name="fields_from_state", signature=(u,) >> fields,
                  kind="field_operator", expr=rho)
     mod.operator(name="flux", signature=(u,) >> model.Rate(u), kind="grid_operator",
@@ -59,7 +61,7 @@ def operator_module(name="euler_poisson_lorentz_operator_first"):
     mod.eigenvalues(x=[mx / rho - cs, mx / rho, mx / rho + cs],
                     y=[my / rho - cs, my / rho, my / rho + cs])
     mod.operator(name="electric", signature=(u, fields) >> model.Rate(u),
-                 kind="local_source", expr=[dsl.Const(0.0), -rho * gx, -rho * gy])
+                 kind="local_source", expr=[Const(0.0), -rho * gx, -rho * gy])
     mod.operator(name="lorentz", signature=(fields,) >> model.LocalLinearOperator(u, u),
                  kind="local_linear_operator",
                  expr=[[0.0, 0.0, 0.0], [0.0, 0.0, bz], [0.0, -bz, 0.0]])
@@ -79,11 +81,11 @@ def operator_first_program(module, name="predictor_corrector_operator_first"):
 
 
 def default_source_model(name="opfirst_ref"):
-    """Same physics with the electric force as the DEFAULT source (a dsl.Model) so eval_rhs returns
+    """Same physics with the electric force as the DEFAULT source (a Model) so eval_rhs returns
     -div F + electric directly -- used to build the offline reference."""
-    m = dsl.Model(name)
+    m = Model(name)
     rho, mx, my = m.conservative_vars("rho", "mx", "my")
-    cs = dsl.sqrt(CS2)
+    cs = sqrt(CS2)
     m.flux(x=[mx, mx * mx / rho + CS2 * rho, mx * my / rho],
            y=[my, mx * my / rho, my * my / rho + CS2 * rho])
     m.eigenvalues(x=[mx / rho - cs, mx / rho, mx / rho + cs],
@@ -94,7 +96,7 @@ def default_source_model(name="opfirst_ref"):
     gy = m.aux("grad_y")
     m.aux("B_z")
     m.elliptic_rhs(rho)
-    m.source([dsl.Const(0.0), -rho * gx, -rho * gy])
+    m.source([Const(0.0), -rho * gx, -rho * gy])
     return m
 
 

@@ -197,11 +197,12 @@ def _discrete_helmholtz_mc(n, alpha):
     return apply
 
 
-def _passive_model(dsl, name, cons):
+def _passive_model(name, cons):
     """An n-variable block with NO flux and NO Poisson coupling: the Program never runs a rhs or
     solve_fields; the block's conservative variables double as the multi-component field the matrix-free
     solve writes. @p cons is the tuple of conservative-variable names."""
-    m = dsl.Model(name)
+    from pops.physics.facade import Model
+    m = Model(name)
     vars_ = m.conservative_vars(*cons)
     if not isinstance(vars_, tuple):
         vars_ = (vars_,)
@@ -223,15 +224,15 @@ def _run_one(t, pops, np, ncomp, init):
         print("-- (B) skipped: _pops lacks the install_program binding (rebuild _pops) --")
         return None
 
-    from pops import dsl
+    from pops.physics.facade import Model
 
     cons = tuple("c%d" % i for i in range(ncomp))
     tol = 1e-10
     try:
         compiled = pops.compile_problem(
-            model=_passive_model(dsl, "mc_prog%d" % ncomp, cons),
+            model=_passive_model("mc_prog%d" % ncomp, cons),
             time=_mc_program(t, ncomp, name="mc_step%d" % ncomp, method="cg", tol=tol, max_iter=200))
-        compiled_model = _passive_model(dsl, "mc_block%d" % ncomp, cons).compile(backend="production")
+        compiled_model = _passive_model("mc_block%d" % ncomp, cons).compile(backend="production")
     except RuntimeError as exc:  # no compiler / no Kokkos visible / .so compile failed
         print("-- (B) skipped: could not build the .so: %s --" % str(exc)[:200])
         return None

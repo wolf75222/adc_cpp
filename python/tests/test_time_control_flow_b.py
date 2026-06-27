@@ -151,10 +151,11 @@ def _if_program(t, *, name, threshold):
     return P
 
 
-def _passive_model(dsl, name):
+def _passive_model(name):
     """A 1-variable model with zero flux + no Poisson coupling: the dt-free Program body needs no rhs /
     solve_fields, so this just provides a compilable block to install the program onto."""
-    m = dsl.Model(name)
+    from pops.physics.facade import Model
+    m = Model(name)
     (rho,) = m.conservative_vars("rho")
     u = m.primitive("u", 0.0 * rho)
     m.primitive_vars(rho=rho, u=u)
@@ -179,17 +180,17 @@ def _run_section_b(t):
         print("-- (B) skipped: _pops lacks install_program (rebuild _pops) --")
         return None
 
-    from pops import dsl
+    from pops.physics.facade import Model
 
     count = 3
     try:
-        compiled = pops.compile_problem(model=_passive_model(dsl, "cf_rg"),
+        compiled = pops.compile_problem(model=_passive_model("cf_rg"),
                                        time=_contraction_program(t, "range", count, name="cf_range"))
-        compiled_sr = pops.compile_problem(model=_passive_model(dsl, "cf_sr"),
+        compiled_sr = pops.compile_problem(model=_passive_model("cf_sr"),
                                           time=_contraction_program(t, "static", count, name="cf_sr"))
-        compiled_if = pops.compile_problem(model=_passive_model(dsl, "cf_if"),
+        compiled_if = pops.compile_problem(model=_passive_model("cf_if"),
                                           time=_if_program(t, name="cf_if", threshold=1e3))  # cond FALSE
-        compiled_if_t = pops.compile_problem(model=_passive_model(dsl, "cf_ift"),
+        compiled_if_t = pops.compile_problem(model=_passive_model("cf_ift"),
                                             time=_if_program(t, name="cf_ift", threshold=0.0))  # TRUE
     except RuntimeError as exc:  # no compiler / no Kokkos visible / .so compile failed
         print("-- (B) skipped: compile_problem could not build a .so: %s --" % str(exc)[:160])
@@ -198,7 +199,7 @@ def _run_section_b(t):
     def run(handle):
         s = pops.System(n=n, L=1.0, periodic=True)
         try:
-            cm = _passive_model(dsl, "blk_" + handle.program_name).compile(backend="production")
+            cm = _passive_model("blk_" + handle.program_name).compile(backend="production")
         except RuntimeError as exc:
             print("-- (B) skipped: model compile failed: %s --" % str(exc)[:140])
             return None

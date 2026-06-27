@@ -12,21 +12,22 @@ import shutil
 import subprocess
 import tempfile
 
-from pops import dsl
+from pops.physics.aux import aux_n_aux
+from pops.physics.model import HyperbolicModel
 
 INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "include"))
 
 
 def main():
     # (1) helper aux_n_aux : largeur canonique du canal aux.
-    assert dsl.aux_n_aux([]) == 3
-    assert dsl.aux_n_aux(["grad_x", "grad_y"]) == 3
-    assert dsl.aux_n_aux(["B_z"]) == 4
-    assert dsl.aux_n_aux(["grad_x", "B_z"]) == 4
+    assert aux_n_aux([]) == 3
+    assert aux_n_aux(["grad_x", "grad_y"]) == 3
+    assert aux_n_aux(["B_z"]) == 4
+    assert aux_n_aux(["grad_x", "B_z"]) == 4
     print("OK  aux_n_aux : base=3, B_z=4")
 
     # (2) une source qui lit B_z -> brique avec n_aux = 4.
-    m = dsl.HyperbolicModel("mag")
+    m = HyperbolicModel("mag")
     (nn,) = m.conservative_vars("n")
     bz = m.aux("B_z")
     m.set_source([bz * nn])  # S = B_z * n
@@ -36,7 +37,7 @@ def main():
     print("OK  emit_cpp_source(B_z) declare n_aux = 4")
 
     # (3) retro-compat : une source qui ne lit que grad n'emet PAS de n_aux.
-    m2 = dsl.HyperbolicModel("plain")
+    m2 = HyperbolicModel("plain")
     (n2,) = m2.conservative_vars("n")
     gx = m2.aux("grad_x")
     m2.set_source([gx * n2])
@@ -46,7 +47,7 @@ def main():
 
     # (4) validation : un nom aux inconnu est rejete (doit etre une composante de pops::Aux).
     try:
-        dsl.aux_n_aux(["n_e"])  # nom absent de la disposition canonique
+        aux_n_aux(["n_e"])  # nom absent de la disposition canonique
         raise AssertionError("aux_n_aux aurait du lever ValueError sur un nom inconnu")
     except ValueError:
         pass

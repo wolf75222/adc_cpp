@@ -31,7 +31,8 @@ import tempfile
 import numpy as np
 
 import pops
-from pops import dsl
+from pops.codegen.toolchain import _default_cxx
+from pops.physics.facade import Model
 
 fails = 0
 INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "include"))
@@ -54,7 +55,7 @@ def err_msg(fn):
 
 def linear_toy(blocks=None, eig="numeric"):
     """Advections decouplees : flux x = [a q1, b q2], y = [b q1, a q2] -> Jx = diag(a, b)."""
-    m = dsl.Model("jaclin")
+    m = Model("jaclin")
     q1, q2 = m.conservative_vars("q1", "q2")
     a = m.param("a", A)
     b = m.param("b", B)
@@ -67,7 +68,7 @@ def linear_toy(blocks=None, eig="numeric"):
 
 def burgers_toy(eig="numeric"):
     """Non lineaire : flux x = [q1^2/2, q2^2/2] -> Jx = diag(q1, q2) ; y croise."""
-    m = dsl.Model("jacburg" + eig)
+    m = Model("jacburg" + eig)
     q1, q2 = m.conservative_vars("q1", "q2")
     m.flux(x=[0.5 * q1 * q1, 0.5 * q2 * q2], y=[0.5 * q2 * q2, 0.5 * q1 * q1])
     m.wave_speeds_from_jacobian(eig=eig)
@@ -118,7 +119,7 @@ chk(np.allclose(lox, min(A, B)) and np.allclose(hix, max(A, B))
     "blocks={'x': ..., 'y': ...} : partitions independantes par direction")
 
 print("== (7) gardes ==")
-m_g = dsl.Model("guard")
+m_g = Model("guard")
 g1, g2 = m_g.conservative_vars("g1", "g2")
 m_g.flux(x=[g1, g2], y=[g2, g1])
 m_g.wave_speeds(x=(0.0 * g1, 1.0 + 0.0 * g1), y=(0.0 * g1, 1.0 + 0.0 * g1))
@@ -128,7 +129,7 @@ msg = err_msg(lambda: m_g.wave_speeds_from_jacobian())
 # l'autre fournisseur set_wave_speeds -- token de code stable, propre a l'exclusivite.
 chk("set_wave_speeds" in msg.split(":", 1)[-1],
     f"exclusivite paire explicite / jacobien ({msg[:40]}...)")
-m_g2 = dsl.Model("guard2")
+m_g2 = Model("guard2")
 h1, h2 = m_g2.conservative_vars("h1", "h2")
 m_g2.flux(x=[h1, h2], y=[h2, h1])
 msg = err_msg(lambda: m_g2.wave_speeds_from_jacobian(blocks=[[0, 0], [1]]))
@@ -136,7 +137,7 @@ chk("present" in msg, f"indice duplique refuse ({msg[:40]}...)")
 msg = err_msg(lambda: m_g2.wave_speeds_from_jacobian(eig="fd", x=[[h1]], y=[[h1]]))
 chk("x/y" in msg, f"fd + jacobien explicite refuse ({msg[:40]}...)")
 
-cxx = dsl._default_cxx(None)
+cxx = _default_cxx(None)
 if not cxx:
     print("pas de compilateur C++ : tests (4)-(6)/(8) sautes")
     sys.exit(1 if fails else 0)
@@ -154,7 +155,7 @@ c_burg = burgers_toy().compile(os.path.join(tmp, "jacburg.so"), INCLUDE, backend
 chk(getattr(c_burg, "has_wave_speeds", False), "compiled.has_wave_speeds (jacobien, sans 'p')")
 
 print("== (8) retro-compat : emission historique inchangee ==")
-m_p = dsl.Model("histo")
+m_p = Model("histo")
 rho, mx = m_p.conservative_vars("rho", "m_x", roles=["Density", "MomentumX"])
 u = m_p.primitive("u", mx / rho)
 pp = m_p.primitive("p", 1.0 * rho)

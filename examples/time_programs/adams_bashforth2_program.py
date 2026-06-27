@@ -26,7 +26,7 @@ try:
     import numpy as np
 
     import pops
-    from pops import dsl
+    from pops.physics.facade import Model
     from pops import time as adctime
 except Exception as exc:  # noqa: BLE001
     print("skip adams_bashforth2_program (pops/numpy unavailable: %s)" % exc)
@@ -38,7 +38,7 @@ C = 0.75  # source coefficient: S(rho) = C * rho (a linear ODE rho' = c rho; R c
 def source_model(name):
     """A 1-variable model (rho), ZERO flux, default LINEAR source S(rho) = C*rho (so R = c*rho changes
     every step). A complete compilable block (flux + primitive + eigenvalue + source)."""
-    m = dsl.Model(name)
+    m = Model(name)
     (rho,) = m.conservative_vars("rho")
     u = m.primitive("u", 0.0 * rho)
     m.primitive_vars(rho=rho, u=u)

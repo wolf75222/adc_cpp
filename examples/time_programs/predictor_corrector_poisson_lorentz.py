@@ -28,7 +28,8 @@ try:
     import numpy as np
 
     import pops
-    from pops import dsl
+    from pops.ir.ops import sqrt
+    from pops.physics.facade import Model
     from pops import time as adctime
 except Exception as exc:  # noqa: BLE001
     print("skip predictor_corrector_poisson_lorentz (pops/numpy unavailable: %s)" % exc)
@@ -49,7 +50,7 @@ def _base_block(m):
     m.primitive_vars(rho=rho, u=u, v=v, p=p)
     m.conservative_from([rho, rho * u, rho * v])
     m.flux(x=[mx, mx * u + p, my * u], y=[my, mx * v, my * v + p])
-    cs = dsl.sqrt(cs2)
+    cs = sqrt(cs2)
     m.eigenvalues(x=[u - cs, u, u + cs], y=[v - cs, v, v + cs])
     m.elliptic_rhs(rho)  # Poisson rhs f = rho (so solve_fields populates a non-trivial grad)
     gx = m.aux("grad_x")
@@ -61,7 +62,7 @@ def _base_block(m):
 def named_source_model(name="pc_named"):
     """Default source EMPTY (NoSource); the electric force is a NAMED source_term and the Lorentz
     operator a NAMED linear_source (both opt-in). This is the model the Program drives."""
-    m = dsl.Model(name)
+    m = Model(name)
     rho, mx, my, gx, gy, bz = _base_block(m)
     m.source_term("electric", [0.0, -rho * gx, -rho * gy])
     m.linear_source("lorentz", [[0.0, 0.0, 0.0],
@@ -73,7 +74,7 @@ def named_source_model(name="pc_named"):
 def default_source_model(name="pc_default"):
     """Same physics, but the electric force is the model's DEFAULT source (m.source): eval_rhs then
     returns -div F + electric directly -- used to build the offline reference."""
-    m = dsl.Model(name)
+    m = Model(name)
     rho, mx, my, gx, gy, bz = _base_block(m)
     m.source([0.0, -rho * gx, -rho * gy])
     m.linear_source("lorentz", [[0.0, 0.0, 0.0],

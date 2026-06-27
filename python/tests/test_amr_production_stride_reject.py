@@ -23,7 +23,7 @@ inexistant) suffit (deterministe en CI minimale ; meme recette que test_stride.p
 import sys
 
 import pops
-from pops import dsl
+from pops.codegen.loader import CompiledModel
 
 fails = 0
 
@@ -40,7 +40,7 @@ def fake_production_amr():
     """CompiledModel FACTICE du chemin production AMR : backend='production', target='amr_system',
     adder='add_native_block', .so inexistant. La garde stride/masque de add_equation leve AVANT le
     dlopen du .so, donc le chemin n'est jamais reellement charge."""
-    return dsl.CompiledModel(
+    return CompiledModel(
         so_path="/inexistant_amr.so", backend="production", adder="add_native_block",
         cons_names=["rho", "rho_u", "rho_v", "E"],
         cons_roles=["Density", "MomentumX", "MomentumY", "Energy"],

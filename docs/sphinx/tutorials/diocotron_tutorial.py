@@ -9,7 +9,7 @@ and `matplotlib` -- no dependency on the `adc_cases` application package.
 What it does, in tutorial order
 --------------------------------
 1. imports `pops` and detects the running backend;
-2. WRITES THE MODEL AS FORMULAS with `pops.dsl.Model` (conservative variable, auxiliary fields
+2. WRITES THE MODEL AS FORMULAS with `pops.physics.facade.Model` (conservative variable, auxiliary fields
    phi/grad, E x B advection flux, eigenvalues, elliptic right-hand side);
 3. COMPILES the model: tries the `production` backend (zero-copy native path, preferred) then
    falls back to `aot` (numerically identical, host-marshalled) -- exactly like the cases;
@@ -50,7 +50,7 @@ from pathlib import Path
 import numpy as np
 
 import pops
-from pops import dsl
+from pops.physics.facade import Model
 
 # Physical parameters of the reduced model (must be consistent between the formulas and the Poisson RHS).
 B0 = 1.0      # background magnetic field (carries the E x B drift)
@@ -60,12 +60,12 @@ REPO_ROOT = Path(__file__).resolve().parents[3]   # tutorials -> sphinx -> docs 
 POPS_INCLUDE = os.environ.get("POPS_INCLUDE", str(REPO_ROOT / "include"))
 
 
-# --- 2. The model, WRITTEN AS FORMULAS (pops.dsl.Model) ---------------------------------------------
-def diocotron_model(n_i0: float) -> "dsl.Model":
+# --- 2. The model, WRITTEN AS FORMULAS (pops.physics.facade.Model) ----------------------------------
+def diocotron_model(n_i0: float) -> "Model":
     """Reduced diocotron model as symbolic formulas, reproducing the native bricks `ExBVelocity`
     (transport) and `BackgroundDensity` (elliptic). `n_i0` = neutralizing ionic background (mean of
     the density, for the solvability of the periodic Poisson)."""
-    m = dsl.Model("diocotron_tutorial")
+    m = Model("diocotron_tutorial")
 
     (n,) = m.conservative_vars("n")          # single conservative variable: the density (Density role)
     m.aux("phi")                             # auxiliary fields provided by the solver (pops::Aux channel)
@@ -120,7 +120,7 @@ def perturbation_amplitude(density: np.ndarray) -> float:
 
 
 # --- 3+4. Compilation + wiring: production (native) if possible, else aot (identical) --------------
-def compile_and_build(model: "dsl.Model", ne0: np.ndarray, L: float, outdir: Path):
+def compile_and_build(model: "Model", ne0: np.ndarray, L: float, outdir: Path):
     """Compile the DSL model AND wire it into a periodic `pops.System`.
 
     Tries `production` first (zero-copy native path `add_native_block`, the plan's target), then

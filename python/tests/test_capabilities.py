@@ -13,7 +13,7 @@ documentation update:
        and AMR facades but NOT on polar (no polar energy-flux brick, make_block_polar rejects
        them); polar exposes only rusanov + hll (the isothermal fluid declares wave_speeds).
        Guards the "hllc/roe = 2D Euler only" and "polar = scalar ExB only" doc regressions.
-  T3 - backends_dsl MPI/AMR flags agree (truthiness) with the dsl._BACKEND_CAPS table that
+  T3 - backends_dsl MPI/AMR flags agree (truthiness) with the _BACKEND_CAPS table that
        actually drives backend selection; catches drift between the two tables.
   T4 - the polar stability bounds (stability_speed / stability_dt / source_frequency) are
        advertised as wired (system_polar.cpp installs them); guards the PolarMesh "NOT wired"
@@ -31,7 +31,8 @@ The test is pure Python: it only reads pops.capabilities() and pops.dsl._BACKEND
 needs the _pops extension to import but does not build or run any model.
 """
 import pops
-from pops import dsl
+from pops.codegen.compile import _BACKEND_CAPS
+from pops.physics.aux import AUX_BASE_COMPS, AUX_CANONICAL, AUX_NAMED_BASE, AUX_NAMED_MAX
 
 EXPECTED_TOP_KEYS = {
     "dimension", "riemann", "time", "stability_policy", "poisson", "geometry", "schur",
@@ -58,7 +59,7 @@ def test_riemann_surface_matches_dispatch():
 def test_backends_dsl_flags_match_backend_caps():
     caps_b = pops.capabilities()["backends_dsl"]
     for backend in ("prototype", "aot", "production"):
-        ref = dsl._BACKEND_CAPS[backend]
+        ref = _BACKEND_CAPS[backend]
         got = caps_b[backend]
         assert bool(got["mpi"]) == bool(ref["mpi"]), \
             "%s: capabilities() mpi=%r disagrees with _BACKEND_CAPS mpi=%r" % (backend, got["mpi"], ref["mpi"])
@@ -110,26 +111,26 @@ def test_aux_named_surface_and_limit_parity():
     # ADC-291: named aux is advertised on System (cartesian + polar) AND AMR (single + multi block),
     # no longer "cartesian System only". The remaining compile-time limit (kAuxMaxExtra) is published
     # as an introspectable scalar and MUST match BOTH the C++ source (_pops.__aux_max_extra__) and the
-    # DSL mirror (dsl.AUX_NAMED_MAX) -- this pins the hand-maintained Python<->C++ mirror so it cannot
+    # DSL mirror (AUX_NAMED_MAX) -- this pins the hand-maintained Python<->C++ mirror so it cannot
     # silently drift (the historical #51-class risk the issue calls out).
     from pops import _pops
     named = pops.capabilities()["aux"]["named"]
     assert set(named["backends"]) >= {"system_cartesian", "system_polar", "amr_single_block",
                                       "amr_multi_block"}, named["backends"]
     # the limit is the SINGLE C++ source, mirrored by the DSL constant.
-    assert named["limit"] == _pops.__aux_max_extra__ == dsl.AUX_NAMED_MAX, \
+    assert named["limit"] == _pops.__aux_max_extra__ == AUX_NAMED_MAX, \
         "aux named limit drift: caps=%r, C++=%r, dsl=%r" % (
-            named["limit"], _pops.__aux_max_extra__, dsl.AUX_NAMED_MAX)
+            named["limit"], _pops.__aux_max_extra__, AUX_NAMED_MAX)
     # the aux ghost width is explicit (the configurable-radius mechanism is a documented follow-up).
     assert named["halo_radius"] == 1, named["halo_radius"]
     # the other mirrored aux constants stay coherent C++ <-> DSL.
-    assert _pops.__aux_named_base__ == dsl.AUX_NAMED_BASE, "AUX_NAMED_BASE drift"
-    assert _pops.__aux_base_comps__ == dsl.AUX_BASE_COMPS, "AUX_BASE_COMPS drift"
+    assert _pops.__aux_named_base__ == AUX_NAMED_BASE, "AUX_NAMED_BASE drift"
+    assert _pops.__aux_base_comps__ == AUX_BASE_COMPS, "AUX_BASE_COMPS drift"
     assert _pops.__aux_max_comps__ == _pops.__aux_named_base__ + _pops.__aux_max_extra__
     # the C++ canonical name->component table mirrors the Python AUX_CANONICAL exactly.
-    assert dict(_pops.__aux_canonical__) == dict(dsl.AUX_CANONICAL), \
+    assert dict(_pops.__aux_canonical__) == dict(AUX_CANONICAL), \
         "C++ aux_names table != Python AUX_CANONICAL: %r vs %r" % (
-            dict(_pops.__aux_canonical__), dict(dsl.AUX_CANONICAL))
+            dict(_pops.__aux_canonical__), dict(AUX_CANONICAL))
     # no stale "cartesian System only" claim survives in the aux surface.
     blob = repr(pops.capabilities()["aux"]).lower()
     assert "cartesian system only" not in blob, "stale 'cartesian System only' aux claim"

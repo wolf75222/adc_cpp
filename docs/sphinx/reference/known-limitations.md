@@ -40,7 +40,7 @@ Several GPU cells of the matrix remain `?` (not yet exercised on device); see th
 
 ## DSL: parity asserted only if a matching C++ compiler is present
 
-The symbolic DSL (`pops.dsl`) compiles a model to a `.so` at runtime (backends `aot` /
+The symbolic DSL (`pops.physics` + `pops.ir`) compiles a model to a `.so` at runtime (backends `aot` /
 `production`) by invoking the C++ compiler against `adc_cpp`'s headers. The parity
 verification (DSL vs native brick) therefore relies on the presence of a working C++ compiler
 that supports the module standard (with `std=None` the loader derives it: C++20 under Kokkos,
@@ -129,8 +129,8 @@ The Python module (`pops._pops`) is a `.so` linked to the interpreter that compi
 
 - importing it under an interpreter of another version (e.g. a system `python3` 3.9) fails,
   with a message that now names the expected tag and the rebuild command;
-- without numpy, `import pops` and `pops.System` work; only `pops.dsl` (host evaluator)
-  fails, with a message that asks for numpy.
+- without numpy, `import pops` and `pops.System` work; only the symbolic DSL (`pops.ir`
+  host evaluator, `pops.physics`) fails, with a message that asks for numpy.
 
 You must therefore use exactly the 3.12 interpreter that built the module (with numpy), and
 point `PYTHONPATH` at the corresponding `build*/python`, or reinstall with the wanted backend

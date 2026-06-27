@@ -147,7 +147,7 @@ Three orthogonal axes (concept `PhysicalModel`, policy `NumericalFlux`, concept
   generic bricks (`pops.Model(state, transport, source, elliptic)`); the core names no
   scenario (the names diocotron, euler_poisson... live on the `adc_cases` side). Shared
   system Poisson; on the Python side via `pops.System`. Three ways to write a model: native
-  brick composition, symbolic `pops.dsl.Model` model, or hybrid composition (see
+  brick composition, symbolic `pops.physics.facade.Model` model, or hybrid composition (see
   [Models](models/index.md)).
 - `RusanovFlux` / `HLLCFlux` / `RoeFlux` flux, MUSCL reconstruction (Minmod / VanLeer) + WENO5-Z;
 - `GeometricMG` (multigrid V-cycle red-black GS) / `PoissonFFTSolver` (direct spectral);

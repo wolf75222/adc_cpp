@@ -24,7 +24,7 @@ Invariants verifies :
 import numpy as np
 
 import pops
-from pops import dsl
+from pops.physics.multispecies import CoupledSource
 
 
 def chk(cond, msg, fails):
@@ -36,7 +36,7 @@ def chk(cond, msg, fails):
 
 def build_source(k):
     """Construit la source d'ionisation generique (3 especes) par le DSL et la compile."""
-    src = dsl.CoupledSource("ionization")
+    src = CoupledSource("ionization")
     ne = src.block("electrons").role("density")
     ni = src.block("ions").role("density")
     ng = src.block("neutrals").role("density")

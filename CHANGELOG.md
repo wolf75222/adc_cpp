@@ -884,6 +884,27 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Changed
 
+- **Spec 4 consumer migration off the flat shims** (ADC-473, epic ADC-467): every
+  in-repo consumer now imports the model-authoring symbols from their package homes
+  instead of the transitional `pops.dsl` / `pops.moments` re-export shims. The
+  symbolic-IR builders move to `pops.ir` (`pops.ir.expr.Var`/`Const`,
+  `pops.ir.ops.sqrt`/`eig_all_real`, `pops.ir.lowering.diff`), the PDE facade to
+  `pops.physics.facade.Model`, the lower-level authoring objects to
+  `pops.physics.model`/`bricks`/`hybrid`/`multispecies`/`aux`, the build/compile
+  engine to `pops.codegen.compile`/`loader`/`toolchain`/`cache`/`abi`, and the moment
+  toolkit to `pops.lib.moments`. Migrated 100 Python tests, 8 examples, 2 benches and
+  the tutorial script plus the affected docs (`pops.dsl.X` -> the fully-qualified
+  home, `pops.moments` -> `pops.lib.moments`). The public top-level re-exports
+  (`pops.compile_problem` / `pops.CompiledProblem` / `pops.compile_library` /
+  `pops.read_library_manifest` / `pops.integrate.*`) and every runtime sim method are
+  unchanged. The `pops.dsl` / `pops.moments` shims are deleted in the final clean-break
+  step.
+
+- **Spec 4 clean break** (ADC-473, epic ADC-467): removed the flat `pops.dsl` and
+  `pops.moments` modules; consumers now import from `pops.physics` / `pops.ir` /
+  `pops.codegen` / `pops.lib.moments`, and the library module moved to
+  `pops.codegen.library`.
+
 - **pops.model package extraction** (ADC-469, epic ADC-450): the flat
   `python/pops/model.py` operator-first core is split into a
   `python/pops/model/` package (`spaces`, `signatures`, `operators`,

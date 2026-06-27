@@ -1,7 +1,7 @@
 # Build and simulate a moment model (HyQMOM, 15 moments)
 
 Build the 2D fifteen-moment kinetic model the way the `hyqmom15` case does: declare the moment
-state, write one closure, let `pops.moments` generate the fluxes and the wave speeds, compile to a
+state, write one closure, let `pops.lib.moments` generate the fluxes and the wave speeds, compile to a
 `.so`, and run the same model under three numerical methods. The point of this tutorial is the
 workflow, not the golden-file validation: you will see how little physics you write (a single
 closure) and how the generator derives the rest.
@@ -50,7 +50,7 @@ The order above is the canonical order of the generic generator. You do not rety
 generator for it, which also guarantees your indices match what the kernel expects.
 
 ```python
-from pops import moments as gmom
+from pops.lib import moments as gmom
 
 names = gmom.moment_names(4)     # ['M00','M10','M20','M30','M40','M01', ... ,'M04'], 15 entries
 pq    = gmom.moment_indices(4)   # [(0,0),(1,0),(2,0), ... ,(0,4)], the (p,q) exponents
@@ -98,7 +98,7 @@ One call turns the closure into a full symbolic model:
 m = gmom.build_moment_model("hyqmom15", 4, hyqmom_closure)
 ```
 
-`build_moment_model(name, order, closure, ...)` returns an `pops.dsl.Model`. From the closure alone it
+`build_moment_model(name, order, closure, ...)` returns an `pops.physics.facade.Model`. From the closure alone it
 generates, as symbolic formulas:
 
 - the mean velocities `u = M10/M00`, `v = M01/M00`;
@@ -206,7 +206,7 @@ and a Poisson right-hand side, then turn on the system Poisson solver. The sourc
 `grad_x`/`grad_y` aux channels that the solver fills in:
 
 ```python
-from pops import dsl
+import pops
 
 def lorentz(m_, M_):                      # E = -grad phi
     gx, gy = m_.aux("grad_x"), m_.aux("grad_y")
@@ -218,7 +218,7 @@ m_vp = gmom.build_moment_model("hyqmom15_vp", 4, hyqmom_closure,
                                exact_speeds=True, sources=lorentz)
 inv_l2 = m_vp.param("inv_debye2", 1.0 / lam ** 2)   # lam = the dimensionless Debye length
 rho_bg = m_vp.param("rho_background", rho_mean)      # neutralizing background = mean density
-M00 = dsl.Var("M00", "cons")
+M00 = pops.ir.expr.Var("M00", "cons")
 m_vp.elliptic_rhs(inv_l2 * (M00 - rho_bg))           # Delta(phi) = (M00 - rho_bg) / lam^2
 m_vp.check()
 compiled = m_vp.compile("hyqmom15_vp.so", pops.pops_include(), backend="aot")
@@ -259,8 +259,8 @@ the generator has no `projection` parameter. It is a separate pointwise hook on 
 component. The system then applies `U <- project(U, aux)` to the valid cells at the end of each whole
 macro-step in C++, instead of a per-cell Python callback. It runs on the flat `pops.System`, under
 MPI, and on `pops.AmrSystem` (per level after the reflux, ADC-312). The projection must be idempotent
-and pointwise (no neighbor reads), and the clamps are written branchlessly with `dsl.abs_` / `sign`;
-`dsl.eig_all_real` builds the realizable-cone masks (ADC-362). Without the hook the model is
+and pointwise (no neighbor reads), and the clamps are written branchlessly with `pops.ir.ops.abs_` / `sign`;
+`pops.ir.ops.eig_all_real` builds the realizable-cone masks (ADC-362). Without the hook the model is
 unchanged.
 
 The `adc_cases/hyqmom15/model.py` case wrapper bundles this: its own `build_moment_model(...,
@@ -292,7 +292,7 @@ projection applied at every step `dt` stays stable (around `1.2e-3`) over the fu
 
 - The [moments and closures concept](../concepts/moments-and-closures.md) for why the standardization
   and the closure problem look the way they do.
-- The [moment models reference](../reference/moment-models.md) for the full `pops.moments` API: the
+- The [moment models reference](../reference/moment-models.md) for the full `pops.lib.moments` API: the
   closure contract, `gaussian_closure`, `lorentz_sources`, and the `robust` / `exact_speeds` flags.
 - The tested case at `adc_cases/hyqmom15` for the complete model, the realizable state generators,
   and the validation against the reference solution.

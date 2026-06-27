@@ -32,7 +32,8 @@ try:
     import numpy as np
 
     import pops
-    from pops import dsl
+    from pops.ir.ops import sqrt
+    from pops.physics.facade import Model
     from pops import time as adctime
 except Exception as exc:  # noqa: BLE001  -- numpy or _pops unavailable in this interpreter
     _skip("pops/numpy unavailable: %s" % exc)
@@ -63,7 +64,7 @@ def lorentz_model(name="lorentz_local"):
     A complete, compilable production block (flux + primitives + eigenvalues). The Program never runs
     a transport rhs: it only solves the LOCAL implicit Lorentz operator, which acts on (mx, my)
     independently of the flux. B_z is read off the System aux."""
-    m = dsl.Model(name)
+    m = Model(name)
     rho, mx, my = m.conservative_vars("rho", "mx", "my")
     cs2 = m.param("cs2", 0.5)  # const sound speed^2
     u = m.primitive("u", mx / rho)
@@ -72,7 +73,7 @@ def lorentz_model(name="lorentz_local"):
     m.primitive_vars(rho=rho, u=u, v=v, p=p)
     m.conservative_from([rho, rho * u, rho * v])
     m.flux(x=[mx, mx * u + p, my * u], y=[my, mx * v, my * v + p])
-    cs = dsl.sqrt(cs2)
+    cs = sqrt(cs2)
     m.eigenvalues(x=[u - cs, u, u + cs], y=[v - cs, v, v + cs])
     bz = m.aux("B_z")
     m.linear_source("lorentz", [[0.0, 0.0, 0.0],
@@ -107,7 +108,7 @@ chk(raises(NotImplementedError, lambda: lorentz_program().emit_cpp_program()),
     "solve_local_linear refused without a model")
 
 # n_cons > 8 dense-fallback guard.
-big = dsl.Model("too_big")
+big = Model("too_big")
 cons = big.conservative_vars(*["c%d" % i for i in range(9)])
 big.aux("B_z")
 zero9 = [[0.0] * 9 for _ in range(9)]

@@ -9,7 +9,8 @@ there is no string lookup in a hot kernel. Pure-Python codegen-text check; skips
 import sys
 
 try:
-    from pops import dsl
+    from pops.ir.expr import Const
+    from pops.physics.facade import Model
     from pops import time as adctime
 except Exception as exc:  # pops not importable here -> skip, never fake
     print("skip test_module_codegen (pops unavailable: %s)" % exc)
@@ -17,13 +18,13 @@ except Exception as exc:  # pops not importable here -> skip, never fake
 
 
 def _model():
-    m = dsl.Model("ep")
+    m = Model("ep")
     rho, mx, my = m.conservative_vars("rho", "mx", "my")
     gx = m.aux("grad_x")
     gy = m.aux("grad_y")
     bz = m.aux("B_z")
     m.flux(x=[mx, mx * mx / rho, mx * my / rho], y=[my, mx * my / rho, my * my / rho])
-    m.source_term("electric", [dsl.Const(0.0), -rho * gx, -rho * gy])
+    m.source_term("electric", [Const(0.0), -rho * gx, -rho * gy])
     m.linear_source("lorentz", [[0.0, 0.0, 0.0], [0.0, 0.0, bz], [0.0, -bz, 0.0]])
     m.elliptic_rhs(rho - 1.0)
     m.rate_operator("explicit_rhs", flux=True, sources=["electric"])

@@ -5,7 +5,7 @@ attach it to an `pops.System` and run.
 
 A native brick is a generic piece of physics already compiled into the core (`pops.ExB`,
 `pops.PotentialForce`, `pops.ChargeDensity`...). A symbolic DSL brick is physics you write as
-formulas with `pops.dsl` and compile into a `.so`. A hybrid model fills the middle ground: you
+formulas with `pops.physics` and compile into a `.so`. A hybrid model fills the middle ground: you
 reuse a native brick for one slot and write the other slot as formulas. Use it when part of the
 physics already exists as a native brick and part is best expressed symbolically.
 
@@ -22,8 +22,8 @@ physics already exists as a native brick and part is best expressed symbolically
 ## How a CompositeModel is built
 
 `pops.CompositeModel(transport, source, elliptic)` takes three slots. Each slot accepts either a
-native brick or a partial compiled DSL brick (`pops.dsl.HyperbolicBrick`, `pops.dsl.SourceBrick`,
-`pops.dsl.EllipticBrick`, each followed by `.compile()`). At least one slot must be a DSL brick. An
+native brick or a partial compiled DSL brick (`pops.physics.bricks.HyperbolicBrick`, `pops.physics.bricks.SourceBrick`,
+`pops.physics.bricks.EllipticBrick`, each followed by `.compile()`). At least one slot must be a DSL brick. An
 all-native composition is written with `pops.Model(...)` instead; otherwise `CompositeModel` raises
 a `ValueError`.
 
@@ -43,23 +43,22 @@ force, and `Q` with the charge of the elliptic coupling.
 
    ```python
    import pops
-   from pops import dsl
 
    CS2, QOM, Q = 0.7, -1.0, -1.0
    ```
 
-2. Write the transport as a DSL hyperbolic brick. `pops.dsl.HyperbolicBrick` replicates
+2. Write the transport as a DSL hyperbolic brick. `pops.physics.bricks.HyperbolicBrick` replicates
    `pops::IsothermalFlux{cs2}` over three conservative variables: it declares the conservatives, the
    primitives, the physical flux, the eigenvalues, the primitive layout, and the inverse
    `conservative_from`.
 
    ```python
    def build_iso_transport(cs2):
-       b = dsl.HyperbolicBrick("iso")
+       b = pops.physics.bricks.HyperbolicBrick("iso")
        rho, rho_u, rho_v = b.conservative_vars("rho", "rho_u", "rho_v")
        u = b.primitive("u", rho_u / rho)
        v = b.primitive("v", rho_v / rho)
-       c = dsl.sqrt(cs2)
+       c = pops.ir.ops.sqrt(cs2)
        b.flux(x=[rho_u, rho_u * u + cs2 * rho, rho_v * u],
               y=[rho_v, rho_u * v, rho_v * v + cs2 * rho])
        b.eigenvalues(x=[u - c, u, u + c], y=[v - c, v, v + c])

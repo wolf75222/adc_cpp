@@ -60,9 +60,9 @@ def _canon_role(role):
 
 
 def _roles_for(hyp):
-    """The canonical dsl roles of a HyperbolicModel's conservative state."""
-    from .. import dsl as _dsl
-    return _dsl.roles_for(hyp.cons_names, hyp.cons_roles)
+    """The canonical roles of a HyperbolicModel's conservative state."""
+    from .aux import roles_for
+    return roles_for(hyp.cons_names, hyp.cons_roles)
 
 
 class StateHandle:

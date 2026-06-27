@@ -5,7 +5,7 @@ algorithm in Python with {py:mod}`pops.time`; Python only builds a typed interme
 representation (IR). The IR is lowered to C++ and compiled into a single `problem.so` that runs
 **entirely C++-side** during `sim.step(dt)`. No numerical stage ever re-enters Python or NumPy.
 
-This is the companion of the *physical* DSL ({doc}`symbolic-dsl`): `pops.dsl.Model` describes the
+This is the companion of the *physical* DSL ({doc}`symbolic-dsl`): `pops.physics.facade.Model` describes the
 local formulas (conservative variables, flux, sources); `pops.time.Program` describes the temporal
 *algorithm* (stages, field solves, linear combinations, commit).
 
@@ -86,7 +86,7 @@ def _(P):
 ## Compiling and running
 
 ```python
-m = pops.dsl.Model(...)                       # the physical model
+m = pops.physics.facade.Model(...)                       # the physical model
 compiled = pops.compile_problem(model=m, time=P, backend="production", target="system")
 
 sim = pops.System(n=128, L=1.0, periodic=True)
@@ -165,7 +165,7 @@ a report rather than a transform that could change numerics.
 | `pops.time.Program` builder IR + `pops.time.std` macros | available |
 | `Program.emit_cpp_program` codegen, **Forward Euler** (`forward_euler_program.py`) | available, runs end-to-end |
 | `pops.compile_problem` + cache + `debug=` + `sim.install_program` + `pops.CompiledTime` | available |
-| Named sources / linear sources on `pops.dsl.Model` (`m.source_term`, `m.linear_source`) | available |
+| Named sources / linear sources on `pops.physics.facade.Model` (`m.source_term`, `m.linear_source`) | available |
 | Multi-stage codegen (SSPRK2 / SSPRK3 / RK4) (`ssprk2_program.py`, `ssprk3_program.py`, `rk4_program.py`) | available, runs end-to-end |
 | `P.source` / `P.apply` / `P.solve_local_linear` (split sources, Lorentz) + predictor-corrector (`predictor_corrector_poisson_lorentz.py`) | available, runs end-to-end |
 | `strang` splitting combinator (compiled H(dt/2); S(dt); H(dt/2) == native `pops.Strang`) (`strang_program.py`) | available, runs end-to-end |

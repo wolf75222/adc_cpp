@@ -8,7 +8,8 @@ tests/test_cache_manager.cpp). Other ops/policies still refuse to lower (not yet
 """
 import pytest
 
-from pops import dsl, model
+from pops import model
+from pops.ir.expr import Var
 
 adctime = pytest.importorskip("pops.time")
 
@@ -17,7 +18,7 @@ def _module():
     mod = model.Module("held_fields")
     u = mod.state_space("U", ("rho", "mx", "my"))
     fields = mod.field_space("fields", ("phi",))
-    rho = dsl.Var("rho", "cons")
+    rho = Var("rho", "cons")
     mod.operator(name="fields_from_state", signature=(u,) >> fields, kind="field_operator", expr=rho)
     mod.operator_capabilities("fields_from_state", cacheable=True)
     return mod, u

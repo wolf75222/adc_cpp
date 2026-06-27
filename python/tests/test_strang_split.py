@@ -26,7 +26,8 @@ import shutil
 import numpy as np
 
 import pops
-from pops import dsl
+from pops.ir.ops import sqrt
+from pops.physics.facade import Model
 
 INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "include"))
 
@@ -53,13 +54,13 @@ def raises(exc_types, fn, *args, **kw):
 def isothermal_magnetized(cs2=1.0):
     """Fluide isotherme 2D (rho, mx, my) magnetise (roles Density/MomentumX/MomentumY, lit B_z). La
     source LOCALE est nulle : l'etage SOURCE est porte par pops.CondensedSchur (electrostatique + Lorentz)."""
-    m = dsl.Model("iso_mag_strang")
+    m = Model("iso_mag_strang")
     rho, mx, my = m.conservative_vars("rho", "mx", "my",
                                       roles=["Density", "MomentumX", "MomentumY"])
     u = m.primitive("u", mx / rho)
     v = m.primitive("v", my / rho)
     p = cs2 * rho
-    c = dsl.sqrt(cs2)
+    c = sqrt(cs2)
     m.flux(x=[mx, mx * u + p, mx * v], y=[my, my * u, my * v + p])
     m.eigenvalues(x=[u - c, u, u + c], y=[v - c, v, v + c])
     m.primitive_vars(rho=rho, u=u, v=v)

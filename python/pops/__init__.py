@@ -185,12 +185,12 @@ def doctor(verbose=True):
     checks["interpreteur"] = (True, "%s (%d.%d) ; extension %s"
                               % (sys.executable, sys.version_info[0], sys.version_info[1], so))
 
-    # 2. numpy (required at import of pops.dsl)
+    # 2. numpy (required by the codegen IR host evaluator)
     try:
         import numpy
         checks["numpy"] = (True, numpy.__version__)
     except Exception as e:
-        checks["numpy"] = (False, "ABSENT from this interpreter (%s) -> `import pops.dsl` will fail. "
+        checks["numpy"] = (False, "ABSENT from this interpreter (%s) -> compiling a model will fail. "
                                   "Install numpy in THIS python." % e)
 
     # 3. compiled compute backend
@@ -202,13 +202,14 @@ def doctor(verbose=True):
 
     # 4. runtime DSL compiler (the link of the -std=c++23 bug)
     try:
-        from . import dsl as _dsl
+        from .codegen import toolchain as _tc
+        from .codegen import abi as _abi
     except Exception as e:
-        checks["dsl"] = (False, "import pops.dsl failed (%s)" % e)
-        _dsl = None
-    if _dsl is not None:
-        baked = _dsl.loader_cxx_compiler()
-        cc = _dsl._default_cxx(None)
+        checks["dsl"] = (False, "import pops.codegen failed (%s)" % e)
+        _tc = None
+    if _tc is not None:
+        baked = _tc.loader_cxx_compiler()
+        cc = _tc._default_cxx(None)
         if not cc:
             checks["compilateur"] = (False, "NO C++ compiler found (POPS_CXX, module, PATH). "
                                             "Install Xcode CLT (macOS) or `conda install cxx-compiler`.")
@@ -216,7 +217,7 @@ def doctor(verbose=True):
             origin = ("$POPS_CXX" if os.environ.get("POPS_CXX") == cc
                       else "baked by the _pops build" if cc == baked else "PATH (which)")
             try:
-                std = _dsl._probe_cxx_std(cc, _dsl.loader_cxx_std())
+                std = _tc._probe_cxx_std(cc, _tc.loader_cxx_std())
                 checks["compilateur"] = (True, "%s [%s] ; -std=%s accepted" % (cc, origin, std))
             except RuntimeError as e:
                 checks["compilateur"] = (False, str(e).splitlines()[0])
@@ -228,14 +229,14 @@ def doctor(verbose=True):
 
         # 5. pops headers (production DSL : the signature must match the one baked into _pops)
         try:
-            inc = _dsl.pops_include()
+            inc = _tc.pops_include()
             checks["include"] = (True, inc)
             # 5b. SYNCHRONIZATION headers <-> module (real bug : module built BEFORE a git pull ->
             # the DSL loader references C++ signatures absent from the old .so -> dlopen 'symbol
             # not found' cryptic). We compare the baked signature to the one of the current tree.
-            baked_sig = _dsl.module_header_signature()
+            baked_sig = _abi.module_header_signature()
             if baked_sig is not None:
-                cur_sig = _dsl.pops_header_signature(inc)
+                cur_sig = _tc.pops_header_signature(inc)
                 if cur_sig == baked_sig:
                     checks["headers_sync"] = (True, "headers == module build (sig %s...)"
                                               % baked_sig[:12])
@@ -250,7 +251,7 @@ def doctor(verbose=True):
         # 5c. Kokkos root for the DSL production/aot backend (the tutorial's "no DSL backend" blocker).
         # adc_cpp is Kokkos-only : every DSL .so that includes the pops headers MUST compile against an
         # installed Kokkos (Serial is enough on CPU), found via POPS_KOKKOS_ROOT / Kokkos_ROOT.
-        kroot = _dsl._native_kokkos_root()
+        kroot = _tc._native_kokkos_root()
         if kroot is None:
             checks["kokkos_root"] = (False,
                 "POPS_KOKKOS_ROOT / Kokkos_ROOT not set -> DSL backend='production'/'aot' cannot compile "
@@ -305,7 +306,7 @@ __all__ = [
     "elliptic", "div_eps_grad", "charge_density", "composite_rhs",
     "electric_field_from_potential", "EllipticSolver", "EllipticModel",
     "Ionization", "Collision", "ThermalExchange",
-    "PythonFlux", "dsl", "time", "model", "math", "physics", "lib", "library",
+    "PythonFlux", "time", "model", "math", "physics", "lib",
     "abi_key", "capabilities",
     "set_threads", "has_kokkos", "parallel_info", "doctor",
     "compile_problem", "CompiledProblem", "CompiledTime",
@@ -625,46 +626,46 @@ def Model(state, transport, source, elliptic):
 # bricks (pops.dsl.HyperbolicBrick(...).compile() / SourceBrick / EllipticBrick). The
 # mix is compiled into ONE composite .so (prototype: backend 'aot'). cf. pops/dsl.py (Phase B).
 def _native_to_brick(obj, role):
-    """Translate a NATIVE brick (pops.* object) into a dsl.NativeBrick descriptor for the @p role slot.
-    An already-compiled DSL brick (dsl.CompiledBrick) passes through unchanged (after slot check)."""
-    from . import dsl
-    if isinstance(obj, dsl.CompiledBrick):
+    """Translate a NATIVE brick (pops.* object) into a NativeBrick descriptor for the @p role slot.
+    An already-compiled DSL brick (CompiledBrick) passes through unchanged (after slot check)."""
+    from .physics.bricks import CompiledBrick, NativeBrick
+    if isinstance(obj, CompiledBrick):
         if obj.kind != role:
             raise ValueError("pops.CompositeModel: DSL brick of type %r placed in the %r slot"
                              % (obj.kind, role))
         return obj
     if role == "hyperbolic":
         if isinstance(obj, ExB):
-            return dsl.NativeBrick("pops::ExBVelocity", "hyperbolic", fields={"B0": obj.B0},
+            return NativeBrick("pops::ExBVelocity", "hyperbolic", fields={"B0": obj.B0},
                                    var_names=["n"], n_vars=1, prim_names=["n"])
         if isinstance(obj, CompressibleFlux):
             g = float(getattr(obj, "gamma", 1.4))
-            return dsl.NativeBrick("pops::CompressibleFlux", "hyperbolic", fields={"gamma": g},
+            return NativeBrick("pops::CompressibleFlux", "hyperbolic", fields={"gamma": g},
                                    var_names=["rho", "rho_u", "rho_v", "E"], n_vars=4,
                                    prim_names=["rho", "u", "v", "p"], gamma=g)
         if isinstance(obj, IsothermalFlux):
             cs2 = float(getattr(obj, "cs2", 1.0))
-            return dsl.NativeBrick("pops::IsothermalFlux", "hyperbolic", fields={"cs2": cs2},
+            return NativeBrick("pops::IsothermalFlux", "hyperbolic", fields={"cs2": cs2},
                                    var_names=["rho", "rho_u", "rho_v"], n_vars=3,
                                    prim_names=["rho", "u", "v"])
         raise ValueError("pops.CompositeModel transport: ExB | CompressibleFlux | IsothermalFlux "
                          "(native) or dsl.HyperbolicBrick(...).compile()")
     if role == "source":
         if isinstance(obj, NoSource):
-            return dsl.NativeBrick("pops::NoSource", "source", min_vars=1)
+            return NativeBrick("pops::NoSource", "source", min_vars=1)
         if isinstance(obj, PotentialForce):
-            return dsl.NativeBrick("pops::PotentialForce", "source", fields={"qom": obj.charge},
+            return NativeBrick("pops::PotentialForce", "source", fields={"qom": obj.charge},
                                    min_vars=3)
         if isinstance(obj, GravityForce):
-            return dsl.NativeBrick("pops::GravityForce", "source", min_vars=3)
+            return NativeBrick("pops::GravityForce", "source", min_vars=3)
         if isinstance(obj, MagneticLorentzForce):
             # n_aux=4: the brick reads B_z (canonical aux channel 3) -> the composite sizes the aux.
-            return dsl.NativeBrick("pops::MagneticLorentzForce", "source",
+            return NativeBrick("pops::MagneticLorentzForce", "source",
                                    fields={"qom": obj.charge}, min_vars=3, n_aux=4)
         if isinstance(obj, PotentialMagneticForce):
             # NESTED fields of CompositeSource (public members a / b): the NativeBrick emit
             # writes `a.qom = ...; b.qom = ...;` in the constructor of the derived struct.
-            return dsl.NativeBrick(
+            return NativeBrick(
                 "pops::CompositeSource<pops::PotentialForce, pops::MagneticLorentzForce>", "source",
                 fields={"a.qom": obj.charge, "b.qom": obj.charge}, min_vars=3, n_aux=4)
         raise ValueError("pops.CompositeModel source: NoSource | PotentialForce | GravityForce | "
@@ -672,13 +673,13 @@ def _native_to_brick(obj, role):
                          "dsl.SourceBrick(...).compile()")
     if role == "elliptic":
         if isinstance(obj, ChargeDensity):
-            return dsl.NativeBrick("pops::ChargeDensity", "elliptic", fields={"q": obj.charge},
+            return NativeBrick("pops::ChargeDensity", "elliptic", fields={"q": obj.charge},
                                    min_vars=1)
         if isinstance(obj, BackgroundDensity):
-            return dsl.NativeBrick("pops::BackgroundDensity", "elliptic",
+            return NativeBrick("pops::BackgroundDensity", "elliptic",
                                    fields={"alpha": obj.alpha, "n0": obj.n0}, min_vars=1)
         if isinstance(obj, GravityCoupling):
-            return dsl.NativeBrick("pops::GravityCoupling", "elliptic",
+            return NativeBrick("pops::GravityCoupling", "elliptic",
                                    fields={"sign": obj.sign, "four_pi_G": obj.four_pi_G,
                                            "rho0": obj.rho0}, min_vars=1)
         raise ValueError("pops.CompositeModel elliptic: ChargeDensity | BackgroundDensity | "
@@ -704,15 +705,16 @@ def CompositeModel(transport, source, elliptic, name="hybrid"):
 
     Returns an pops.dsl.HybridModel; call .compile(backend="aot") for a CompiledModel pluggable
     via System.add_equation. (Prototype: only the 'aot' backend is wired.)"""
-    from . import dsl
+    from .physics.bricks import CompiledBrick
+    from .physics.hybrid import HybridModel
     tr = _native_to_brick(transport, "hyperbolic")
     sr = _native_to_brick(source, "source")
     el = _native_to_brick(elliptic, "elliptic")
-    if not any(isinstance(b, dsl.CompiledBrick) for b in (tr, sr, el)):
+    if not any(isinstance(b, CompiledBrick) for b in (tr, sr, el)):
         raise ValueError(
             "pops.CompositeModel: all-native composition; use pops.Model(...) (ModelSpec) for "
             "a 100% native model. CompositeModel is for MIXING native + DSL in a single model.")
-    return dsl.HybridModel(tr, sr, el, name=name)
+    return HybridModel(tr, sr, el, name=name)
 
 
 # --- Elliptic model (EPM): Poisson = a composable instance ------------
@@ -1314,12 +1316,12 @@ class CondensedSchur:
         if magnetic_field == "B_z":
             self.bz_aux_component = -1  # canonical channel (default, bit-identical)
         else:
-            from . import dsl as _dsl
-            if magnetic_field not in _dsl.AUX_CANONICAL:
+            from .physics.aux import AUX_CANONICAL
+            if magnetic_field not in AUX_CANONICAL:
                 raise ValueError(
                     "CondensedSchur: magnetic_field=%r unknown (canonical aux fields: %s)"
-                    % (magnetic_field, sorted(_dsl.AUX_CANONICAL)))
-            self.bz_aux_component = int(_dsl.AUX_CANONICAL[magnetic_field])
+                    % (magnetic_field, sorted(AUX_CANONICAL)))
+            self.bz_aux_component = int(AUX_CANONICAL[magnetic_field])
         if potential != "phi":
             raise ValueError(
                 "CondensedSchur: potential=%r not configurable (the source stage solves the "
@@ -1521,7 +1523,10 @@ class System:
         'production' -> add_native_block). On backend 'prototype'/'aot' (the .so ABI does not carry
         evolve) an evolve=False is REJECTED explicitly -> use a native block (add_background).
         """
-        from . import dsl  # late import (dsl imports this module: avoid the import cycle)
+        # Late imports (the codegen/physics modules import this package: avoid the cycle).
+        from .codegen.abi import check_compiled_matches_module
+        from .codegen.loader import CompiledModel
+        from .physics.aux import AUX_NAMED_BASE
 
         spatial = spatial if spatial is not None else Spatial()
         time = time if time is not None else Explicit()
@@ -1591,7 +1596,7 @@ class System:
                 "pops.Model(...) (-> add_block). The compiled model (.so) ABI does not carry "
                 "them; use a native pops.Model(...).")
 
-        if not isinstance(model, dsl.CompiledModel):
+        if not isinstance(model, CompiledModel):
             raise TypeError("add_equation: model must be an pops.Model(...) (ModelSpec) or a "
                             "CompiledModel (m.compile(...)); got %r" % type(model).__name__)
 
@@ -1607,7 +1612,7 @@ class System:
         # Consumed by set_aux_field / aux_field. add_compiled_block / add_native_block / add_dynamic_block
         # have already widened the aux channel (pops_compiled_naux -> ensure_aux_width), so the component exists.
         extra = list(getattr(compiled, "aux_extra_names", []) or [])
-        self._aux_field_index[name] = {nm: dsl.AUX_NAMED_BASE + k for k, nm in enumerate(extra)}
+        self._aux_field_index[name] = {nm: AUX_NAMED_BASE + k for k, nm in enumerate(extra)}
 
         backend = compiled.backend
         # Numerical flux guard: HLLC/Roe require a pressure -> the generated brick emits
@@ -1735,7 +1740,7 @@ class System:
                     "add_equation: wave_speed_cache not supported on backend 'production' (the "
                     "add_native_block ABI does not carry the HLL wave speed cache; it would be silently "
                     "ignored). Use a composed native model pops.Model(...) -> add_block.")
-            dsl.check_compiled_matches_module(getattr(compiled, "abi_key", ""))
+            check_compiled_matches_module(getattr(compiled, "abi_key", ""))
             gamma = compiled.gamma if compiled.gamma is not None else 1.4
             self._s.add_native_block(name, compiled.so_path, spatial.limiter, spatial.flux,
                                      spatial.recon, time.kind, gamma, nsub, evolve, nstride,
@@ -1886,10 +1891,12 @@ class System:
         the compiled time Program, which drives the step (the per-instance ``time`` is not the stepper;
         cf. compile_problem). A runtime-param instance must therefore use an AOT-compatible
         ``time`` (the default pops.Explicit() == SSPRK2 is fine; euler/ssprk3 raise at add_equation)."""
-        from . import dsl  # late import (dsl <-> __init__ cycle)
-        if isinstance(model, (ModelSpec, dsl.CompiledModel)):
+        # Late imports (the codegen/physics modules import this package: avoid the cycle).
+        from .codegen.loader import CompiledModel
+        from .physics.facade import Model
+        if isinstance(model, (ModelSpec, CompiledModel)):
             return model
-        if isinstance(model, dsl.Model):
+        if isinstance(model, Model):
             has_runtime = any(getattr(p, "kind", "const") == "runtime"
                               for p in model.params.values())
             return model.compile(backend="aot" if has_runtime else "production")
@@ -1901,9 +1908,9 @@ class System:
         from the model's emitted capabilities (CompiledModel.has_hllc / has_roe / has_wave_speeds);
         a composed native pops.Model(...) carries the capability in its bricks (the C++ requires-gate
         is the backstop), so we only gate the compiled (.so) path here."""
-        from . import dsl  # late import (dsl <-> __init__ cycle)
+        from .codegen.loader import CompiledModel  # late import (codegen <-> __init__ cycle)
         flux = getattr(spatial, "flux", "rusanov")
-        if not isinstance(model, dsl.CompiledModel):
+        if not isinstance(model, CompiledModel):
             return  # native composed model: the C++ requires-gate validates at first use
         if flux == "hllc" and not (getattr(model, "has_hllc", False)
                                    or "p" in getattr(model, "prim_names", [])):
@@ -2013,7 +2020,7 @@ class System:
         their dedicated paths (B_z -> set_magnetic_field, T_e -> set_electron_temperature_from, phi/grad
         derived by solve_fields). Otherwise look it up in the block table (filled at add_equation from
         the compiled model). Raises ValueError with an actionable message on unknown block/name."""
-        from . import dsl  # late import (dsl <-> __init__ cycle)
+        from .physics.aux import AUX_CANONICAL  # late import (physics <-> __init__ cycle)
         if name == "B_z":
             raise ValueError(
                 "set_aux_field: 'B_z' (magnetic field) is set via sim.set_magnetic_field(Bz), "
@@ -2022,7 +2029,7 @@ class System:
             raise ValueError(
                 "set_aux_field: 'T_e' (electron temperature) is DERIVED from a fluid block via "
                 "sim.set_electron_temperature_from(block), NOT set via set_aux_field.")
-        if name in dsl.AUX_CANONICAL:
+        if name in AUX_CANONICAL:
             raise ValueError(
                 "set_aux_field: '%s' is a CANONICAL aux field (derived by the solver, not settable); "
                 "set_aux_field only carries the NAMED fields declared by m.aux_field(...)." % name)
@@ -2147,9 +2154,10 @@ class System:
         - CompiledCoupledSource (pops.dsl.CoupledSource(...).compile(...)) -> GENERIC source described in
           formulas, carried as bytecode and interpreted on the C++ side (System.add_coupled_source; no
           per-cell Python callback, MPI-safe)."""
-        from . import dsl  # late import (dsl imports this module: avoid the import cycle)
+        # Late import (the multispecies module imports this package: avoid the cycle).
+        from .physics.multispecies import CompiledCoupledSource
 
-        if isinstance(coupling, dsl.CompiledCoupledSource):
+        if isinstance(coupling, CompiledCoupledSource):
             self._s.add_coupled_source(coupling.in_blocks, coupling.in_roles, coupling.consts,
                                        coupling.out_blocks, coupling.out_roles, coupling.prog_ops,
                                        coupling.prog_args, coupling.prog_lens,
@@ -2721,8 +2729,8 @@ def capabilities():
     combinations outside the matrix raise an explicit error on the C++ side (never a silent ignore).
     """
     from . import _pops as _pops_mod  # ADC-291: read the aux limit from the SINGLE C++ source
-    from . import dsl as _dsl_caps  # fallback mirror (no second hardcoded literal)
-    aux_max_extra = int(getattr(_pops_mod, "__aux_max_extra__", _dsl_caps.AUX_NAMED_MAX))
+    from .physics.aux import AUX_NAMED_MAX  # fallback mirror (no second hardcoded literal)
+    aux_max_extra = int(getattr(_pops_mod, "__aux_max_extra__", AUX_NAMED_MAX))
     return {
         # Spatial dimension of the core (ADC-294 / ADR-0001 Decision 1). The solver is structurally
         # 2D: a load-bearing invariant baked into the data layout (Fab2D operator()(i, j, c)), the
@@ -3290,7 +3298,9 @@ class AmrSystem:
         @p time: pops.Explicit (default) or pops.IMEX (implicit stiff source). @p substeps: overrides
         time.substeps.
         """
-        from . import dsl  # late import (dsl imports this module: avoid the import cycle)
+        # Late imports (the codegen/physics modules import this package: avoid the cycle).
+        from .codegen.loader import CompiledModel
+        from .physics.aux import AUX_NAMED_BASE
 
         spatial = spatial if spatial is not None else Spatial()
         time = time if time is not None else Explicit()
@@ -3357,7 +3367,7 @@ class AmrSystem:
                               getattr(spatial, "positivity_floor", 0.0))  # Zhang-Shu floor (ADC-259)
             return
 
-        if not isinstance(model, dsl.CompiledModel):
+        if not isinstance(model, CompiledModel):
             raise TypeError("AmrSystem.add_equation: model must be an pops.Model(...) (ModelSpec) "
                             "or a CompiledModel (m.compile(...)); received %r" % type(model).__name__)
 
@@ -3433,8 +3443,8 @@ class AmrSystem:
         # PRE-DLOPEN guard at attach (covers the cache HIT, cf. System.add_equation): module
         # _pops stale vs .so compiled against the up-to-date headers -> actionable error, not a dlopen
         # 'symbol not found' cryptic message.
-        from . import dsl as _dsl_guard
-        _dsl_guard.check_compiled_matches_module(getattr(compiled, "abi_key", ""))
+        from .codegen.abi import check_compiled_matches_module
+        check_compiled_matches_module(getattr(compiled, "abi_key", ""))
         gamma = compiled.gamma if compiled.gamma is not None else 1.4
         self._s.add_native_block(name, compiled.so_path, spatial.limiter, spatial.flux,
                                  spatial.recon, time.kind, gamma, nsub,
@@ -3443,14 +3453,14 @@ class AmrSystem:
         # AUX_NAMED_BASE + k), so set_aux_field(block, name, array) can resolve name -> component.
         extra = list(getattr(compiled, "aux_extra_names", []) or [])
         if extra:
-            self._aux_field_index[name] = {nm: dsl.AUX_NAMED_BASE + k for k, nm in enumerate(extra)}
+            self._aux_field_index[name] = {nm: AUX_NAMED_BASE + k for k, nm in enumerate(extra)}
 
     def _resolve_aux_field(self, block, name):
         """Resolve (block, named aux field) -> aux channel component (ADC-291). Mirror of
         System._resolve_aux_field: a canonical name is redirected to its dedicated path; an unknown
         block or an undeclared field raises (no silent component-0 fallback)."""
-        from . import dsl
-        if name in dsl.AUX_CANONICAL:
+        from .physics.aux import AUX_CANONICAL
+        if name in AUX_CANONICAL:
             if name == "B_z":
                 raise ValueError(
                     "set_aux_field: 'B_z' (magnetic field) is set via sim.set_magnetic_field(Bz), "
@@ -3493,9 +3503,10 @@ class AmrSystem:
         constant -> dt bound dt <= cfl/mu; Expr -> PER-CELL frequency mu(U) evaluated on the COARSE grid at
         each step_cfl (the freq_prog_* vectors are forwarded). Must be called BEFORE the first
         step (the source is frozen then injected at the lazy build of the runtime engine)."""
-        from . import dsl  # late import (dsl imports this module: avoid the import cycle)
+        # Late import (the multispecies module imports this package: avoid the cycle).
+        from .physics.multispecies import CompiledCoupledSource
 
-        if isinstance(coupling, dsl.CompiledCoupledSource):
+        if isinstance(coupling, CompiledCoupledSource):
             self._s.add_coupled_source(coupling.in_blocks, coupling.in_roles, coupling.consts,
                                        coupling.out_blocks, coupling.out_roles, coupling.prog_ops,
                                        coupling.prog_args, coupling.prog_lens,
@@ -3554,29 +3565,21 @@ from . import model  # noqa: E402  (pops.model operator-first type system; pure 
 from . import math  # noqa: E402  (pops.math board operators; pure stdlib, Spec 3, dsl lazy)
 from . import lib  # noqa: E402  (pops.lib typed-brick descriptor catalog; pure stdlib, Spec 3)
 from . import physics  # noqa: E402  (pops.physics board model authoring; numpy-free import, Spec 3)
-from . import library  # noqa: E402  (pops.compile_library brick-manifest layer; numpy-free, Spec 3)
-from .library import (  # noqa: E402,F401  (re-export: brick-library manifest API, Spec 3 section 21)
+from .codegen.library import (  # noqa: E402,F401  (re-export: brick-library manifest API, Spec 3 section 21)
     LibraryManifest, compile_library, read_library_manifest)
 from .time import CompiledTime  # noqa: E402,F401  (re-export: compiled-Program time policy)
 
 
-# LAZY pops.dsl (PEP 562): dsl.py does `import numpy` at module level (host evaluator of the
-# prototype). The eager import made numpy mandatory for the ENTIRE `import pops`, whereas the
-# native path (System/add_block) and the production backend do not need it. With this
-# __getattr__, `pops.dsl.Model(...)` and `from pops import dsl` work identically, but numpy
-# is required ONLY AT the first use of the DSL -- and its absence gives a targeted message (doctor too).
+# LAZY pops.compile_problem / pops.CompiledProblem (PEP 562): the codegen engine pulls numpy at
+# import (host evaluator of the prototype IR), whereas the native path (System/add_block) and the
+# production backend do not need it. Exposing these top-level names LAZILY keeps `import pops`
+# numpy-free until the DSL/compile path is first used; numpy's absence then gives a targeted message
+# (doctor too).
 def __getattr__(name):
-    if name == "dsl":
-        import importlib
-        try:
-            return importlib.import_module(".dsl", __name__)
-        except ImportError as exc:
-            raise ImportError(
-                "pops.dsl requires numpy in this interpreter (host evaluator of the DSL): "
-                "`pip install numpy` / `conda install numpy`. The rest of pops (System, add_block) "
-                "works without it. Cause: %s" % exc) from exc
-    # pops.compile_problem / pops.CompiledProblem live in pops.dsl (which imports numpy); expose them at
-    # the top level LAZILY so `import pops` stays numpy-free until the DSL/compile path is first used.
-    if name in ("compile_problem", "CompiledProblem"):
-        return getattr(__getattr__("dsl"), name)
+    if name == "compile_problem":
+        from .codegen.compile import compile_problem
+        return compile_problem
+    if name == "CompiledProblem":
+        from .codegen.loader import CompiledProblem
+        return CompiledProblem
     raise AttributeError("module %r has no attribute %r" % (__name__, name))

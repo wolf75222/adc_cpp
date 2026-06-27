@@ -23,6 +23,8 @@ import tempfile
 import numpy as np
 
 import pops
+from pops.ir.ops import sqrt
+from pops.physics.facade import Model
 
 INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "include"))
 
@@ -30,7 +32,7 @@ INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "i
 def _build_iso(cs2_kind, cs2_value=1.0):
     """Modele isotherme 2D (rho, rho_u, rho_v) avec p = cs2 * rho. @p cs2_kind = 'runtime' | 'const'.
     Le SEUL parametre est cs2 : un meme modele a deux variantes (cs2 runtime vs cs2 const)."""
-    m = pops.dsl.Model("iso")
+    m = Model("iso")
     rho, mx, my = m.conservative_vars("rho", "rho_u", "rho_v")
     cs2 = m.param("cs2", cs2_value, kind=cs2_kind)
     u = m.primitive("u", mx / rho)
@@ -39,7 +41,7 @@ def _build_iso(cs2_kind, cs2_value=1.0):
     m.primitive_vars(rho=rho, u=u, v=v, p=p)
     m.conservative_from([rho, rho * u, rho * v])
     m.flux(x=[mx, mx * u + p, my * u], y=[my, mx * v, my * v + p])
-    cs = pops.dsl.sqrt(cs2)
+    cs = sqrt(cs2)
     m.eigenvalues(x=[u - cs, u, u + cs], y=[v - cs, v, v + cs])
     return m
 

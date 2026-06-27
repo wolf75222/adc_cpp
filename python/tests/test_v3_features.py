@@ -24,7 +24,9 @@ import tempfile
 import numpy as np
 
 import pops
-from pops import dsl
+from pops.ir.ops import sqrt
+from pops.physics.facade import Model
+from pops.physics.multispecies import CoupledSource
 
 fails = 0
 INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "include"))
@@ -59,7 +61,7 @@ sim.add_block("a", iso_model(+1.0), spatial=pops.FiniteVolume(limiter="minmod"))
 sim.add_block("b", iso_model(-1.0), spatial=pops.FiniteVolume(limiter="minmod"))
 sim.set_density("a", gaussian(n).ravel())
 sim.set_density("b", gaussian(n).ravel())
-src = dsl.CoupledSource("friction").frequency(500.0)  # mu = 500 -> dt = 0.4/500 = 8e-4 << transport
+src = CoupledSource("friction").frequency(500.0)  # mu = 500 -> dt = 0.4/500 = 8e-4 << transport
 na = src.block("a").role("density")
 k = src.param("k", 1e-3)
 src.add_pair("a", "b", role="density", expr=k * na)
@@ -70,7 +72,7 @@ chk(sim.last_dt_bound() == "coupled_source:friction",
     f"borne active = coupled_source:friction (recu {sim.last_dt_bound()!r})")
 # Pas de BORNE FANTOME (revue vague 3) : un couplage REJETE (role absent du bloc) ne doit laisser
 # AUCUNE frequence enregistree -- sinon le pas serait bride par une physique inexistante.
-ghost = dsl.CoupledSource("ghost").frequency(5000.0)  # 0.4/5000 = 8e-5 << 8e-4 si fantome
+ghost = CoupledSource("ghost").frequency(5000.0)  # 0.4/5000 = 8e-5 << 8e-4 si fantome
 ng = ghost.block("a").role("density")
 kg = ghost.param("kg", 1e-3)
 ghost.add_pair("a", "b", role="energy", expr=kg * ng)  # isotherme : pas de role Energy -> rejet C++
@@ -177,13 +179,13 @@ if not cxx or not os.path.isdir(INCLUDE):
 
 
 def iso3_dsl(name, hllc=False, jac=False):
-    m = dsl.Model(name)
+    m = Model(name)
     rho, mx, my = m.conservative_vars("rho", "mx", "my", roles=["Density", "MomentumX", "MomentumY"])
     cs2 = 0.5
     u = m.primitive("u", mx / rho)
     v = m.primitive("v", my / rho)
     m.primitive("p", cs2 * rho)
-    c = dsl.sqrt(cs2)
+    c = sqrt(cs2)
     m.flux(x=[mx, mx * u + cs2 * rho, mx * v], y=[my, my * u, my * v + cs2 * rho])
     m.eigenvalues(x=[u - c, u, u + c], y=[v - c, v, v + c])
     m.primitive_vars(rho, u, v)

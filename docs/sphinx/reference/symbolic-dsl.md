@@ -1,18 +1,18 @@
-# Reference: the symbolic DSL (pops.dsl)
+# Reference: the symbolic DSL (pops.physics + pops.ir)
 
-The `pops.dsl` DSL lets you write a model's physics as a tree of symbolic
-expressions (the Python operators `+ - * / ** -` and `dsl.sqrt` build the tree, not a
+The symbolic DSL lets you write a model's physics as a tree of symbolic
+expressions (the Python operators `+ - * / ** -` and `pops.ir.ops.sqrt` build the tree, not a
 function called per cell), which the DSL translates into compilable C++ then compiles into a `.so`
-attachable to an `pops.System` / `pops.AmrSystem`. Two entry points: `pops.dsl.Model(name)`,
+attachable to an `pops.System` / `pops.AmrSystem`. Two entry points: `pops.physics.facade.Model(name)`,
 the recommended stable facade (pure sugar, composition of a private `HyperbolicModel` `_m`), and
-`pops.dsl.HyperbolicModel(name)`, the lower-level backend object (`set_*` naming, always
+`pops.physics.model.HyperbolicModel(name)`, the lower-level backend object (`set_*` naming, always
 usable directly). Both expose `compile()`. This page is the canonical registry of the
 DSL. Source: [python/pops/dsl.py](https://github.com/wolf75222/adc_cpp/blob/master/python/pops/dsl.py) ;
 design: [DSL_MODEL_DESIGN.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/DSL_MODEL_DESIGN.md).
 
 ## Declaring a model
 
-All the methods below are on the `pops.dsl.Model` facade. They delegate to
+All the methods below are on the `pops.physics.facade.Model` facade. They delegate to
 `HyperbolicModel` (implicit right column). `flux`, `eigenvalues`, `source`, `elliptic_rhs`
 map one to one to the functions of the `pops::PhysicalModel` concept read by the core.
 
@@ -277,7 +277,7 @@ m.projection([rho, (rhou + abs_(rhou)) / 2, ...])   # ex. plancher de positivite
   couplings; never per RK stage, including under Strang), on the valid cells only (ghosts are rebuilt
   by the next step).
 - **Contract**: `P` must be idempotent (a true projection) and pointwise (no neighbor). Write the
-  clamps BRANCH-FREE in max/min via `dsl.abs_` / `dsl.sign` (differentiable through `dsl.diff`), e.g.
+  clamps BRANCH-FREE in max/min via `pops.ir.ops.abs_` / `pops.ir.ops.sign` (differentiable through `pops.ir.lowering.diff`), e.g.
   positivity `(q + abs_(q)) / 2`.
 - **Where it runs**: backends `aot` and `production`, on BOTH `pops.System` and `pops.AmrSystem` -- on
   AMR (ADC-312) the projection is applied per level after the reflux and cascade, so the conservative
@@ -286,7 +286,7 @@ m.projection([rho, (rhou + abs_(rhou)) / 2, ...])   # ex. plancher de positivite
 
 ### Eigenvalue spectrum predicates
 
-`pops.dsl` exposes scalar `Expr` nodes built from the spectrum of a SMALL dense matrix assembled from
+`pops.ir.ops` exposes scalar `Expr` nodes built from the spectrum of a SMALL dense matrix assembled from
 expressions (a Jacobian sub-block, a companion matrix...). The matrix is `rows`, a list of `k` rows
 of `k` `Expr` (row-major, `k <= 16`), diagonalized device-clean by `pops::real_eig_minmax`
 (`dense_eig.hpp`). They are designed for the branch-free `m.projection`: a test like "if the spectrum
@@ -336,7 +336,7 @@ g   = m.param("gamma", 1.4)                   # const : inline + set_gamma
 cs2 = m.param("cs2", 1.0, kind="runtime")     # runtime: params.get(0), overwritable (aot)
 ```
 
-`pops.dsl.RuntimeParam(name, value)` is sugar equivalent to `Param(name, value, kind="runtime")`.
+`pops.physics.model.RuntimeParam(name, value)` is sugar equivalent to `Param(name, value, kind="runtime")`.
 
 ```{note}
 On `HyperbolicModel`, these declarators carry the `set_` prefix (`set_flux`, `set_eigenvalues`,
@@ -362,9 +362,9 @@ Every formula is a tree of `Expr`. The leaves are `Var`, `Const`, `Param`, `Runt
 
 Python scalars (`int` / `float`) are auto-promoted to `Const(float(o))` (via `_wrap`). A
 `Param` is promoted by its inner node (`Const` for const, `RuntimeParamRef` for runtime), so
-`dsl.sqrt(param_runtime)` correctly emits `params.get(...)` and not the frozen value.
+`pops.ir.ops.sqrt(param_runtime)` correctly emits `params.get(...)` and not the frozen value.
 
-`dsl.sqrt(x)` (-> `std::sqrt(...)`) is the only named math function of the algebra. Everything
+`pops.ir.ops.sqrt(x)` (-> `std::sqrt(...)`) is the only named math function of the algebra. Everything
 else goes through the operators : for a square or a root you write `x*x` or `x**0.5`.
 
 What is not supported, on purpose :
@@ -432,7 +432,7 @@ at runtime, and not a `device=` argument frozen at compile time.
 ### Hybrid models (native + DSL)
 
 You can mix native bricks and partial DSL bricks in a single model via
-`pops.CompositeModel(transport, source, elliptic)`, which returns a `dsl.HybridModel` ; its
+`pops.CompositeModel(transport, source, elliptic)`, which returns a `pops.physics.hybrid.HybridModel` ; its
 `.compile(backend="aot")` returns a `CompiledModel` attachable via `add_equation`. At least one slot must
 be a DSL brick (otherwise use `pops.Model(...)`). Brick catalog and example :
 [brick reference](native-bricks.md).
@@ -470,7 +470,7 @@ already holds it. You attach via `System.add_equation(name, compiled, ...)`, whi
 
 ## Inter-species coupled sources (CoupledSource)
 
-`pops.dsl.CoupledSource` describes an arbitrary inter-species exchange in formulas (beyond the named
+`pops.physics.multispecies.CoupledSource` describes an arbitrary inter-species exchange in formulas (beyond the named
 Ionization / Collision / ThermalExchange couplings). It compiles into flat bytecode (stack machine, no
 `.so`, no per-cell Python callback) interpreted in a device `for_each_cell`. Applied in
 explicit splitting, after the transport.
@@ -499,9 +499,9 @@ C++ boundary : 32 registers (inputs + constants), 16 source terms, 256 opcodes p
 (-> `System.add_coupled_source`).
 
 ```python
-from pops import dsl
+import pops
 
-src = dsl.CoupledSource("ionization")
+src = pops.physics.multispecies.CoupledSource("ionization")
 ne = src.block("electrons").role("density")
 ni = src.block("ions").role("density")
 ng = src.block("neutrals").role("density")
@@ -546,12 +546,11 @@ requires pops headers and a C++ compiler ; without them, `compile` raises.
 ```python
 import numpy as np
 import pops
-from pops import dsl
 
 GAMMA = 1.4
 
 def build_euler_poisson():
-    m = dsl.Model("euler_poisson")
+    m = pops.physics.facade.Model("euler_poisson")
     rho, rhou, rhov, E = m.conservative_vars(
         "rho", "rho_u", "rho_v", "E",
         roles=["Density", "MomentumX", "MomentumY", "Energy"])
@@ -560,7 +559,7 @@ def build_euler_poisson():
     v = m.primitive("v", rhov / rho)
     p = m.primitive("p", (g - 1.0) * (E - 0.5 * rho * (u*u + v*v)))
     H = (E + p) / rho
-    c = dsl.sqrt(g * p / rho)
+    c = pops.ir.ops.sqrt(g * p / rho)
     m.flux(x=[rhou, rhou*u + p, rhou*v, rho*H*u],
            y=[rhov, rhov*u, rhov*v + p, rho*H*v])
     m.eigenvalues(x=[u-c, u, u+c], y=[v-c, v, v+c])
@@ -602,7 +601,7 @@ require a primitive named `p`.
 ## Pitfalls
 
 1. **Two `Model`**. `pops.Model(state, transport, source, elliptic)` (in `__init__.py`) composes
-   pre-compiled native bricks (`ModelSpec`) ; `pops.dsl.Model(name)` writes symbolic
+   pre-compiled native bricks (`ModelSpec`) ; `pops.physics.facade.Model(name)` writes symbolic
    formulas. Different signatures and files.
 2. **`flux` vs `eval_flux`**. `m.flux(x=, y=)` declares ; `m.eval_flux(U, aux, dir)` evaluates (numpy).
    Distinct methods. On `HyperbolicModel`, the collision is resolved the other way :

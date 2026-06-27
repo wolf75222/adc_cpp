@@ -16,7 +16,8 @@ Run with python3 (PYTHONPATH = built pops package).
 """
 import numpy as np
 
-from pops import dsl
+from pops.ir.expr import Var
+from pops.physics.facade import Model
 
 # Golden hashes computed on master BEFORE this feature (build() / build(with_source=False)
 # below). The feature must NOT perturb the cache key of a model that uses only m.source(...).
@@ -29,7 +30,7 @@ def build(with_source=True):
 
     Mirrors the golden computed on master with only m.source(...); used to assert the named-source
     feature leaves the existing cache key untouched."""
-    m = dsl.Model("es3")
+    m = Model("es3")
     rho, mx, my = m.conservative_vars("rho", "rho_u", "rho_v")
     gx = m.aux("grad_x")
     gy = m.aux("grad_y")
@@ -42,7 +43,7 @@ def build(with_source=True):
 
 def base_model():
     """3-variable carrier with primitives and aux declared (rho, rho_u, rho_v; u, v; grad, B_z)."""
-    m = dsl.Model("nm")
+    m = Model("nm")
     rho, mx, my = m.conservative_vars("rho", "rho_u", "rho_v")
     u = m.primitive("u", mx / rho)
     v = m.primitive("v", my / rho)
@@ -143,8 +144,8 @@ def test_old_stepper_multiple_named_sources():
 def test_source_term_default_equiv_source():
     a = build(with_source=True)
     b = build(with_source=False)
-    rho = dsl.Var("rho", "cons")
-    gx, gy = dsl.Var("grad_x", "aux"), dsl.Var("grad_y", "aux")
+    rho = Var("rho", "cons")
+    gx, gy = Var("grad_x", "aux"), Var("grad_y", "aux")
     b.source_term("default", [0.0 * rho, -rho * gx, -rho * gy])
     assert b._model_hash() == a._model_hash() == GOLDEN_WITH_SOURCE
     print("OK  9. source_term('default', ...) == m.source(...) (same cache key)")

@@ -57,6 +57,6 @@ What the key calls do:
 - `set_density(name, arr2d)` sets a contiguous `(n, n)` array; `step_cfl(cfl)` advances one step
   at the given CFL; `density(name)` / `mass(name)` / `time()` read the state.
 
-To move from the model composed of bricks to the model written in formulas (DSL `pops.dsl.Model`),
+To move from the model composed of bricks to the model written in formulas (DSL `pops.physics.facade.Model`),
 to adaptive refinement (`pops.AmrSystem`), to the figures and the GIF, follow the
 [A->Z tutorial](tutorial.md).

@@ -37,8 +37,8 @@ import tempfile
 import numpy as np
 
 import pops
-from pops import dsl
-from pops.moments import (bgk_source, build_moment_model, gaussian_closure,
+from pops.codegen.toolchain import _default_cxx
+from pops.lib.moments import (bgk_source, build_moment_model, gaussian_closure,
                          lorentz_sources, maxwellian_moments, moment_indices,
                          moment_names)
 
@@ -293,7 +293,7 @@ chk("order >= 2" in msg, f"order=1 refuse ({msg[:42]}...)")
 msg = err_msg(lambda: build_moment_model("bad2", 2, lambda S: {"S30": 0.0}))
 chk("S30" in msg, f"fermeture incomplete refusee ({msg[:42]}...)")
 
-cxx = dsl._default_cxx(None)
+cxx = _default_cxx(None)
 if not cxx:
     print("pas de compilateur C++ : test (9) saute")
     print("FAILS =", fails)

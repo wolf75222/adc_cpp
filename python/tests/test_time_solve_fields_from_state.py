@@ -39,7 +39,8 @@ try:
     import numpy as np
 
     import pops
-    from pops import dsl
+    from pops.ir.ops import sqrt
+    from pops.physics.facade import Model
     from pops import time as adctime
 except Exception as exc:  # noqa: BLE001  -- numpy or _pops unavailable in this interpreter
     _skip("pops/numpy unavailable: %s" % exc)
@@ -65,7 +66,7 @@ def _base_block(m):
     m.primitive_vars(rho=rho, u=u, v=v, p=p)
     m.conservative_from([rho, rho * u, rho * v])
     m.flux(x=[mx, mx * u + p, my * u], y=[my, mx * v, my * v + p])
-    cs = dsl.sqrt(cs2)
+    cs = sqrt(cs2)
     m.eigenvalues(x=[u - cs, u, u + cs], y=[v - cs, v, v + cs])
     m.elliptic_rhs(rho)  # phi depends on rho -> a stage change re-solves a DIFFERENT phi
     gx = m.aux("grad_x")
@@ -76,7 +77,7 @@ def _base_block(m):
 def named_source_model(name="sffs_named"):
     """Default source EMPTY; the electric force (-rho*grad phi) is a NAMED source the Program requests.
     This is the model the compiled Program drives."""
-    m = dsl.Model(name)
+    m = Model(name)
     rho, mx, my, gx, gy = _base_block(m)
     m.source_term("electric", [0.0, -rho * gx, -rho * gy])
     return m
@@ -85,7 +86,7 @@ def named_source_model(name="sffs_named"):
 def default_source_model(name="sffs_default"):
     """Same physics, but the electric force is the model's DEFAULT source, so eval_rhs returns
     -div F + electric directly -- the offline reference reads it that way."""
-    m = dsl.Model(name)
+    m = Model(name)
     rho, mx, my, gx, gy = _base_block(m)
     m.source([0.0, -rho * gx, -rho * gy])
     return m

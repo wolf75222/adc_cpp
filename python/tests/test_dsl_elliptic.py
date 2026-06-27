@@ -8,14 +8,14 @@ import shutil
 import subprocess
 import tempfile
 
-from pops import dsl
+from pops.physics.model import HyperbolicModel
 
 Q = -1.0
 INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "include"))
 
 
 def build_charge():
-    e = dsl.HyperbolicModel("charge")
+    e = HyperbolicModel("charge")
     (rho,) = e.conservative_vars("rho")
     e.set_elliptic_rhs(Q * rho)   # densite de charge f = q n
     return e

@@ -32,7 +32,8 @@ import tempfile
 import numpy as np
 
 import pops
-from pops import dsl
+from pops.codegen.toolchain import _default_cxx
+from pops.physics.facade import Model
 
 fails = 0
 
@@ -122,7 +123,7 @@ msg = err_msg(lambda: amr.add_block("ions", transport_model(),
                                     time=pops.Explicit(method="euler")))
 chk("euler" in msg or "explicit" in msg, f"AmrSystem rejette time='euler' ({msg[:60]}...)")
 
-cxx = dsl._default_cxx(None)
+cxx = _default_cxx(None)
 if not cxx:
     print("pas de compilateur C++ : test (6) saute")
     print("FAILS =", fails)
@@ -133,7 +134,7 @@ INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "i
 
 
 def adv_model():
-    m = dsl.Model("eulprod")
+    m = Model("eulprod")
     q1, q2 = m.conservative_vars("q1", "q2")
     m.flux(x=[1.5 * q1, -0.7 * q2], y=[-0.7 * q1, 1.5 * q2])
     z = 0.0 * q1  # les listes d'eigenvalues attendent des Expr (pas des flottants nus)

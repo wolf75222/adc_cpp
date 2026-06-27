@@ -26,9 +26,10 @@ def _toolchain_or_skip():
     adc_cpp is Kokkos-only: the library ``.so`` MUST be compiled with Kokkos (point
     POPS_KOKKOS_ROOT at an installed Kokkos). A missing toolchain is a clean skip, never a
     fake; we exercise the manifest layer unconditionally above this gate."""
-    dsl = pytest.importorskip("pops.dsl")
+    pytest.importorskip("pops.codegen")
+    from pops.codegen.toolchain import pops_loader_build_flags
     try:
-        return dsl.pops_loader_build_flags()
+        return pops_loader_build_flags()
     except Exception as exc:  # noqa: BLE001  -- no Kokkos / no compiler visible
         pytest.skip("Kokkos loader toolchain unavailable: %s" % str(exc)[:160])
 
@@ -133,12 +134,13 @@ def test_non_production_backend_is_rejected():
 
 # --- compile_problem libraries= seam (validation, no compile) --------------
 def test_compile_problem_rejects_a_corrupt_library():
-    dsl = pytest.importorskip("pops.dsl")
+    pytest.importorskip("pops.codegen")
+    from pops.codegen.compile import compile_problem
     time = pytest.importorskip("pops.time")
     prog = time.Program("p")
     # A corrupt manifest is rejected at the libraries= read, BEFORE the Program is lowered.
     with pytest.raises((KeyError, ValueError, TypeError)):
-        dsl.compile_problem(time=prog, libraries=[{"name": "bad.so"}])
+        compile_problem(time=prog, libraries=[{"name": "bad.so"}])
 
 
 # --- real .so: emit + compile + read back (Kokkos-gated) -------------------
@@ -198,16 +200,17 @@ def test_read_back_rejects_an_abi_mismatch(tmp_path):
     read-back -- never a silent fallback. We forge a .so with a deliberately wrong ABI key by
     compiling with a mismatched POPS_HEADER_SIG, then confirm read_library_manifest rejects it."""
     cc, cflags, lflags = _toolchain_or_skip()
-    dsl = pytest.importorskip("pops.dsl")
+    pytest.importorskip("pops.codegen")
     from pops.codegen.library_codegen import emit_library_cpp
+    from pops.codegen.toolchain import pops_include, _probe_cxx_std, loader_cxx_std
     import os
     import subprocess
     import tempfile
 
     man = pops.compile_library("mismatch.so", objects=_objects())
     src = emit_library_cpp(man)
-    include = dsl.pops_include()
-    eff_std = dsl._probe_cxx_std(cc, dsl.loader_cxx_std())
+    include = pops_include()
+    eff_std = _probe_cxx_std(cc, loader_cxx_std())
     so = str(tmp_path / "mismatch.so")
     with tempfile.TemporaryDirectory() as tmp:
         cpp = os.path.join(tmp, "mismatch.cpp")
@@ -229,7 +232,8 @@ def test_read_back_rejects_an_abi_mismatch(tmp_path):
 # --- consume path: compile_problem(libraries=[.so]) ------------------------
 def test_compile_problem_consumes_a_compiled_library_so(tmp_path):
     cc, cflags, lflags = _toolchain_or_skip()
-    dsl = pytest.importorskip("pops.dsl")
+    pytest.importorskip("pops.codegen")
+    from pops.codegen.compile import compile_problem
     time = pytest.importorskip("pops.time")
     so = str(tmp_path / "consumed.so")
     pops.compile_library("consumed.so", objects=_objects(), emit=True, so_path=so)
@@ -240,7 +244,7 @@ def test_compile_problem_consumes_a_compiled_library_so(tmp_path):
     R = P.rhs(state=U, flux=True, sources=[])
     P.commit("ions", P.linear_combine("U1", U + dt * R))
     try:
-        compiled = dsl.compile_problem(time=P, libraries=[so])
+        compiled = compile_problem(time=P, libraries=[so])
     except RuntimeError as exc:  # .so compile of the PROBLEM failed (toolchain), not the library
         pytest.skip("compile_problem could not build the problem .so: %s" % str(exc)[:160])
     # The validated library manifest is carried on the handle, ABI-matched.

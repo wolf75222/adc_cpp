@@ -1,6 +1,6 @@
 # GPU verification of the generated brick (ROMEO, NVIDIA GH200)
 
-The `pops.dsl` DSL generates a C++ hyperbolic brick (`emit_cpp_brick`) that is already device-ready (`POPS_HD` ->
+The `pops.physics` DSL generates a C++ hyperbolic brick (`emit_cpp_brick`) that is already device-ready (`POPS_HD` ->
 `__host__ __device__` under nvcc, device-safe ops, `std::sqrt` like `pops::Euler`). This document records
 the verification on a REAL GPU: the generated brick `EulerGen` runs in a CUDA kernel and gives the
 same flux as the hand-written `pops::Euler`.

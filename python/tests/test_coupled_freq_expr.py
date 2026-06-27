@@ -19,7 +19,8 @@ import sys
 import numpy as np
 
 import pops
-from pops import dsl
+from pops.ir.expr import Var
+from pops.physics.multispecies import CoupledSource
 
 fails = 0
 
@@ -67,7 +68,7 @@ sim = make_system()
 rho = gaussian(N)
 sim.set_density("a", rho.ravel())
 sim.set_density("b", rho.ravel())
-csrc = dsl.CoupledSource("constfreq").frequency(500.0)  # mu = 500 constante
+csrc = CoupledSource("constfreq").frequency(500.0)  # mu = 500 constante
 na = csrc.block("a").role("density")
 kc = csrc.param("kc", 1e-9)
 csrc.add_pair("a", "b", role="density", expr=kc * na)   # terme benin (la source doit avoir un terme)
@@ -85,7 +86,7 @@ sim2 = make_system()
 rho = gaussian(N)
 sim2.set_density("a", rho.ravel())
 sim2.set_density("b", rho.ravel())
-fsrc = dsl.CoupledSource("freqexpr")
+fsrc = CoupledSource("freqexpr")
 ne = fsrc.block("a").role("density")          # declare le champ (a, density)
 kf = fsrc.param("kf", K)
 fsrc.add_pair("a", "b", role="density", expr=1e-9 * ne)  # terme benin
@@ -117,11 +118,11 @@ chk(rel(dt_c, dt_b / 3.0) < 1e-12, f"borne suivie : dt_c == dt_b/3 ({dt_c:.9e} v
 
 # --- (d) ERREUR : frequence-Expr referencant un (bloc,role) NON declare ----------------------
 print("== (d) frequence-Expr sur un (bloc,role) non declare -> ValueError ==")
-bad = dsl.CoupledSource("bad")
+bad = CoupledSource("bad")
 nb = bad.block("a").role("density")            # seuls (a,density) et (b,density) seront declares
 bad.add_pair("a", "b", role="density", expr=1e-9 * nb)
 # Var construite a la main : 'a::pressure' n'a jamais ete declaree via .block(...).role(...).
-ghost = dsl.Var("a::pressure", "coupled_field")
+ghost = Var("a::pressure", "coupled_field")
 bad.frequency(2.0 * ghost)
 raised = False
 try:
@@ -143,7 +144,7 @@ amr.add_block("e2", iso_model(-1.0), spatial=pops.FiniteVolume(limiter="minmod")
 rho = gaussian(N)
 amr.set_density("e1", rho.ravel())
 amr.set_density("e2", rho.ravel())
-asrc = dsl.CoupledSource("amrfreq")
+asrc = CoupledSource("amrfreq")
 ae = asrc.block("e1").role("density")
 ka = asrc.param("ka", KA)
 asrc.add_pair("e1", "e2", role="density", expr=1e-9 * ae)

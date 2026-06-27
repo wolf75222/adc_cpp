@@ -150,10 +150,11 @@ def test_absent_history_program_lowers(t):
 
 
 # ---- (B) end-to-end AB2 parity: skips unless the full toolchain is present ----
-def _passive_source_model(dsl, name):
+def _passive_source_model(name):
     """A 1-variable model (rho), ZERO flux, default LINEAR source S(rho) = _C*rho (so R = c*rho changes
     every step). A complete compilable block (flux + primitive + eigenvalue + source)."""
-    m = dsl.Model(name)
+    from pops.physics.facade import Model
+    m = Model(name)
     (rho,) = m.conservative_vars("rho")
     u = m.primitive("u", 0.0 * rho)
     m.primitive_vars(rho=rho, u=u)
@@ -193,12 +194,12 @@ def _run_section_b(t):
         print("-- (B) skipped: _pops lacks the install_program binding (rebuild _pops) --")
         return None
 
-    from pops import dsl
+    from pops.physics.facade import Model
 
     P = t.Program("ab2_step")
     t.std.adams_bashforth2(P, "blk")
     try:
-        compiled = pops.compile_problem(model=_passive_source_model(dsl, "ab2_prog"), time=P)
+        compiled = pops.compile_problem(model=_passive_source_model("ab2_prog"), time=P)
     except RuntimeError as exc:  # no compiler / no Kokkos visible / .so compile failed
         print("-- (B) skipped: compile_problem could not build the .so: %s --" % str(exc)[:200])
         return None
@@ -206,7 +207,7 @@ def _run_section_b(t):
     assert compiled.program_name == "ab2_step", "handle carries the program name"
 
     try:
-        compiled_model = _passive_source_model(dsl, "ab2_block").compile(backend="production")
+        compiled_model = _passive_source_model("ab2_block").compile(backend="production")
     except RuntimeError as exc:  # no compiler / no Kokkos visible
         print("-- (B) skipped: model compile could not build the .so: %s --" % str(exc)[:200])
         return None
@@ -258,7 +259,7 @@ def _run_section_c(t):
         print("-- (C) skipped: _pops lacks the install_program binding (rebuild _pops) --")
         return None
 
-    from pops import dsl
+    from pops.physics.facade import Model
 
     # A Program that READS missing.R but NEVER stores it -> the runtime read must fail loud.
     P = t.Program("miss_step")
@@ -268,12 +269,12 @@ def _run_section_c(t):
     P.commit("blk", P.linear_combine(U + P.dt * (R - Rp)))
 
     try:
-        compiled = pops.compile_problem(model=_passive_source_model(dsl, "miss_prog"), time=P)
+        compiled = pops.compile_problem(model=_passive_source_model("miss_prog"), time=P)
     except RuntimeError as exc:
         print("-- (C) skipped: compile_problem could not build the .so: %s --" % str(exc)[:200])
         return None
     try:
-        compiled_model = _passive_source_model(dsl, "miss_block").compile(backend="production")
+        compiled_model = _passive_source_model("miss_block").compile(backend="production")
     except RuntimeError as exc:
         print("-- (C) skipped: model compile could not build the .so: %s --" % str(exc)[:200])
         return None

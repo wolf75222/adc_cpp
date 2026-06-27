@@ -37,7 +37,7 @@ try:
     import numpy as np
 
     import pops
-    from pops import dsl
+    from pops.physics.facade import Model
     from pops import time as adctime
 except Exception as exc:  # noqa: BLE001  -- numpy or _pops unavailable in this interpreter
     _skip("pops/numpy unavailable: %s" % exc)
@@ -58,7 +58,7 @@ def decay_model(name="rhs_decay", c=0.7):
     A complete, compilable production block (zero flux + primitives + zero eigenvalues). flux == 0 so
     -div F == 0 exactly: the only dynamics is the default source, which lets the probe separate the
     flux from the source bit-exactly."""
-    m = dsl.Model(name)
+    m = Model(name)
     (rho,) = m.conservative_vars("rho")
     zero = 0.0 * rho  # null expr (flux / eig do not wrap a bare float)
     m.flux(x=[zero], y=[zero])
@@ -73,7 +73,7 @@ def decay_model_with_named(name="rhs_decay_named", c=0.7, d=0.5):
     """Same zero-flux scalar but with BOTH a default source S = c*rho and a NAMED source 'decay' =
     d*rho. Lets (A) check that named sources axpy onto either base (rhs_into or flux-only) without a
     double-count rejection (the ADC-425 routing makes them sound)."""
-    m = dsl.Model(name)
+    m = Model(name)
     (rho,) = m.conservative_vars("rho")
     zero = 0.0 * rho
     m.flux(x=[zero], y=[zero])

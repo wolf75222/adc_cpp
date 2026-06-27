@@ -74,7 +74,7 @@ silent changes).
 
 ## 6. check_model: generic safeguards
 
-- `dsl.Model.check_model(...)` (formulas, before compilation): flux/source/elliptic finite,
+- `pops.physics.facade.Model.check_model(...)` (formulas, before compilation): flux/source/elliptic finite,
   finite/real eigenvalues, consistency wave_speeds <-> max_wave_speed, round-trip
   to_conservative(to_primitive(U)) ~= U, positivity Density / 'p', reproducible samples.
 - `System.check_model(block)` (runtime, any backend): U finite, residual -div F + S finite, positivity
@@ -148,7 +148,7 @@ still missing.
    `dt <= cfl/mu` applies to the MACRO-step (the couplings are applied once per macro-step,
    not per substep); reason "coupled_source:<label>". Plumbing System AND AmrSystem
    (add_coupled_source(frequency=, label=) -> coupled_freqs_; AmrRuntime::add_coupled_frequency;
-   mono-block step_cfl aggregates it too). DSL: `dsl.CoupledSource(...).frequency(mu)` carried by
+   mono-block step_cfl aggregates it too). DSL: `pops.physics.multispecies.CoupledSource(...).frequency(mu)` carried by
    CompiledCoupledSource. Default without frequency: no change. REFINEMENT (sec. 7): mu ALSO accepts
    an Expr (same block().role() + param() fields as the terms) -> PER-CELL frequency
    mu(U), emitted in bytecode (freq_prog_ops/args) and reduced (MAX) per cell at each step
@@ -363,7 +363,7 @@ is wired really is; what is not is documented with file:line, never masked).
 9. **check_model on CompiledModel**: DONE (balance) -- `CompiledModel.check_runtime(n=, state=)`
    installs the .so in an EPHEMERAL System and delegates to System.check_model (finite state/residual,
    positivity by roles, round-trip of the conversions); smoke state by ROLES by default,
-   state= for a precise regime. Remains: the FORMULAS of a .so without its original dsl.Model are
+   state= for a precise regime. Remains: the FORMULAS of a .so without its original pops.physics.facade.Model are
    not re-derivable (the symbolic source is not embedded in the .so -- assumed).
 10. **IO**: System `write` / `checkpoint` / `restart` are **MULTI-RANK** (wave 4) -- collective GLOBAL
     gather (all_reduce_sum_inplace) + rank-0 write + MPI-safe scatter (MONO-BOX System: all
@@ -389,16 +389,16 @@ is wired really is; what is not is documented with file:line, never masked).
       preserved exactly in 3-var).
     - **PROVIDED route** -- `m.roe_dissipation(x=rows_x, y=rows_y)`: for an ARBITRARY model (outside the
       fluid-role families), the user provides themselves the n lines d_i of their
-      eigenstructure (same spirit as `m.source_jacobian`), written in `dsl.left(...)`/`dsl.right(...)`
+      eigenstructure (same spirit as `m.source_jacobian`), written in `pops.ir.ops.left(...)`/`pops.ir.ops.right(...)`
       of both states UL/UR (a bare variable, without a marker, raises). The **symbolic autodiff** of the
-      DSL assists this writing: `dsl.diff(expr, var)` differentiates the Expr tree (linearity, product,
+      DSL assists this writing: `pops.ir.lowering.diff(expr, var)` differentiates the Expr tree (linearity, product,
       quotient, pow/sqrt chain; primitives expanded by their definition; unknown node ->
       NotImplementedError), and `m.flux_jacobian(dir)` derives from it the flux Jacobian A = dF/dU. The
       automatic symbolic DIAGONALIZATION of A (general eigenstructure) stays out of perimeter --
       out of reach of an honest generic emission: the provided route delegates it to the user.
 
     The two routes are EXCLUSIVE (a single provider of the hook; declaring them together raises) and
-    `CompiledModel.has_roe` covers both (test_dsl_autodiff_roe: dsl.diff on analytic cases,
+    `CompiledModel.has_roe` covers both (test_dsl_autodiff_roe: pops.ir.lowering.diff on analytic cases,
     flux_jacobian of the isothermal 3-var, m.roe_dissipation reproducing the hand-written isothermal Roe
     == enable_roe at ~1e-12, rejections).
 

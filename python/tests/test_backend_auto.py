@@ -19,7 +19,9 @@ import tempfile
 import numpy as np
 
 import pops
-from pops import dsl
+from pops.codegen.toolchain import resolve_auto_backend
+from pops.ir.ops import sqrt
+from pops.physics.facade import Model
 
 fails = 0
 INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "include"))
@@ -33,12 +35,12 @@ def chk(cond, label):
 
 
 def iso3(name):
-    m = dsl.Model(name)
+    m = Model(name)
     rho, mx, my = m.conservative_vars("rho", "mx", "my",
                                       roles=["Density", "MomentumX", "MomentumY"])
     u = m.primitive("u", mx / rho)
     v = m.primitive("v", my / rho)
-    c = dsl.sqrt(0.5)
+    c = sqrt(0.5)
     m.flux(x=[mx, mx * u + 0.5 * rho, mx * v], y=[my, my * u, my * v + 0.5 * rho])
     m.eigenvalues(x=[u - c, u, u + c], y=[v - c, v, v + c])
     m.primitive_vars(rho, u, v)
@@ -55,7 +57,7 @@ if not cxx or not os.path.isdir(INCLUDE):
 tmp = tempfile.mkdtemp()
 try:
     print("== (1) auto -> production quand la parite toolchain est etablie ==")
-    bk, reason = dsl.resolve_auto_backend(INCLUDE)
+    bk, reason = resolve_auto_backend(INCLUDE)
     chk(bk == "production", f"resolve_auto_backend = production (raison : {reason[:60]})")
     cm = iso3("auto_prod").compile(os.path.join(tmp, "auto_prod.so"), INCLUDE)
     chk(cm.backend == "production", f"compile() sans backend -> {cm.backend!r}")
@@ -79,7 +81,7 @@ try:
     shutil.copytree(INCLUDE, stale)
     with open(os.path.join(stale, "pops", "core", "types.hpp"), "a") as f:
         f.write("\n// drift de signature pour test_backend_auto (copie jetable)\n")
-    bk2, reason2 = dsl.resolve_auto_backend(stale)
+    bk2, reason2 = resolve_auto_backend(stale)
     chk(bk2 == "aot" and "module" in reason2 or "en-tetes" in reason2,
         f"resolve(stale) = {bk2} ({reason2[:60]})")
     cm2 = iso3("auto_aot").compile(os.path.join(tmp, "auto_aot.so"), stale)

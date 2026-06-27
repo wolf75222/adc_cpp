@@ -28,7 +28,7 @@ Python script that imports `pops`, composes a model, plugs it into a system, and
    ```
 
 3. Write the case script in that folder. Compose a model the same way the tutorial does:
-   `pops.Model(...)` for a native composition, `pops.dsl.Model(...)` for a formula model, or
+   `pops.Model(...)` for a native composition, `pops.physics.facade.Model(...)` for a formula model, or
    `pops.CompositeModel(...)` for a hybrid. See the [models overview](../models/index.md) for
    the three paths.
 

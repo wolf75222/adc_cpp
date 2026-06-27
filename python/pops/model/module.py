@@ -2,11 +2,12 @@
 
 A Module owns the RULES -- state/field spaces, parameters, aux declarations and a
 registry of typed operators a Program composes by signature. The Simulation owns
-the DATA. ``Module.to_dsl()`` lowers a pure Module to a :class:`pops.dsl.Model`.
+the DATA. ``Module.to_dsl()`` lowers a pure Module to a
+:class:`pops.physics.facade.Model`.
 
 Imports only the standard library (plus the sibling operator-first types) so it
-can be exercised without the compiled ``_pops`` extension; ``pops.dsl`` is imported
-lazily inside :meth:`Module.to_dsl` to avoid an import cycle.
+can be exercised without the compiled ``_pops`` extension; the codegen engine is
+imported lazily inside :meth:`Module.to_dsl` to avoid an import cycle.
 """
 import hashlib
 
@@ -27,7 +28,7 @@ class Module:
 
     A Module owns the RULES -- state/field spaces, parameters, aux declarations and the
     typed operators a Program composes by signature. The Simulation owns the DATA
-    (grid, arrays, solvers, clock). :class:`pops.dsl.Model` is the PDE convenience facade
+    (grid, arrays, solvers, clock). :class:`pops.physics.facade.Model` is the PDE convenience facade
     that populates a Module's registry (``source_term`` / ``linear_source`` /
     ``elliptic_field`` / ``flux`` register typed operators); a Module can also be built
     directly with ``state_space`` / ``field_space`` / ``parameters`` / ``aux_fields`` /
@@ -153,12 +154,13 @@ class Module:
         return self._registry
 
     def to_dsl(self):
-        """Lower this Module to a :class:`pops.dsl.Model` -- the physical/codegen engine -- by mapping
+        """Lower this Module to a :class:`pops.physics.facade.Model` -- the physical/codegen engine -- by mapping
         each typed operator (with its IR body) to the dsl method of its kind. Reuses the dsl backend
         (a translation, not a second codegen). ``pops.compile_problem(model=module, ...)`` does this
         implicitly; call it directly to build the block model for ``sim.add_equation``."""
-        from pops import dsl as _dsl  # lazy: dsl imports this module, so import only when compiling
-        return _dsl._module_to_model(self)
+        # Lazy: codegen.compile imports this module, so import only when compiling.
+        from pops.codegen.compile import _module_to_model
+        return _module_to_model(self)
 
     # --- introspection (Spec 2, S2-5) ---
     def state_spaces(self):

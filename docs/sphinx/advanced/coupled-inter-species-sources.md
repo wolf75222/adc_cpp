@@ -3,7 +3,7 @@
 
 Beyond transport and a block's local source, one can describe an inter-species
 coupling (ionization, collisions, thermal exchange) in formulas, without writing any
-C++ and without a per-cell Python callback. The DSL `pops.dsl.CoupledSource` carries the
+C++ and without a per-cell Python callback. The DSL `pops.physics.multispecies.CoupledSource` carries the
 formula as stack-machine bytecode, interpreted on the C++ side in a device `for_each_cell`
 (so MPI-safe and GPU-clean). The stage is applied by explicit splitting, after the
 transport.
@@ -13,9 +13,8 @@ The canonical example is a three-species ionization
 
 ```python
 import pops
-from pops import dsl
 
-src = dsl.CoupledSource("ionization")
+src = pops.physics.multispecies.CoupledSource("ionization")
 ne = src.block("electrons").role("density")
 ni = src.block("ions").role("density")
 ng = src.block("neutrals").role("density")

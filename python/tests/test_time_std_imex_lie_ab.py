@@ -33,9 +33,10 @@ _C = 0.75  # AB linear-source coefficient: S(rho) = _C*rho
 
 
 # ---------- shared DSL models (compiled only in section B) ----------
-def _passive_source_model(dsl, name):
+def _passive_source_model(name):
     """1-variable rho, ZERO flux, default LINEAR source S = _C*rho (R changes every step) -- for AB."""
-    m = dsl.Model(name)
+    from pops.physics.facade import Model
+    m = Model(name)
     (rho,) = m.conservative_vars("rho")
     u = m.primitive("u", 0.0 * rho)
     m.primitive_vars(rho=rho, u=u)
@@ -46,14 +47,15 @@ def _passive_source_model(dsl, name):
     return m
 
 
-def _reaction_term_model(dsl, name):
+def _reaction_term_model(name):
     """1-variable rho, ZERO flux, a NAMED source_term S = _C*rho and NO default source -- for the Lie
     split. The hyperbolic stage H requests sources=[] (flux only): with an empty default source that is
     inert (zero flux, no source), so H is a true no-op and the source stage applies only the named
     "reaction". (A default m.source would be wrongly included by sources=[] on the flux-only path; that
     flux-only-excludes-default-source gap is tracked separately and does not affect this named-source
     model.)"""
-    m = dsl.Model(name)
+    from pops.physics.facade import Model
+    m = Model(name)
     (rho,) = m.conservative_vars("rho")
     u = m.primitive("u", 0.0 * rho)
     m.primitive_vars(rho=rho, u=u)
@@ -64,12 +66,13 @@ def _reaction_term_model(dsl, name):
     return m
 
 
-def _lorentz_model(dsl, name):
+def _lorentz_model(name):
     """Isothermal 2D fluid (rho, mx, my) with a Lorentz linear source L(B_z) -- for imex_local.
 
     ZERO flux so the explicit RHS is the default source only (here: none), isolating the implicit
     Lorentz solve; B_z is read off the System aux. A complete compilable production block."""
-    m = dsl.Model(name)
+    from pops.physics.facade import Model
+    m = Model(name)
     rho, mx, my = m.conservative_vars("rho", "mx", "my")
     cs2 = m.param("cs2", 0.5)
     u = m.primitive("u", mx / rho)
@@ -92,11 +95,11 @@ def test_imex_local_builds_and_lowers(t):
     out = t.std.imex_local(P, "plasma", linear_source="lorentz")
     assert P.validate() is True and P.commits()["plasma"] is out
     try:
-        from pops import dsl
+        from pops.physics.facade import Model
     except Exception as exc:  # noqa: BLE001
         print("  (imex codegen skipped: pops.dsl unavailable: %s)" % exc)
         return
-    src = P.emit_cpp_program(model=_lorentz_model(dsl, "imex_m"))
+    src = P.emit_cpp_program(model=_lorentz_model("imex_m"))
     assert "pops::detail::mat_inverse<3>(" in src, "imex implicit term is a per-cell dense solve"
     assert "rhs_into" in src, "imex explicit term assembles an RHS"
 
@@ -205,7 +208,7 @@ def _run_ab3(t):
         import numpy as np
 
         import pops
-        from pops import dsl
+        from pops.physics.facade import Model
     except Exception as exc:  # noqa: BLE001
         print("-- (B AB3) skipped: pops/numpy unavailable: %s --" % exc)
         return
@@ -216,8 +219,8 @@ def _run_ab3(t):
     P = t.Program("ab3_step")
     t.std.adams_bashforth(P, "blk", 3)
     try:
-        compiled = pops.compile_problem(model=_passive_source_model(dsl, "ab3_prog"), time=P)
-        cm = _passive_source_model(dsl, "ab3_block").compile(backend="production")
+        compiled = pops.compile_problem(model=_passive_source_model("ab3_prog"), time=P)
+        cm = _passive_source_model("ab3_block").compile(backend="production")
     except RuntimeError as exc:
         print("-- (B AB3) skipped: compile could not build the .so: %s --" % str(exc)[:160])
         return
@@ -247,7 +250,7 @@ def _run_imex(t):
         import numpy as np
 
         import pops
-        from pops import dsl
+        from pops.physics.facade import Model
     except Exception as exc:  # noqa: BLE001
         print("-- (B imex) skipped: pops/numpy unavailable: %s --" % exc)
         return
@@ -258,8 +261,8 @@ def _run_imex(t):
     P = t.Program("imex_step")
     t.std.imex_local(P, "plasma", linear_source="lorentz", flux=True, sources=["default"], theta=1.0)
     try:
-        compiled = pops.compile_problem(model=_lorentz_model(dsl, "imex_prog"), time=P)
-        cm = _lorentz_model(dsl, "imex_block").compile(backend="production")
+        compiled = pops.compile_problem(model=_lorentz_model("imex_prog"), time=P)
+        cm = _lorentz_model("imex_block").compile(backend="production")
     except RuntimeError as exc:
         print("-- (B imex) skipped: compile could not build the .so: %s --" % str(exc)[:160])
         return
@@ -298,7 +301,7 @@ def _run_lie(t):
         import numpy as np
 
         import pops
-        from pops import dsl
+        from pops.physics.facade import Model
     except Exception as exc:  # noqa: BLE001
         print("-- (B lie) skipped: pops/numpy unavailable: %s --" % exc)
         return
@@ -321,8 +324,8 @@ def _run_lie(t):
     P = t.Program("lie_step")
     t.std.lie(P, "blk", half_flow, source)
     try:
-        compiled = pops.compile_problem(model=_reaction_term_model(dsl, "lie_prog"), time=P)
-        cm = _reaction_term_model(dsl, "lie_block").compile(backend="production")
+        compiled = pops.compile_problem(model=_reaction_term_model("lie_prog"), time=P)
+        cm = _reaction_term_model("lie_block").compile(backend="production")
     except RuntimeError as exc:
         print("-- (B lie) skipped: compile could not build the .so: %s --" % str(exc)[:160])
         return

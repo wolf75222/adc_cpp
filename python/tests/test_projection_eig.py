@@ -22,7 +22,6 @@ On verifie :
  (5) le hook m.projection sans temoin VP (ADC-177) reste INCHANGE : aucun include dense_eig, aucun
      foncteur emis (extension strictement additive, test_projection_hook reste vert).
 """
-import importlib.util
 import os
 import shutil
 import subprocess
@@ -31,12 +30,16 @@ import tempfile
 
 import numpy as np
 
-# Import DIRECT du module dsl (pur Python) : le temoin VP, son eval numpy et son codegen ne dependent
-# pas de l'extension compilee _pops. La partie System (4) est gardee par la disponibilite de _pops.
-_DSL_PATH = os.path.join(os.path.dirname(__file__), "..", "pops", "dsl.py")
-_spec = importlib.util.spec_from_file_location("pops_dsl_eig", os.path.abspath(_DSL_PATH))
-dsl = importlib.util.module_from_spec(_spec)
-_spec.loader.exec_module(dsl)
+# Import DIRECT des symboles DSL (pur Python) : le temoin VP, son eval numpy et son codegen ne
+# dependent pas de l'extension compilee _pops. La partie System (4) est gardee par la dispo de _pops.
+from types import SimpleNamespace
+
+from pops.ir.expr import Const, Var
+from pops.ir.ops import abs_, eig_lmax, eig_lmin, eig_max_im, sign
+from pops.physics.model import HyperbolicModel
+
+dsl = SimpleNamespace(Const=Const, Var=Var, abs_=abs_, sign=sign, eig_lmax=eig_lmax,
+                      eig_lmin=eig_lmin, eig_max_im=eig_max_im, HyperbolicModel=HyperbolicModel)
 
 INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "include"))
 TOL_EVAL = 1e-12   # eval numpy vs np.linalg.eigvals (meme algebre numpy des deux cotes)
@@ -207,7 +210,9 @@ def test_system_end_to_end():
     print("== (4) [_pops] semantique POST-PAS (production + aot) == reference numpy ==")
     try:
         import pops
-        from pops import dsl as dsl_pkg
+        from pops.ir.expr import Const
+        from pops.ir.ops import eig_max_im, sign
+        from pops.physics.model import HyperbolicModel
     except Exception as ex:  # noqa: BLE001
         print("  skip  extension _pops absente (%s) -- (3) couvre deja la numerique compilee"
               % type(ex).__name__)
@@ -221,14 +226,14 @@ def test_system_end_to_end():
     tol, target = 0.5, 9.0
 
     def build_pkg(tag):
-        m = dsl_pkg.HyperbolicModel("toyeigsys_" + tag)
+        m = HyperbolicModel("toyeigsys_" + tag)
         q0, q1, q2 = m.conservative_vars("q0", "q1", "q2")
         m.set_flux(x=[q0, q1, q2], y=[0.5 * q0, 0.5 * q1, 0.5 * q2])
-        m.set_eigenvalues(x=[dsl_pkg.Const(1.0)], y=[dsl_pkg.Const(0.5)])
+        m.set_eigenvalues(x=[Const(1.0)], y=[Const(0.5)])
         m.set_primitive_state("q0", "q1", "q2")
         m.set_conservative_from([q0, q1, q2])
-        wit = dsl_pkg.eig_max_im([[q0, -q1], [q1, q0]])
-        mask = 0.5 * (dsl_pkg.sign(wit - tol) + 1.0)
+        wit = eig_max_im([[q0, -q1], [q1, q0]])
+        mask = 0.5 * (sign(wit - tol) + 1.0)
         m.projection([q0, q1, q2 * (1.0 - mask) + target * mask])
         return m
 

@@ -137,31 +137,32 @@ def _aux_comp(impl, name):
     """Component index of an aux field @p name in the System aux channel: canonical (dsl.AUX_CANONICAL)
     or a model NAMED aux field (dsl.AUX_NAMED_BASE + position in aux_extra_names). @p impl is the
     HyperbolicModel."""
-    from pops import dsl
-    if name in dsl.AUX_CANONICAL:
-        return dsl.AUX_CANONICAL[name]
+    from pops.physics.aux import AUX_CANONICAL, AUX_NAMED_BASE
+    if name in AUX_CANONICAL:
+        return AUX_CANONICAL[name]
     extra = list(getattr(impl, "aux_extra_names", []) or [])
     if name in extra:
-        return dsl.AUX_NAMED_BASE + extra.index(name)
+        return AUX_NAMED_BASE + extra.index(name)
     raise NotImplementedError(
         "emit_cpp_program: aux field '%s' is neither canonical (%s) nor a declared named aux field "
-        "(%s); cannot map it to an aux component" % (name, sorted(dsl.AUX_CANONICAL), extra))
+        "(%s); cannot map it to an aux component" % (name, sorted(AUX_CANONICAL), extra))
 
 
 def _check_no_runtime_param(exprs):
     """Phase-4b kernels read coefficients from the state / aux only (const params are inlined as
     literals by the dsl Expr tree). A RUNTIME parameter would emit ``params.get(idx)``, unavailable in
     a ProgramContext kernel -> raise NotImplementedError (deferred), never a .so that fails to link."""
-    from pops import dsl
+    from pops.ir.values import RuntimeParamRef
+    from pops.ir.visitors import _children
     stack = list(exprs)
     while stack:
         e = stack.pop()
-        if isinstance(e, dsl.RuntimeParamRef):
+        if isinstance(e, RuntimeParamRef):
             raise NotImplementedError(
                 "emit_cpp_program: a Phase-4b source / linear source references a RUNTIME parameter "
                 "(%s); only constants and aux fields are supported in the per-cell kernel yet "
                 "(runtime params in compiled programs are a later phase)" % e.name)
-        stack.extend(dsl._children(e))
+        stack.extend(_children(e))
 
 
 def _cell_locals(impl, exprs, state_var, *, with_cons, with_prim):
@@ -438,7 +439,7 @@ def _residual_term_exprs(impl, w):
 
     The iterate / guess State placeholders and ``linear_combine`` are handled by the affine walk in
     `_emit_residual_eval`, not here (they are not standalone-evaluable Exprs)."""
-    from pops import dsl
+    from pops.ir.expr import Const, Var
     if w.op == "source":
         name = w.attrs["source"]
         if name not in impl._source_terms:
@@ -450,8 +451,8 @@ def _residual_term_exprs(impl, w):
         rows = _linear_source_rows(impl, w.attrs["linear_source"])
         n = len(rows)
         # (L U)_r = sum_c L[r][c] * cons_c -- a per-component Expr in the cons names + aux.
-        return [sum((rows[r][c] * dsl.Var(impl.cons_names[c], "cons") for c in range(n)),
-                    dsl.Const(0.0)) for r in range(n)]
+        return [sum((rows[r][c] * Var(impl.cons_names[c], "cons") for c in range(n)),
+                    Const(0.0)) for r in range(n)]
     raise NotImplementedError(
         "emit_cpp_program: residual op '%s' is not a per-cell Expr term (source / apply only)" % w.op)
 
@@ -1044,7 +1045,7 @@ def _coupled_rate_components(program, v):
     ``P.state(space=...)``). Raises a clear NotImplementedError naming ADC-457 when a coupled_rate
     cannot lower in this MVP: no bound registry, no operator body, a block whose component count
     does not match its StateSpace, or a formula referencing a non-cons (prim / aux) Var."""
-    from pops import dsl
+    from pops.ir.expr import Var
     op_name = v.attrs["operator"]
     if program._registry is None:
         raise NotImplementedError(
@@ -1077,7 +1078,7 @@ def _coupled_rate_components(program, v):
                 "node %r)" % (op_name, blk, len(comps), ncons, v.name))
         for e in comps:
             for node in _walk_expr(e):
-                if isinstance(node, dsl.Var) and node.kind != "cons":
+                if isinstance(node, Var) and node.kind != "cons":
                     raise NotImplementedError(
                         "coupled_rate formulas referencing prim/aux vars are deferred (ADC-457): "
                         "operator %r block %r references %s var %r; the MVP per-cell binding is "
@@ -1103,12 +1104,12 @@ def _coupled_rate_components(program, v):
 
 def _walk_expr(e):
     """Yield every node of a dsl Expr tree (used to scan a coupled_rate formula for non-cons Vars)."""
-    from pops import dsl
+    from pops.ir.visitors import _children
     stack = [e]
     while stack:
         node = stack.pop()
         yield node
-        stack.extend(dsl._children(node))
+        stack.extend(_children(node))
 
 def _emit_body(program, model=None):
     """Generate the C++ of the install function in TWO phases (each list indented uniformly by the

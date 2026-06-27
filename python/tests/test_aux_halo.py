@@ -21,7 +21,7 @@ import tempfile
 import numpy as np
 
 import pops
-from pops import dsl
+from pops.physics.facade import Model
 
 INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "include"))
 
@@ -34,7 +34,7 @@ def _have_compiler():
 def build_advect_vx():
     """Scalaire 'n', flux_x = vx*n ou vx est un aux NOMME, flux_y = 0. Le flux LIT vx (au bord, via le
     ghost de vx) -> le halo de vx est observable dans eval_rhs au bord."""
-    m = dsl.Model("advectvx")
+    m = Model("advectvx")
     (nn,) = m.conservative_vars("n")
     vx = m.aux_field("vx")
     zero = 0.0 * nn

@@ -9,7 +9,8 @@ import time
 import numpy as np
 
 import pops
-from pops import dsl
+from pops.ir.ops import sqrt
+from pops.physics.facade import Model
 
 GAMMA = 1.4
 
@@ -30,7 +31,7 @@ def initial_state(n):
 
 
 def dsl_model():
-    m = dsl.Model("frontend_euler_periodic")
+    m = Model("frontend_euler_periodic")
     rho, rhou, rhov, E = m.conservative_vars(
         "rho",
         "rho_u",
@@ -43,7 +44,7 @@ def dsl_model():
     v = m.primitive("v", rhov / rho)
     p = m.primitive("p", (g - 1.0) * (E - 0.5 * rho * (u * u + v * v)))
     H = (E + p) / rho
-    c = dsl.sqrt(g * p / rho)
+    c = sqrt(g * p / rho)
     m.flux(
         x=[rhou, rhou * u + p, rhou * v, rho * H * u],
         y=[rhov, rhov * u, rhov * v + p, rho * H * v],

@@ -31,7 +31,7 @@ import sys
 import numpy as np
 
 import pops
-from pops import dsl
+from pops.codegen.loader import CompiledModel
 
 fails = 0
 
@@ -74,7 +74,7 @@ def fake_production_amr():
     """CompiledModel FACTICE du chemin production AMR : la garde options/diagnostics de add_equation
     leve AVANT le dlopen du .so, donc le .so inexistant n'est jamais charge (deterministe, no compiler).
     Meme recette que test_amr_production_stride_reject.py."""
-    return dsl.CompiledModel(
+    return CompiledModel(
         so_path="/inexistant_amr.so", backend="production", adder="add_native_block",
         cons_names=["rho", "rho_u", "rho_v"], cons_roles=["Density", "MomentumX", "MomentumY"],
         prim_names=["rho", "u", "v"], n_vars=3, gamma=1.4, n_aux=3, params={}, caps={},

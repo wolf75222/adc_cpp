@@ -9,7 +9,8 @@ import inspect
 import sys
 
 try:
-    from pops import dsl
+    from pops.ir.expr import Const
+    from pops.physics.facade import Model
     from pops import time as adctime
 except Exception as exc:  # pops not importable here -> skip, never fake
     print("skip test_operator_macros (pops unavailable: %s)" % exc)
@@ -19,14 +20,14 @@ _PHYSICS_TOKENS = ("electric", "lorentz", "poisson", "rho", "grad_x", "grad_y", 
 
 
 def _model(name, gain=1.0):
-    m = dsl.Model(name)
+    m = Model(name)
     rho, mx, my = m.conservative_vars("rho", "mx", "my")
     gx = m.aux("grad_x")
     gy = m.aux("grad_y")
     bz = m.aux("B_z")
     m.flux(x=[mx, mx * mx / rho, mx * my / rho],
            y=[my, mx * my / rho, my * my / rho])
-    m.source_term("electric", [dsl.Const(0.0), rho * (-gx) * gain, rho * (-gy) * gain])
+    m.source_term("electric", [Const(0.0), rho * (-gx) * gain, rho * (-gy) * gain])
     m.linear_source("lorentz", [[0.0, 0.0, 0.0],
                                 [0.0, 0.0, bz],
                                 [0.0, -bz, 0.0]])

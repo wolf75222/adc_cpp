@@ -26,7 +26,8 @@ import tempfile
 import numpy as np
 
 import pops
-from pops import dsl
+from pops.ir.ops import sqrt
+from pops.physics.facade import Model
 
 GAMMA = 1.4
 INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "include"))
@@ -123,7 +124,7 @@ if not cxx or not os.path.isdir(INCLUDE):
 def _isothermal():
     """Isotherme 3-var (rho, rho_u, rho_v), c^2 = 0.5 : la qty de mouvement advecte la densite et il
     n'y a PAS d'energie -> seed conservatif == seed densite a la cellule pres (bit-identique)."""
-    m = dsl.Model("iso3")
+    m = Model("iso3")
     rho_, rhou_, rhov_ = m.conservative_vars("rho", "rho_u", "rho_v")
     cs2 = 0.5
     u = rhou_ / rho_
@@ -131,8 +132,8 @@ def _isothermal():
     pu, pv = m.primitive("u", u), m.primitive("v", v)
     m.flux(x=[rhou_, rhou_ * pu + cs2 * rho_, rhou_ * pv],
            y=[rhov_, rhov_ * pu, rhov_ * pv + cs2 * rho_])
-    m.eigenvalues(x=[pu - dsl.sqrt(cs2), pu, pu + dsl.sqrt(cs2)],
-                  y=[pv - dsl.sqrt(cs2), pv, pv + dsl.sqrt(cs2)])
+    m.eigenvalues(x=[pu - sqrt(cs2), pu, pu + sqrt(cs2)],
+                  y=[pv - sqrt(cs2), pv, pv + sqrt(cs2)])
     m.primitive_vars(rho_, pu, pv)
     m.conservative_from([rho_, rho_ * pu, rho_ * pv])
     m.elliptic_rhs(0.0 * rho_)  # transport pur (pas de Poisson) : isole l'effet du seed

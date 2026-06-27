@@ -19,7 +19,7 @@ the same way. Pick the front by whether the bricks you need already exist:
   just-in-time compilation, and you keep full production parity (MPI, AMR, GPU). Follow
   [Write a model with bricks](../tutorials/write-a-model-with-bricks.md).
 - Use the **symbolic DSL** when the model you want does not exist as a native brick. You write
-  the equation as formulas with `pops.dsl.Model`, then compile it into a `.so`. Follow
+  the equation as formulas with `pops.physics.facade.Model`, then compile it into a `.so`. Follow
   [Write a model with the DSL](../tutorials/write-a-model-with-dsl.md).
 
 The two fronts are interchangeable and produce an identical numerical kernel. The full brick

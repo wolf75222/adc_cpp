@@ -31,8 +31,8 @@ class Model(_MultiSpeciesMixin):
     """A blackboard-style physical model that lowers to the operator-first IR."""
 
     def __init__(self, name):
-        from .. import dsl as _dsl  # lazy: dsl pulls numpy
-        self._dsl = _dsl.Model(name)
+        from .facade import Model as _PdeModel  # lazy: the facade pulls numpy
+        self._dsl = _PdeModel(name)
         self.name = str(name)
         self._states = {}
         self._fields = {}

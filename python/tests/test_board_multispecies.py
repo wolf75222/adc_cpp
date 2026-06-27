@@ -28,7 +28,8 @@ import pytest
 
 adctime = pytest.importorskip("pops.time")
 physics = pytest.importorskip("pops.physics")
-from pops import dsl, model  # noqa: E402 (after importorskip so a missing pops skips cleanly)
+from pops import model
+from pops.ir.expr import Var
 
 
 def _three_fluid_board():
@@ -67,7 +68,7 @@ def _two_fluid_handwritten():
     e = mod.state_space("electron_state", ("ne", "mex", "mey"))
     i = mod.state_space("ion_state", ("ni", "mix", "miy"))
     bundle = model.RateBundle({"electron_state": model.Rate(e), "ion_state": model.Rate(i)})
-    ne, ni = dsl.Var("ne", "cons"), dsl.Var("ni", "cons")
+    ne, ni = Var("ne", "cons"), Var("ni", "cons")
     mod.operator(name="collision", signature=model.Signature((e, i), bundle),
                  kind="coupled_rate",
                  expr={"electron_state": [ni - ne, ne, ne], "ion_state": [ne - ni, ni, ni]})
@@ -121,10 +122,10 @@ def test_field_solve_lowers_to_a_multi_input_field_operator():
 def test_state_handle_indexes_by_component_name():
     m, e, _i, _n = _three_fluid_board()
     # e["ne"] is the conservative Var of that component (the board access of section 12.3/16),
-    # identical to the operator-first dsl.Var("ne", "cons"). Var has no __eq__ (== builds an
+    # identical to the operator-first Var("ne", "cons"). Var has no __eq__ (== builds an
     # expression), so compare by name + kind.
     ne = e["ne"]
-    assert isinstance(ne, dsl.Var) and ne.name == "ne" and ne.kind == "cons"
+    assert isinstance(ne, Var) and ne.name == "ne" and ne.kind == "cons"
     with pytest.raises(KeyError):
         _ = e["not_a_component"]
 

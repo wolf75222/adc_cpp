@@ -23,8 +23,8 @@ import tempfile
 import numpy as np
 
 import pops
-from pops import dsl
-from pops.moments import build_moment_model, gaussian_closure
+from pops.codegen.toolchain import _default_cxx
+from pops.lib.moments import build_moment_model, gaussian_closure
 
 fails = 0
 INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "include"))
@@ -78,7 +78,7 @@ chk(hasattr(mr, "roe_from_jacobian") and callable(mr.roe_from_jacobian),
     "facade Model.roe_from_jacobian re-exported")
 
 # --- (B) compile AOT + System riemann='roe' (compiler-gated) ------------------
-cxx = dsl._default_cxx(None)
+cxx = _default_cxx(None)
 if not cxx or not os.path.isdir(INCLUDE):
     print("== (B) saute : compilateur C++ ou en-tetes pops absents ==")
     print("FAILS =", fails)

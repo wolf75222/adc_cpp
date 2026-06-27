@@ -7,7 +7,8 @@ Python, locally testable); the C++ coupled-rate kernel codegen is the deferred r
 """
 import pytest
 
-from pops import dsl, model
+from pops import model
+from pops.ir.expr import Var
 
 adctime = pytest.importorskip("pops.time")
 
@@ -18,7 +19,7 @@ def _two_fluid_module():
     e = mod.state_space("electron_state", ("ne", "mex", "mey"))
     i = mod.state_space("ion_state", ("ni", "mix", "miy"))
     bundle = model.RateBundle({"electrons": model.Rate(e), "ions": model.Rate(i)})
-    ne, ni = dsl.Var("ne", "cons"), dsl.Var("ni", "cons")
+    ne, ni = Var("ne", "cons"), Var("ni", "cons")
     mod.operator(name="collision", signature=model.Signature((e, i), bundle),
                  kind="coupled_rate",
                  expr={"electrons": [ni - ne, ne, ne], "ions": [ne - ni, ni, ni]})
@@ -65,7 +66,7 @@ def test_coupled_rate_arbitrary_arity_three_blocks():
     i = mod.state_space("i", ("ni",))
     n = mod.state_space("n", ("nn",))
     bundle = model.RateBundle({"e": model.Rate(e), "i": model.Rate(i), "n": model.Rate(n)})
-    z = dsl.Var("ne", "cons")
+    z = Var("ne", "cons")
     mod.operator(name="coll3", signature=model.Signature((e, i, n), bundle),
                  kind="coupled_rate", expr={"e": [z], "i": [z], "n": [z]})
     P = adctime.Program("s").bind_operators(mod)

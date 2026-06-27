@@ -147,14 +147,14 @@ print("== (6) garde backend compile : cache + add_equation(modele .so) -> erreur
 # compile (.so) -- prototype/aot/production -- ne transportent pas le flag : il serait ignore en
 # silence. On verifie le rejet explicite via des CompiledModel FACTICES (la garde leve AVANT la
 # frontiere C++ / le dlopen, donc aucun .so reel ni compilateur requis).
-import pops.dsl as dsl  # noqa: E402
+from pops.codegen.loader import CompiledModel
 
 # aot et production : l'ABI du .so transporte hll mais PAS le cache -> rejet explicite attendu.
 # (Le backend 'prototype' rejette deja hll en amont -- rusanov ordre 1 uniquement -- donc le cache
 #  n'y est jamais ignore en silence ; pas de cas dedie.)
 for backend, adder in (("aot", "add_compiled_block"),
                        ("production", "add_native_block")):
-    fake = dsl.CompiledModel(so_path="/inexistant.so", backend=backend, adder=adder,
+    fake = CompiledModel(so_path="/inexistant.so", backend=backend, adder=adder,
                              cons_names=["rho"], cons_roles=["Density"], prim_names=["rho"],
                              n_vars=1, gamma=(None if backend == "production" else 1.4),
                              n_aux=0, params={}, caps={}, abi_key="k", model_hash="h",

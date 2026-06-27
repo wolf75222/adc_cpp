@@ -2,7 +2,7 @@
 """Roe DSL hors roles fluides (Linear ADC-68, GENERICITY point 11, voie FOURNIE) : autodiff
 symbolique du DSL + dissipation de Roe ecrite par l'utilisateur.
 
-  (a) dsl.diff : differentiation symbolique de l'arbre Expr (linearite, produit, quotient, chaine
+  (a) diff : differentiation symbolique de l'arbre Expr (linearite, produit, quotient, chaine
       pour pow/sqrt). Verifiee NUMERIQUEMENT (chemin d'evaluation reference des Expr, sans
       compilateur) sur des cas analytiques ; noeud non derivable / exposant dependant de la
       variable -> NotImplementedError ;
@@ -25,7 +25,10 @@ import tempfile
 import numpy as np
 
 import pops
-from pops import dsl
+from pops.ir.expr import Expr, Var
+from pops.ir.lowering import diff
+from pops.ir.ops import left, right, sqrt
+from pops.physics.facade import Model
 
 fails = 0
 INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "include"))
@@ -39,60 +42,60 @@ def chk(cond, label):
         fails += 1
 
 
-# === (a) dsl.diff : differentiation symbolique, verifiee numeriquement =========================
-print("== (a) dsl.diff : regles de derivation sur cas analytiques (eval numpy) ==")
+# === (a) diff : differentiation symbolique, verifiee numeriquement =========================
+print("== (a) diff : regles de derivation sur cas analytiques (eval numpy) ==")
 rng = np.random.default_rng(0)
 xs = rng.uniform(-2.0, 2.0, 64)
 ys = rng.uniform(-2.0, 2.0, 64)
 xp = rng.uniform(0.2, 3.0, 64)  # echantillons strictement positifs (sqrt, puissances)
 
-x = dsl.Var("x", "cons")
-y = dsl.Var("y", "cons")
+x = Var("x", "cons")
+y = Var("y", "cons")
 
 # d(x^2 + 3xy)/dx == 2x + 3y ; d/dy == 3x
 e = x * x + 3.0 * x * y
-dex = dsl.diff(e, x)
-dey = dsl.diff(e, y)
+dex = diff(e, x)
+dey = diff(e, y)
 chk(np.allclose(dex.eval({"x": xs, "y": ys}), 2.0 * xs + 3.0 * ys), "d(x^2+3xy)/dx == 2x+3y")
 chk(np.allclose(dey.eval({"x": xs, "y": ys}), 3.0 * xs), "d(x^2+3xy)/dy == 3x")
 
 # puissance : d(x^3)/dx == 3 x^2 ; exposant symbolique INDEPENDANT : d(x^y)/dx == y x^(y-1)
-chk(np.allclose(dsl.diff(x ** 3, x).eval({"x": xp}), 3.0 * xp ** 2), "d(x^3)/dx == 3 x^2")
+chk(np.allclose(diff(x ** 3, x).eval({"x": xp}), 3.0 * xp ** 2), "d(x^3)/dx == 3 x^2")
 yp = rng.uniform(1.0, 3.0, 64)
-chk(np.allclose(dsl.diff(x ** y, x).eval({"x": xp, "y": yp}), yp * xp ** (yp - 1.0)),
+chk(np.allclose(diff(x ** y, x).eval({"x": xp, "y": yp}), yp * xp ** (yp - 1.0)),
     "d(x^y)/dx == y x^(y-1) (exposant independant)")
 
 # racine : d(sqrt(x))/dx == 1/(2 sqrt(x))
-chk(np.allclose(dsl.diff(dsl.sqrt(x), x).eval({"x": xp}), 0.5 / np.sqrt(xp)),
+chk(np.allclose(diff(sqrt(x), x).eval({"x": xp}), 0.5 / np.sqrt(xp)),
     "d(sqrt(x))/dx == 1/(2 sqrt(x))")
 
 # quotient : d(x/y)/dx == 1/y ; d/dy == -x/y^2
 q = x / y
-chk(np.allclose(dsl.diff(q, x).eval({"x": xs, "y": yp}), 1.0 / yp), "d(x/y)/dx == 1/y")
-chk(np.allclose(dsl.diff(q, y).eval({"x": xs, "y": yp}), -xs / yp ** 2), "d(x/y)/dy == -x/y^2")
+chk(np.allclose(diff(q, x).eval({"x": xs, "y": yp}), 1.0 / yp), "d(x/y)/dx == 1/y")
+chk(np.allclose(diff(q, y).eval({"x": xs, "y": yp}), -xs / yp ** 2), "d(x/y)/dy == -x/y^2")
 
 # primitive DEFINIE derivee par sa definition (chaine) : f = x*w, w = x/y. d(x*w)/dx = w + x*w'
 # = w + x/y ; l'occurrence NON derivee de w reste un symbole (env doit fournir sa valeur w=x/y).
-w = dsl.Var("w", "prim")
-dfw = dsl.diff(x * w, x, defs={"w": x / y})
+w = Var("w", "prim")
+dfw = diff(x * w, x, defs={"w": x / y})
 env_w = {"x": xs, "y": yp, "w": xs / yp}
 chk(np.allclose(dfw.eval(env_w), xs / yp + xs / yp),
     "primitive definie : d(x*w)/dx avec w=x/y == w + x/y (derivee de la definition, chaine)")
 
 # noeud non derivable -> NotImplementedError nommant le type
-class _Weird(dsl.Expr):
+class _Weird(Expr):
     pass
 
 
 try:
-    dsl.diff(_Weird(), x)
+    diff(_Weird(), x)
     chk(False, "noeud inconnu aurait du lever NotImplementedError")
 except NotImplementedError as ex:
     chk("Weird" in str(ex), f"noeud inconnu -> NotImplementedError ({str(ex)[:48]})")
 
 # exposant DEPENDANT de la variable (x^x) -> NotImplementedError (logarithme absent du DSL)
 try:
-    dsl.diff(x ** x, x)
+    diff(x ** x, x)
     chk(False, "x^x aurait du lever NotImplementedError")
 except NotImplementedError as ex:
     chk("logarithm" in str(ex), f"d(x^x)/dx -> NotImplementedError ({str(ex)[:48]})")
@@ -104,13 +107,13 @@ print("== (b) m.flux_jacobian : Jacobien de flux auto-derive == analytique connu
 
 def iso_model(name):
     """Isotherme 3-var (rho, mx, my), p = cs2 rho, flux et valeurs propres standard."""
-    m = dsl.Model(name)
+    m = Model(name)
     rho, mx, my = m.conservative_vars("rho", "mx", "my",
                                       roles=["Density", "MomentumX", "MomentumY"])
     u = m.primitive("u", mx / rho)
     v = m.primitive("v", my / rho)
     m.primitive("p", CS2 * rho)
-    c = dsl.sqrt(CS2)
+    c = sqrt(CS2)
     m.flux(x=[mx, mx * u + CS2 * rho, mx * v], y=[my, my * u, my * v + CS2 * rho])
     m.eigenvalues(x=[u - c, u, u + c], y=[v - c, v, v + c])
     m.primitive_vars(rho, u, v)
@@ -151,7 +154,7 @@ try:
 except ValueError as ex:
     chk("direction" in str(ex), f"direction invalide rejetee ({str(ex)[:40]})")
 try:
-    mm = dsl.Model("noflux")
+    mm = Model("noflux")
     mm.conservative_vars("a", "b", "c")
     mm.flux_jacobian(0)
     chk(False, "flux_jacobian sans flux aurait du lever")
@@ -161,11 +164,11 @@ except ValueError as ex:
 
 # === (d) rejets explicites (purement symboliques) ==============================================
 print("== (d) rejets : dimensions, variable hors left/right, conflit enable_roe ==")
-L, R = dsl.left, dsl.right
+L, R = left, right
 
 
 def iso_bare():
-    m = dsl.Model("iso_rej")
+    m = Model("iso_rej")
     rho, mx, my = m.conservative_vars("rho", "mx", "my",
                                       roles=["Density", "MomentumX", "MomentumY"])
     m.primitive("u", mx / rho)
@@ -226,13 +229,13 @@ def iso_roe_hand(name):
     """Isotherme 3-var avec roe_dissipation FOURNIE a la main (algebre de Roe isotherme, sans
     Energy, transcrite en left()/right() des deux etats). Pas d'enable_roe : l'utilisateur fournit
     tout le hook."""
-    m = dsl.Model(name)
+    m = Model(name)
     rho, mx, my = m.conservative_vars("rho", "mx", "my",
                                       roles=["Density", "MomentumX", "MomentumY"])
     u = m.primitive("u", mx / rho)
     v = m.primitive("v", my / rho)
     p = m.primitive("p", CS2 * rho)
-    c0 = dsl.sqrt(CS2)
+    c0 = sqrt(CS2)
     m.flux(x=[mx, mx * u + CS2 * rho, mx * v], y=[my, my * u, my * v + CS2 * rho])
     m.eigenvalues(x=[u - c0, u, u + c0], y=[v - c0, v, v + c0])
     m.primitive_vars(rho, u, v)
@@ -241,12 +244,12 @@ def iso_roe_hand(name):
 
     def dissipation(norm, tang):
         """Lignes (densite, normale, tangentielle) de d = |A_roe| dU, moyennes de Roe explicites."""
-        sqL, sqR = L(dsl.sqrt(rho)), R(dsl.sqrt(rho))
+        sqL, sqR = L(sqrt(rho)), R(sqrt(rho))
         den = sqL + sqR
         rho_roe = sqL * sqR
         un = (sqL * L(norm) + sqR * R(norm)) / den
         ut = (sqL * L(tang) + sqR * R(tang)) / den
-        c = (sqL * dsl.sqrt(L(p) / L(rho)) + sqR * dsl.sqrt(R(p) / R(rho))) / den
+        c = (sqL * sqrt(L(p) / L(rho)) + sqR * sqrt(R(p) / R(rho))) / den
         c2 = c * c
         dr = R(rho) - L(rho)
         dp = R(p) - L(p)
@@ -270,13 +273,13 @@ def iso_roe_hand(name):
 
 def iso_roe_roles(name):
     """Meme isotherme avec enable_roe() (capability generee depuis les ROLES) : la reference."""
-    m = dsl.Model(name)
+    m = Model(name)
     rho, mx, my = m.conservative_vars("rho", "mx", "my",
                                       roles=["Density", "MomentumX", "MomentumY"])
     u = m.primitive("u", mx / rho)
     v = m.primitive("v", my / rho)
     m.primitive("p", CS2 * rho)
-    c0 = dsl.sqrt(CS2)
+    c0 = sqrt(CS2)
     m.flux(x=[mx, mx * u + CS2 * rho, mx * v], y=[my, my * u, my * v + CS2 * rho])
     m.eigenvalues(x=[u - c0, u, u + c0], y=[v - c0, v, v + c0])
     m.primitive_vars(rho, u, v)

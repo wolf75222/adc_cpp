@@ -34,11 +34,11 @@ class _MultiSpeciesMixin:
 
         ``handle`` updates an existing :class:`StateHandle` in place (promotion of the first
         species); otherwise a fresh handle is created and recorded."""
-        from .. import dsl as _dsl
+        from ..ir.expr import Var
         comps = tuple(components)
         canon = {c: _canon_role(roles.get(c)) for c in comps} if roles else {}
         space = self._multi_module.state_space(str(name), comps, roles=canon)
-        vars_ = tuple(_dsl.Var(c, "cons") for c in comps)
+        vars_ = tuple(Var(c, "cons") for c in comps)
         if handle is None:
             handle = StateHandle(name, comps, vars_, roles, space=space)
         else:

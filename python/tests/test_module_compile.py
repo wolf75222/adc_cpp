@@ -1,7 +1,7 @@
 """Spec 2 (S2-11 / ADC-447): a pure pops.model.Module compiles via the dsl codegen engine.
 
-A Module authored directly -- typed spaces + operators with IR (dsl.Expr) bodies + eigenvalues --
-is a self-contained, compilable model. ``Module.to_dsl`` lowers it to a dsl.Model (reusing the dsl
+A Module authored directly -- typed spaces + operators with IR (Expr) bodies + eigenvalues --
+is a self-contained, compilable model. ``Module.to_dsl`` lowers it to a Model (reusing the dsl
 backend, not a second codegen), and ``compile_problem(model=module, time=P)`` accepts it. This test
 validates the translation + the emitted .so source (codegen-text); the full Kokkos/AOT compile+run
 is on ROMEO. Pure Python; skips if pops is not importable.
@@ -9,7 +9,10 @@ is on ROMEO. Pure Python; skips if pops is not importable.
 import sys
 
 try:
-    from pops import dsl, model
+    from pops import model
+    from pops.ir.expr import Const, Expr, Var
+    from pops.ir.ops import sqrt
+    from pops.physics.facade import Model
     from pops import time as adctime
 except Exception as exc:  # pops not importable here -> skip, never fake
     print("skip test_module_compile (pops unavailable: %s)" % exc)
@@ -22,11 +25,11 @@ def pure_module():
                         roles={"rho": "density", "mx": "momentum_x", "my": "momentum_y"})
     fields = mod.field_space("fields", ("phi", "grad_x", "grad_y"))
     mod.aux_fields(B_z="cell_scalar")
-    # Operator bodies are plain dsl.Expr over the state/field names (evaluated at codegen only).
-    rho, mx, my = dsl.Var("rho", "cons"), dsl.Var("mx", "cons"), dsl.Var("my", "cons")
-    gx, gy = dsl.Var("grad_x", "aux"), dsl.Var("grad_y", "aux")
-    bz = dsl.Var("B_z", "aux")
-    cs = dsl.sqrt(0.5)  # isothermal sound speed (cs2 = 0.5)
+    # Operator bodies are plain Expr over the state/field names (evaluated at codegen only).
+    rho, mx, my = Var("rho", "cons"), Var("mx", "cons"), Var("my", "cons")
+    gx, gy = Var("grad_x", "aux"), Var("grad_y", "aux")
+    bz = Var("B_z", "aux")
+    cs = sqrt(0.5)  # isothermal sound speed (cs2 = 0.5)
     mod.operator(name="fields_from_state", signature=(u,) >> fields,
                  kind="field_operator", expr=rho)
     mod.operator(name="flux", signature=(u,) >> model.Rate(u), kind="grid_operator",
@@ -35,7 +38,7 @@ def pure_module():
     mod.eigenvalues(x=[mx / rho - cs, mx / rho, mx / rho + cs],
                     y=[my / rho - cs, my / rho, my / rho + cs])
     mod.operator(name="electric", signature=(u, fields) >> model.Rate(u),
-                 kind="local_source", expr=[dsl.Const(0.0), -rho * gx, -rho * gy])
+                 kind="local_source", expr=[Const(0.0), -rho * gx, -rho * gy])
     mod.operator(name="lorentz", signature=(fields,) >> model.LocalLinearOperator(u, u),
                  kind="local_linear_operator",
                  expr=[[0.0, 0.0, 0.0], [0.0, 0.0, bz], [0.0, -bz, 0.0]])
@@ -109,7 +112,7 @@ def test_multiple_field_operators_rejected():
     mod = model.Module("twofields")
     u = mod.state_space("U", ("rho",))
     f1 = mod.field_space("fields", ("phi",))
-    rho = dsl.Var("rho", "cons")
+    rho = Var("rho", "cons")
     mod.operator(name="fields_from_state", signature=(u,) >> f1, kind="field_operator", expr=rho)
     mod.operator(name="psi", signature=(u,) >> f1, kind="field_operator", expr=rho)
     try:
@@ -125,7 +128,7 @@ def test_explicit_roles_honored():
     mod = model.Module("custom")
     u = mod.state_space("U", ("n", "px", "py"),
                         roles={"n": "density", "px": "momentum_x", "py": "momentum_y"})
-    n, px, py = dsl.Var("n", "cons"), dsl.Var("px", "cons"), dsl.Var("py", "cons")
+    n, px, py = Var("n", "cons"), Var("px", "cons"), Var("py", "cons")
     mod.operator(name="flux", signature=(u,) >> model.Rate(u), kind="grid_operator",
                  expr={"x": [px, px * px / n, px * py / n], "y": [py, px * py / n, py * py / n]})
     m = mod.to_dsl()

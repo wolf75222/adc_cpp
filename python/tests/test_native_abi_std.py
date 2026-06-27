@@ -27,7 +27,9 @@ import tempfile
 import numpy as np
 
 import pops
-from pops import dsl
+from pops.codegen.toolchain import loader_cxx_std
+from pops.ir.ops import sqrt
+from pops.physics.model import HyperbolicModel
 
 
 INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "include"))
@@ -36,13 +38,13 @@ GAMMA = 1.4
 
 def build_trivial_euler(name="euler_abistd"):
     """Modele euler 2D minimal en formules (suffisant pour exercer add_native_block en natif)."""
-    e = dsl.HyperbolicModel(name)
+    e = HyperbolicModel(name)
     rho, rhou, rhov, E = e.conservative_vars("rho", "rho_u", "rho_v", "E")
     u = e.primitive("u", rhou / rho)
     v = e.primitive("v", rhov / rho)
     p = e.primitive("p", (GAMMA - 1.0) * (E - 0.5 * rho * (u * u + v * v)))
     H = (E + p) / rho
-    c = dsl.sqrt(GAMMA * p / rho)
+    c = sqrt(GAMMA * p / rho)
     e.set_flux(x=[rhou, rhou * u + p, rhou * v, rho * H * u],
                y=[rhov, rhov * u, rhov * v + p, rho * H * v])
     e.set_eigenvalues(x=[u - c, u, u + c], y=[v - c, v, v + c])
@@ -69,7 +71,7 @@ def _expected_std_from_module():
 
 def check_std_invariant():
     """La norme retournee par loader_cxx_std() DOIT coincider avec la norme reelle du module charge."""
-    got = dsl.loader_cxx_std()
+    got = loader_cxx_std()
     assert got in ("c++20", "c++23"), "loader_cxx_std() = %r (attendu c++20|c++23)" % got
     expected = _expected_std_from_module()
     assert got == expected, (

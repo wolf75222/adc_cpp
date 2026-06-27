@@ -7,20 +7,22 @@ par composante ; (2) max_wave_speed coherent ; (3) check() detecte une variable 
 """
 import numpy as np
 
-from pops import dsl
+from pops.ir.expr import Var
+from pops.ir.ops import sqrt
+from pops.physics.model import HyperbolicModel
 
 GAMMA = 1.4
 
 
 def build_euler():
     """Euler compressible 2D ecrit entierement en formules symboliques."""
-    e = dsl.HyperbolicModel("euler")
+    e = HyperbolicModel("euler")
     rho, rhou, rhov, E = e.conservative_vars("rho", "rho_u", "rho_v", "E")
     u = e.primitive("u", rhou / rho)
     v = e.primitive("v", rhov / rho)
     p = e.primitive("p", (GAMMA - 1.0) * (E - 0.5 * rho * (u * u + v * v)))
     H = (E + p) / rho
-    c = dsl.sqrt(GAMMA * p / rho)
+    c = sqrt(GAMMA * p / rho)
     e.set_flux(x=[rhou, rhou * u + p, rhou * v, rho * H * u],
                y=[rhov, rhov * u, rhov * v + p, rho * H * v])
     e.set_eigenvalues(x=[u - c, u, u + c], y=[v - c, v, v + c])
@@ -65,9 +67,9 @@ def main():
     print("OK  max_wave_speed coherent")
 
     # (3) verification de dependances : reference d'une variable non declaree -> ValueError
-    bad = dsl.HyperbolicModel("bad")
+    bad = HyperbolicModel("bad")
     (r,) = bad.conservative_vars("rho")
-    ghost = dsl.Var("ghost", "aux")  # jamais declaree via aux()
+    ghost = Var("ghost", "aux")  # jamais declaree via aux()
     bad.set_flux(x=[r * ghost], y=[r])
     bad.set_eigenvalues(x=[r], y=[r])
     try:

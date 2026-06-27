@@ -20,7 +20,7 @@ import sys
 
 import numpy as np
 
-from pops import dsl
+from pops.physics.facade import Model
 
 fails = 0
 
@@ -42,7 +42,7 @@ def err_msg(fn):
 def kswap_model(blocks):
     """2 var, flux x = y = [K*b, K*a] : jacobien antidiagonal, spectre exact {-K, +K}.
     Les sous-blocs diagonaux 1x1 sont NULS -> blocks=[[0],[1]] (faux) borne le spectre a 0."""
-    m = dsl.Model("kswap")
+    m = Model("kswap")
     a, b = m.conservative_vars("a", "b")
     K = 2.0
     m.flux(x=[K * b, K * a], y=[K * b, K * a])
@@ -56,7 +56,7 @@ def triangular_model():
     """3 var, jacobiens x et y bloc-INFERIEUR-triangulaires sous la partition [[0], [1, 2]] :
     q0 autonome, (q1, q2) recoivent de q0 mais q0 ne recoit pas d'eux. Les extremes des
     sous-blocs == spectre vrai -> partition legitime, check_model doit passer."""
-    m = dsl.Model("tri3")
+    m = Model("tri3")
     q0, q1, q2 = m.conservative_vars("q0", "q1", "q2")
     m.flux(x=[2.0 * q0, 3.0 * q1 + 0.5 * q0, -1.0 * q2 + 0.2 * q1],
            y=[1.0 * q0, 2.0 * q1 + 0.3 * q0, 0.5 * q2 - 0.1 * q1])
@@ -87,7 +87,7 @@ def check_b_triangular_partition_passes():
 
 def check_c_intra_block_message():
     print("== (c) doublon intra-bloc : message correct ==")
-    m = dsl.Model("intra")
+    m = Model("intra")
     a, b, c = m.conservative_vars("a", "b", "c")
     m.flux(x=[a, b, c], y=[a, b, c])
     msg = err_msg(lambda: m.wave_speeds_from_jacobian(blocks=[[0, 0, 1], [2]]))

@@ -232,10 +232,11 @@ def _discrete_nonsym(n, alpha, beta):
     return apply
 
 
-def _passive_model(dsl, name):
+def _passive_model(name):
     """A minimal 1-variable block with NO flux and NO Poisson coupling: the block's single conservative
     variable doubles as the scalar field the matrix-free solve writes."""
-    m = dsl.Model(name)
+    from pops.physics.facade import Model
+    m = Model(name)
     (rho,) = m.conservative_vars("rho")
     u = m.primitive("u", 0.0 * rho)
     m.primitive_vars(rho=rho, u=u)
@@ -254,11 +255,11 @@ def _run_one(t, pops, np, program, name):
         print("-- (B) skipped: _pops lacks the install_program binding (rebuild _pops) --")
         return None
 
-    from pops import dsl
+    from pops.physics.facade import Model
 
     try:
-        compiled = pops.compile_problem(model=_passive_model(dsl, name + "_prog"), time=program)
-        compiled_model = _passive_model(dsl, name + "_block").compile(backend="production")
+        compiled = pops.compile_problem(model=_passive_model(name + "_prog"), time=program)
+        compiled_model = _passive_model(name + "_block").compile(backend="production")
     except RuntimeError as exc:  # no compiler / no Kokkos visible / .so compile failed
         print("-- (B) skipped: could not build the .so: %s --" % str(exc)[:200])
         return None

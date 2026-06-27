@@ -10,7 +10,10 @@ numerics; skips cleanly if the pops package is not importable.
 import sys
 
 try:
-    from pops import dsl, model
+    from pops import model
+    from pops.ir.expr import Const
+    from pops.ir.ops import abs_
+    from pops.physics.facade import Model
 except Exception as exc:  # pops not importable here -> skip, never fake
     print("skip test_operator_registry (pops unavailable: %s)" % exc)
     sys.exit(0)
@@ -18,7 +21,7 @@ except Exception as exc:  # pops not importable here -> skip, never fake
 
 def build_model():
     """A small electrostatic-magnetized fluid exercising every operator kind."""
-    m = dsl.Model("euler_poisson_lorentz")
+    m = Model("euler_poisson_lorentz")
     rho, mx, my = m.conservative_vars("rho", "mx", "my")
     # Auxiliary surface (read order fixes the FieldSpace components).
     m.aux("phi")
@@ -29,9 +32,9 @@ def build_model():
     m.flux(x=[mx, mx * mx / rho, mx * my / rho],
            y=[my, mx * my / rho, my * my / rho])
     # Named source reading the solved field gradients -> local_source (needs Fields).
-    m.source_term("electric", [dsl.Const(0.0), rho * (-gx), rho * (-gy)])
+    m.source_term("electric", [Const(0.0), rho * (-gx), rho * (-gy)])
     # Default source independent of the fields -> local_source (state only).
-    m.source_term("default", [dsl.Const(0.0), dsl.Const(0.0), -rho * dsl.Const(0.1)])
+    m.source_term("default", [Const(0.0), Const(0.0), -rho * Const(0.1)])
     # Lorentz rotation, coefficients in B_z only -> local_linear_operator (Fields).
     m.linear_source("lorentz", [[0.0, 0.0, 0.0],
                                 [0.0, 0.0, bz],
@@ -41,7 +44,7 @@ def build_model():
     # A second, NAMED elliptic field -> field_operator.
     m.elliptic_field("psi", rhs=mx, aux=["psi_x", "psi_y"])
     # Pointwise positivity projection -> projection.
-    m.projection([dsl.abs_(rho), mx, my])
+    m.projection([abs_(rho), mx, my])
     return m
 
 

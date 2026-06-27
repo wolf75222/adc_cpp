@@ -26,7 +26,8 @@ import tempfile
 import numpy as np
 
 import pops
-from pops import dsl
+from pops.ir.ops import sqrt
+from pops.physics.facade import Model
 
 fails = 0
 INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "include"))
@@ -90,13 +91,13 @@ if not cxx or not os.path.isdir(INCLUDE):
 def iso3(declare_p):
     """Isotherme magnetise 3-var (rho, mx, my). declare_p=True -> primitive 'p' declaree (wave_speeds
     emis, HLL dispo) ; False -> pas de 'p' (pas de wave_speeds, HLL doit etre rejete)."""
-    m = dsl.Model("iso3_%s" % ("withp" if declare_p else "nop"))
+    m = Model("iso3_%s" % ("withp" if declare_p else "nop"))
     rho, mx, my = m.conservative_vars("rho", "mx", "my", roles=["Density", "MomentumX", "MomentumY"])
     cs2 = 0.5
     u = m.primitive("u", mx / rho); v = m.primitive("v", my / rho)
     if declare_p:
         m.primitive("p", cs2 * rho)  # declaree -> wave_speeds emis (meme hors primitive_vars)
-    c = dsl.sqrt(cs2)
+    c = sqrt(cs2)
     m.flux(x=[mx, mx * u + cs2 * rho, mx * v], y=[my, my * u, my * v + cs2 * rho])
     m.eigenvalues(x=[u - c, u, u + c], y=[v - c, v, v + c])
     m.primitive_vars(rho, u, v)

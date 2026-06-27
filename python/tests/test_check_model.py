@@ -2,7 +2,7 @@
 """check_model : verification generique d'un modele (audit 2026-06, chantier 6).
 
 Deux niveaux :
-  - dsl.Model.check_model(...) : verifie les FORMULES avant compilation (flux/source/elliptic
+  - Model.check_model(...) : verifie les FORMULES avant compilation (flux/source/elliptic
     finis, valeurs propres finies et reelles, coherence wave_speeds/max_wave_speed, round-trip
     to_conservative(to_primitive(U)) ~= U, positivite Density / 'p') sur des etats echantillons ;
   - System.check_model(block) : verifie le BLOC INSTALLE sur son etat courant (U fini, residu
@@ -19,7 +19,8 @@ import tempfile
 import numpy as np
 
 import pops
-from pops import dsl
+from pops.ir.ops import sqrt
+from pops.physics.facade import Model
 
 fails = 0
 
@@ -32,14 +33,14 @@ def chk(cond, label):
 
 
 def iso3(broken_roundtrip=False, nan_flux=False):
-    m = dsl.Model("iso3_chk")
+    m = Model("iso3_chk")
     rho, mx, my = m.conservative_vars("rho", "mx", "my", roles=["Density", "MomentumX", "MomentumY"])
     cs2 = 0.5
     u = m.primitive("u", mx / rho)
     v = m.primitive("v", my / rho)
     m.primitive("p", cs2 * rho)
-    c = dsl.sqrt(cs2)
-    fx = dsl.sqrt(rho - 10.0) if nan_flux else mx  # rho ~ [0.1, 2] -> sqrt(negatif) = NaN
+    c = sqrt(cs2)
+    fx = sqrt(rho - 10.0) if nan_flux else mx  # rho ~ [0.1, 2] -> sqrt(negatif) = NaN
     m.flux(x=[fx, mx * u + cs2 * rho, mx * v], y=[my, my * u, my * v + cs2 * rho])
     m.eigenvalues(x=[u - c, u, u + c], y=[v - c, v, v + c])
     m.primitive_vars(rho, u, v)
@@ -50,7 +51,7 @@ def iso3(broken_roundtrip=False, nan_flux=False):
 
 
 # --- 1. DSL : chemin vert ----------------------------------------------------------
-print("== dsl.Model.check_model : modele sain ==")
+print("== Model.check_model : modele sain ==")
 rep = iso3().check_model()
 chk(rep["ok"], "modele isotherme 3-var : ok")
 chk(rep["n_samples"] == 64, "64 echantillons par defaut")
@@ -109,13 +110,13 @@ INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "i
 if cxx and os.path.isdir(INCLUDE):
     tmpd = tempfile.mkdtemp()
     try:
-        mq = dsl.Model("ckrt")
+        mq = Model("ckrt")
         rho, mx, my = mq.conservative_vars("rho", "mx", "my",
                                            roles=["Density", "MomentumX", "MomentumY"])
         uq = mq.primitive("u", mx / rho)
         vq = mq.primitive("v", my / rho)
         mq.primitive("p", 0.5 * rho)
-        cq = dsl.sqrt(0.5)
+        cq = sqrt(0.5)
         mq.flux(x=[mx, mx * uq + 0.5 * rho, mx * vq], y=[my, my * uq, my * vq + 0.5 * rho])
         mq.eigenvalues(x=[uq - cq, uq, uq + cq], y=[vq - cq, vq, vq + cq])
         mq.primitive_vars(rho, uq, vq)

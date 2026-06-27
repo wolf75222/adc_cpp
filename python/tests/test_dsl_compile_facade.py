@@ -22,7 +22,9 @@ import tempfile
 import numpy as np
 
 import pops
-from pops import dsl
+from pops.ir.ops import sqrt
+from pops.physics.aux import roles_for
+from pops.physics.model import HyperbolicModel
 
 INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "include"))
 GAMMA = 1.6667  # gamma NON STANDARD (5/3), distinct du defaut historique 1.4
@@ -31,13 +33,13 @@ GAMMA = 1.6667  # gamma NON STANDARD (5/3), distinct du defaut historique 1.4
 def build_meta_euler():
     """Euler aux roles canoniques + gamma 5/3 : fournit des metadonnees UTILES (roles non 'Custom',
     gamma explicite). Sert a prouver que la facade les transporte et que require_metadata passe."""
-    e = dsl.HyperbolicModel("euler_facade")
+    e = HyperbolicModel("euler_facade")
     rho, rhou, rhov, E = e.conservative_vars("rho", "rho_u", "rho_v", "E")
     u = e.primitive("u", rhou / rho)
     v = e.primitive("v", rhov / rho)
     p = e.primitive("p", (GAMMA - 1.0) * (E - 0.5 * rho * (u * u + v * v)))
     H = (E + p) / rho
-    c = dsl.sqrt(GAMMA * p / rho)
+    c = sqrt(GAMMA * p / rho)
     e.set_flux(x=[rhou, rhou * u + p, rhou * v, rho * H * u],
                y=[rhov, rhov * u, rhov * v + p, rho * H * v])
     e.set_eigenvalues(x=[u - c, u, u + c], y=[v - c, v, v + c])
@@ -50,7 +52,7 @@ def build_meta_euler():
 def build_bare_scalar():
     """Transport scalaire 'q' SANS role canonique ni gamma : metadonnees PAUVRES, declenche les
     erreurs require_metadata (le System retomberait sur le fallback custom / 1.4)."""
-    e = dsl.HyperbolicModel("bare_q")
+    e = HyperbolicModel("bare_q")
     (q,) = e.conservative_vars("q")
     e.set_flux(x=[q], y=[q])
     e.set_eigenvalues(x=[q], y=[q])
@@ -62,7 +64,7 @@ def build_bare_scalar():
 def build_bz_scalar():
     """Scalaire sans flux, source magnetisee S = B_z * n (lit aux('B_z')) : exerce le canal aux
     etendu (n_aux=4) a travers la facade."""
-    m = dsl.HyperbolicModel("bz_facade")
+    m = HyperbolicModel("bz_facade")
     (nn,) = m.conservative_vars("n")
     zero = 0.0 * nn
     m.set_flux(x=[zero], y=[zero])
@@ -88,7 +90,7 @@ def test_guardrails():
         else:
             raise AssertionError("backend %r aurait du lever" % (bad,))
     try:
-        dsl.HyperbolicModel.adder_for("nope")
+        HyperbolicModel.adder_for("nope")
     except ValueError:
         pass
     else:
@@ -96,9 +98,9 @@ def test_guardrails():
     print("OK  backend inconnu rejete (compile + adder_for)")
 
     # mapping backend -> adder System (couplage compilation/execution)
-    assert dsl.HyperbolicModel.adder_for("prototype") == "add_dynamic_block"
-    assert dsl.HyperbolicModel.adder_for("aot") == "add_compiled_block"
-    assert dsl.HyperbolicModel.adder_for("production") == "add_native_block"
+    assert HyperbolicModel.adder_for("prototype") == "add_dynamic_block"
+    assert HyperbolicModel.adder_for("aot") == "add_compiled_block"
+    assert HyperbolicModel.adder_for("production") == "add_native_block"
     print("OK  adder_for : prototype->add_dynamic_block, aot->add_compiled_block, "
           "production->add_native_block")
 
@@ -125,8 +127,8 @@ def test_guardrails():
     # on isole le pre-check en passant un backend pauvre cote compilation (mais on ne compile pas ici,
     # on verifie juste que la verification de metadonnees ne leve pas avant l'appel au moteur). On le
     # prouve via le chemin bout-en-bout ci-dessous ; ici on s'assure juste que bare != e.
-    assert all(r == "Custom" for r in dsl.roles_for(bare.cons_names)), "scalaire q devrait etre Custom"
-    assert dsl.roles_for(e.cons_names) == ["Density", "MomentumX", "MomentumY", "Energy"]
+    assert all(r == "Custom" for r in roles_for(bare.cons_names)), "scalaire q devrait etre Custom"
+    assert roles_for(e.cons_names) == ["Density", "MomentumX", "MomentumY", "Energy"]
     print("OK  garde-fous pur-Python verts")
 
 
@@ -150,7 +152,7 @@ def test_end_to_end():
             so = e.compile(os.path.join(tmp, "facade_%s.so" % backend), INCLUDE,
                            backend=backend, require_metadata=True)
             s = pops.System(n=n, L=L, periodic=True)
-            adder = getattr(s, dsl.HyperbolicModel.adder_for(backend))
+            adder = getattr(s, HyperbolicModel.adder_for(backend))
             kw = dict(gamma=GAMMA) if backend == "production" else {}
             adder("gas", so, limiter="minmod", riemann="hllc", recon="primitive", **kw)
             # noms/roles DU MODELE (pas le fallback u0.. / custom)
@@ -164,7 +166,7 @@ def test_end_to_end():
             assert abs(s.block_gamma("gas") - GAMMA) < 1e-12, \
                 "%s : gamma != metadonnees : %r" % (backend, s.block_gamma("gas"))
             print("OK  backend=%s : noms/roles/gamma propages (gamma=%.4f) via %s"
-                  % (backend, s.block_gamma("gas"), dsl.HyperbolicModel.adder_for(backend)))
+                  % (backend, s.block_gamma("gas"), HyperbolicModel.adder_for(backend)))
 
         # --- la facade ne regresse pas la numerique : compile(aot) octets-identiques a
         #     compile_or_jit(mode="compile") (meme source generee, meme toolchain) ---
@@ -184,7 +186,7 @@ def test_end_to_end():
         # --- prototype : JIT (add_dynamic_block), roles/gamma transportes aussi (sans require_metadata) ---
         sop = e.compile(os.path.join(tmp, "facade_proto.so"), INCLUDE, backend="prototype")
         sp = pops.System(n=n, L=L, periodic=True)
-        getattr(sp, dsl.HyperbolicModel.adder_for("prototype"))("gas", sop, recon="minmod")
+        getattr(sp, HyperbolicModel.adder_for("prototype"))("gas", sop, recon="minmod")
         assert sp.variable_names("gas") == ["rho", "rho_u", "rho_v", "E"], \
             "prototype : noms != metadonnees : %r" % sp.variable_names("gas")
         assert sp.variable_roles("gas") == ["density", "momentum_x", "momentum_y", "energy"], \

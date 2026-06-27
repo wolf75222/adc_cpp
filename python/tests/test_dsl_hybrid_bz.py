@@ -16,14 +16,14 @@ import tempfile
 import numpy as np
 
 import pops
-from pops import dsl
+from pops.physics.bricks import SourceBrick
 
 INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "include"))
 
 
 def build_bz_source():
     """Brique de source DSL S = B_z * n (scalaire), lit aux('B_z') -> n_aux=4."""
-    s = dsl.SourceBrick("bz")
+    s = SourceBrick("bz")
     (nn,) = s.conservative_vars("n")
     bz = s.aux("B_z")
     s.source([bz * nn])
@@ -76,7 +76,7 @@ def main():
         # T_e (2e champ aux extra, index 4) se propage par le MEME mecanisme que B_z : une source DSL
         # lisant aux('T_e') porte le composite a n_aux=5. Le marshaling hote/device est partage avec
         # B_z (deja prouve de bout en bout ci-dessus) ; on verifie ici la propagation au composite.
-        s_te = dsl.SourceBrick("te")
+        s_te = SourceBrick("te")
         (nn_te,) = s_te.conservative_vars("n")
         s_te.source([s_te.aux("T_e") * nn_te])
         m_te = pops.CompositeModel(transport=pops.ExB(B0=1.0), source=s_te.compile(),

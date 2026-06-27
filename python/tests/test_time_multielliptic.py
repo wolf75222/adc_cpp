@@ -35,15 +35,16 @@ import sys
 
 def _pops_mods():
     try:
-        from pops import dsl
+        from pops.ir.ops import sqrt
+        from pops.physics.facade import Model
         from pops import time as adctime
     except Exception as exc:  # pops not importable here -> skip, never fake
         print("skip test_time_multielliptic (pops unavailable: %s)" % exc)
         sys.exit(0)
-    return dsl, adctime
+    return Model, sqrt, adctime
 
 
-dsl, adctime = _pops_mods()
+Model, sqrt, adctime = _pops_mods()
 
 fails = 0
 
@@ -77,7 +78,7 @@ def _block(m):
     p = m.primitive("p", cs2 * rho)
     m.primitive_vars(rho=rho, u=u, v=v, p=p)
     m.conservative_from([rho, rho * u, rho * v])
-    cs = dsl.sqrt(cs2)
+    cs = sqrt(cs2)
     m.eigenvalues(x=[u - cs, u, u + cs], y=[v - cs, v, v + cs])
     m.flux(x=[mx, mx * u + p, my * u], y=[my, mx * v, my * v + p])
     m.elliptic_rhs(Q * rho)  # default Poisson coupling: f = q * rho
@@ -86,7 +87,7 @@ def _block(m):
 
 def default_model(name="me_default"):
     """Default Poisson only; the source pushes momentum along the default electric field -grad phi."""
-    m = dsl.Model(name)
+    m = Model(name)
     rho, mx, my = _block(m)
     gx = m.aux("grad_x")
     gy = m.aux("grad_y")
@@ -98,7 +99,7 @@ def default_model(name="me_default"):
 def named_model(name="me_named", scale=1.0, src_scale=1.0):
     """Default Poisson PLUS a named field 'phi2' with rhs = scale * (default RHS). The source reads
     phi2's OWN gradient (g2x/g2y, the named aux), multiplied by src_scale -- NOT the default grad."""
-    m = dsl.Model(name)
+    m = Model(name)
     rho, mx, my = _block(m)
     # The named field's output aux components -- declared as model aux_field slots so a source can read
     # them and the runtime has a channel to write into.
@@ -152,7 +153,7 @@ chk(raises(NotImplementedError, lambda: _prog("me_nomodel", field="phi2").emit_c
 
 
 def _bad_rhs_aux():
-    m = dsl.Model("me_badrhs")
+    m = Model("me_badrhs")
     rho, mx, my = _block(m)
     m.elliptic_field("phi2", rhs=rho + m.aux("grad_x"))  # rhs reading aux -> rejected
 
@@ -161,7 +162,7 @@ chk(raises(ValueError, _bad_rhs_aux), "an elliptic_field rhs reading the aux cha
 
 
 def _bad_aux_out():
-    m = dsl.Model("me_badaux")
+    m = Model("me_badaux")
     rho, mx, my = _block(m)
     m.elliptic_field("phi2", rhs=rho, aux=["never_declared"])  # output aux not an aux_field
     m._m._elliptic_field_registrations("Me_badauxGen")

@@ -27,15 +27,16 @@ import sys
 
 def _pops_mods():
     try:
-        from pops import dsl
+        from pops.ir.ops import sqrt
+        from pops.physics.facade import Model
         from pops import time as adctime
     except Exception as exc:  # pops not importable here -> skip, never fake
         print("skip test_time_named_flux_elliptic (pops unavailable: %s)" % exc)
         sys.exit(0)
-    return dsl, adctime
+    return Model, sqrt, adctime
 
 
-dsl, adctime = _pops_mods()
+Model, sqrt, adctime = _pops_mods()
 
 fails = 0
 
@@ -66,7 +67,7 @@ def _base_block(m):
     p = m.primitive("p", cs2 * rho)
     m.primitive_vars(rho=rho, u=u, v=v, p=p)
     m.conservative_from([rho, rho * u, rho * v])
-    cs = dsl.sqrt(cs2)
+    cs = sqrt(cs2)
     m.eigenvalues(x=[u - cs, u, u + cs], y=[v - cs, v, v + cs])
     gx = m.aux("grad_x")
     gy = m.aux("grad_y")
@@ -75,7 +76,7 @@ def _base_block(m):
 
 def whole_flux_model(name="nf_whole"):
     """The physical flux as the model's DEFAULT (m.flux) AND as a single named flux 'whole'."""
-    m = dsl.Model(name)
+    m = Model(name)
     rho, mx, my, u, v, p, gx, gy = _base_block(m)
     fx = [mx, mx * u + p, my * u]
     fy = [my, mx * v, my * v + p]
@@ -87,7 +88,7 @@ def whole_flux_model(name="nf_whole"):
 def split_flux_model(name="nf_split"):
     """The SAME physical flux split into two named pieces 'conv' + 'press' that sum to it. The default
     m.flux is the same whole flux (so the model is otherwise identical to whole_flux_model)."""
-    m = dsl.Model(name)
+    m = Model(name)
     rho, mx, my, u, v, p, gx, gy = _base_block(m)
     fx = [mx, mx * u + p, my * u]
     fy = [my, mx * v, my * v + p]
@@ -103,7 +104,7 @@ print("== (A) m.flux_term / m.elliptic_field validation + hash + codegen ==")
 
 
 def _carrier():
-    m = dsl.Model("nf")
+    m = Model("nf")
     rho, mx, my, u, v, p, gx, gy = _base_block(m)
     m.flux(x=[mx, mx * u + p, my * u], y=[my, mx * v, my * v + p])
     return m, dict(rho=rho, mx=mx, my=my, u=u, v=v, p=p, gx=gx, gy=gy)
@@ -132,7 +133,7 @@ chk(raises(ValueError, lambda: m3.flux_term("1bad", x=[V3["mx"], V3["mx"], V3["m
 
 # default alias: flux_term('default', ...) == m.flux(...), hash unchanged.
 a = whole_flux_model("nf_alias_a")
-b = dsl.Model("nf_alias_a")
+b = Model("nf_alias_a")
 rho, mx, my, u, v, p, gx, gy = _base_block(b)
 b.flux_term("default", x=[mx, mx * u + p, my * u], y=[my, mx * v, my * v + p])
 b.flux_term("whole", x=[mx, mx * u + p, my * u], y=[my, mx * v, my * v + p])

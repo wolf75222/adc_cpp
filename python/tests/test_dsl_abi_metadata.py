@@ -18,7 +18,8 @@ import subprocess
 import tempfile
 
 import pops
-from pops import dsl
+from pops.ir.ops import sqrt
+from pops.physics.model import HyperbolicModel
 
 INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "include"))
 GAMMA = 1.6667  # gamma NON STANDARD (monoatomique 5/3), distinct du defaut historique 1.4
@@ -27,7 +28,7 @@ GAMMA = 1.6667  # gamma NON STANDARD (monoatomique 5/3), distinct du defaut hist
 def build_shuffled_euler():
     """Euler au layout NON STANDARD [my, E, mx, rho] (roles explicites) + gamma 5/3. Sert a prouver
     que noms, roles ET gamma traversent l'ABU du .so au lieu du fallback. La physique reste Euler."""
-    e = dsl.HyperbolicModel("euler_meta")
+    e = HyperbolicModel("euler_meta")
     my, E, mx, rho = e.conservative_vars(
         "my", "ee", "mx", "rho",
         roles=["MomentumY", "Energy", "MomentumX", "Density"])
@@ -35,7 +36,7 @@ def build_shuffled_euler():
     v = e.primitive("v", my / rho)
     p = e.primitive("p", (GAMMA - 1.0) * (E - 0.5 * rho * (u * u + v * v)))
     H = (E + p) / rho
-    c = dsl.sqrt(GAMMA * p / rho)
+    c = sqrt(GAMMA * p / rho)
     e.set_flux(x=[mx * v, rho * H * u, mx * u + p, mx],
                y=[my * v + p, rho * H * v, my * u, my])
     e.set_eigenvalues(x=[u - c, u, u + c], y=[v - c, v, v + c])
@@ -52,7 +53,7 @@ def build_shuffled_euler():
 # d'avant ce chantier : aucun des symboles pops_compiled_var_names / _roles / _gamma n'est defini.
 def build_legacy_scalar():
     """Transport scalaire (1 var, nom 'q' sans role canonique). Brique simple pour le .so legacy."""
-    e = dsl.HyperbolicModel("legacy_q")
+    e = HyperbolicModel("legacy_q")
     (q,) = e.conservative_vars("q")
     e.set_flux(x=[q], y=[q])
     e.set_eigenvalues(x=[q], y=[q])
@@ -65,7 +66,7 @@ def compile_src(src, so_path, std="c++20"):
     # adc_cpp est Kokkos-only : le .so legacy inclut compiled_block_abi.hpp -> for_each (#error sans
     # Kokkos). pops_loader_build_flags fournit compilateur + flags Kokkos (+ macOS -undefined dynamic_lookup),
     # symboles Kokkos resolus contre _pops au chargement.
-    from pops.dsl import pops_loader_build_flags
+    from pops.codegen.toolchain import pops_loader_build_flags
     cc, kflags_c, kflags_l = pops_loader_build_flags()
     with tempfile.TemporaryDirectory() as tmp:
         cpp = os.path.join(tmp, "legacy.cpp")

@@ -1,7 +1,6 @@
 """Moment-hierarchy source terms: Lorentz forcing, Maxwellian matching, BGK collision.
 
-Extracted from pops.moments (flat module); symbols are re-exported via
-python/pops/lib/moments/__init__.py.
+Symbols are re-exported via python/pops/lib/moments/__init__.py.
 
 These functions are pure Python / DSL-expression arithmetic and do NOT require
 the DSL compiler; no lazy import is needed here.

@@ -1,6 +1,6 @@
-"""Spec 2 (S2-3): the public pops.model.Module API and dsl.Model as its PDE facade.
+"""Spec 2 (S2-3): the public pops.model.Module API and Model as its PDE facade.
 
-A Module is the model-free view: typed spaces + a registry of typed operators. dsl.Model
+A Module is the model-free view: typed spaces + a registry of typed operators. Model
 encapsulates a Module (its source_term / linear_source / elliptic_field / flux register
 typed operators). A generic Program -- written only with operator names and signatures --
 runs against any Module that provides the expected signatures. Pure Python; skips if pops
@@ -9,7 +9,9 @@ is not importable.
 import sys
 
 try:
-    from pops import dsl, model
+    from pops import model
+    from pops.ir.expr import Const
+    from pops.physics.facade import Model
     from pops import time as adctime
 except Exception as exc:  # pops not importable here -> skip, never fake
     print("skip test_operator_module (pops unavailable: %s)" % exc)
@@ -74,19 +76,19 @@ def test_module_builder_and_decorator():
 
 
 def test_dsl_model_is_a_module_facade():
-    m = dsl.Model("ep")
+    m = Model("ep")
     rho, mx, my = m.conservative_vars("rho", "mx", "my")
     gx = m.aux("grad_x")
     gy = m.aux("grad_y")
     m.flux(x=[mx, mx, mx], y=[my, my, my])
-    m.source_term("electric", [dsl.Const(0.0), rho * (-gx), rho * (-gy)])
+    m.source_term("electric", [Const(0.0), rho * (-gx), rho * (-gy)])
     m.elliptic_rhs(rho - 1.0)
     mod = m.module
     assert isinstance(mod, model.Module)
     names = mod.operator_registry().names()
     assert "electric" in names and "fields_from_state" in names and "flux_default" in names
     assert "U" in mod.state_spaces() and "fields" in mod.field_spaces()
-    print("OK  dsl.Model.module exposes the derived registry + spaces")
+    print("OK  Model.module exposes the derived registry + spaces")
 
 
 def _build_predictor(P, mdl):
@@ -103,14 +105,14 @@ def _build_predictor(P, mdl):
 
 def _physics_model(name, gain):
     """Two of these differ in physics but share the operator signatures."""
-    m = dsl.Model(name)
+    m = Model(name)
     rho, mx, my = m.conservative_vars("rho", "mx", "my")
     gx = m.aux("grad_x")
     gy = m.aux("grad_y")
     bz = m.aux("B_z")
     m.flux(x=[mx, mx * mx / rho, mx * my / rho],
            y=[my, mx * my / rho, my * my / rho])
-    m.source_term("electric", [dsl.Const(0.0), rho * (-gx) * gain, rho * (-gy) * gain])
+    m.source_term("electric", [Const(0.0), rho * (-gx) * gain, rho * (-gy) * gain])
     m.linear_source("lorentz", [[0.0, 0.0, 0.0],
                                 [0.0, 0.0, bz],
                                 [0.0, -bz, 0.0]])

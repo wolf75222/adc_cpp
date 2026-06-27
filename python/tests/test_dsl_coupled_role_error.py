@@ -23,7 +23,7 @@ Deux points de rejet sont confirmes (lus dans python/pops/dsl.py et python/syste
 import pytest
 
 import pops
-from pops import dsl
+from pops.physics.multispecies import CoupledSource
 
 
 # ---------------------------------------------------------------------------
@@ -32,7 +32,7 @@ from pops import dsl
 
 def test_coupled_source_rejects_unknown_role_at_field():
     """(A1) block().role('bogus') leve ValueError car 'bogus' n'est pas dans _ROLE_TO_CANONICAL."""
-    src = dsl.CoupledSource("test")
+    src = CoupledSource("test")
     raised = False
     msg = ""
     try:
@@ -49,7 +49,7 @@ def test_coupled_source_rejects_unknown_role_at_field():
 
 def test_coupled_source_rejects_unknown_role_at_add():
     """(A2) .add(role='bad') leve ValueError car 'bad' n'est pas un role canonique connu."""
-    src = dsl.CoupledSource("test")
+    src = CoupledSource("test")
     ne = src.block("electrons").role("density")  # valide
     raised = False
     msg = ""
@@ -64,7 +64,7 @@ def test_coupled_source_rejects_unknown_role_at_add():
 
 def test_coupled_source_accepts_valid_role():
     """Contrepartie positive : un role valide ('density') est accepte sans lever."""
-    src = dsl.CoupledSource("test_ok")
+    src = CoupledSource("test_ok")
     ne = src.block("electrons").role("density")
     ng = src.block("neutrals").role("density")
     k = src.param("k", 1.0)

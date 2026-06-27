@@ -30,7 +30,7 @@ try:
     import numpy as np
 
     import pops
-    from pops import dsl
+    from pops.physics.facade import Model
     from pops import time as adctime
 except Exception as exc:  # noqa: BLE001  -- pops/numpy unavailable in this interpreter
     print("skip divergence_solve (pops/numpy unavailable: %s)" % exc)
@@ -42,7 +42,7 @@ ALPHA = 0.1  # Helmholtz coefficient: A = I - alpha*div(grad) = I - alpha*Lap is
 def passive_model(name):
     """A 1-variable block with no flux and no Poisson coupling: the Program runs neither a flux RHS nor
     solve_fields, so the single conservative variable is just the scalar field the solve writes."""
-    m = dsl.Model(name)
+    m = Model(name)
     (rho,) = m.conservative_vars("rho")
     u = m.primitive("u", 0.0 * rho)
     m.primitive_vars(rho=rho, u=u)

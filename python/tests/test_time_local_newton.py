@@ -50,11 +50,12 @@ def raises(exc_types, fn):
 
 
 # --- a 1-variable model with a NON-LINEAR named source S(rho) = -k*rho^2 (a Riccati-type reaction) ---
-def reaction_model(dsl, name, k):
+def reaction_model(name, k):
     """rho only, ZERO flux, a NAMED non-linear source ``react`` = -k*rho^2 (the implicit step rotates
     no transport: the Program drives only the LOCAL non-linear solve). A complete compilable block
     (flux + primitive + eigenvalue + named source_term)."""
-    m = dsl.Model(name)
+    from pops.physics.facade import Model
+    m = Model(name)
     (rho,) = m.conservative_vars("rho")
     u = m.primitive("u", 0.0 * rho)
     m.primitive_vars(rho=rho, u=u)
@@ -96,7 +97,7 @@ def chk(cond, label):
 def section_a(t):
     print("== (A) solve_local_nonlinear validation + codegen ==")
     try:
-        from pops import dsl
+        from pops.physics.facade import Model
     except Exception as exc:  # noqa: BLE001 -- dsl needs _pops; A still skips cleanly, never fakes
         print("-- (A) skipped: pops.dsl unavailable (%s) --" % exc)
         return
@@ -148,7 +149,7 @@ def section_a(t):
     chk(_h(1e-10, 20) != _h(1e-10, 30), "a different max_iter rehashes the IR")
 
     # --- the codegen lowers a per-cell Newton kernel ---
-    m = reaction_model(dsl, "react_cg", 2.0)
+    m = reaction_model("react_cg", 2.0)
     src = reaction_program(t, "react_cg").emit_cpp_program(model=m)
     for frag in ("auto residual_eval = [&]", "pops::detail::mat_inverse<1>(",
                  "for (int it_ = 0;", "J_[1][1]", "std::fmax(rmax_, std::fabs(r_",
@@ -168,7 +169,7 @@ def section_a(t):
         "the Newton codegen is refused without a model")
 
     # --- n_cons > 8 dense-fallback guard fires (the FD Jacobian is a fixed N x N stack inverse) ---
-    big = dsl.Model("too_big_nl")
+    big = Model("too_big_nl")
     cons = big.conservative_vars(*["c%d" % i for i in range(9)])
     big.source_term("react", [-1.0 * c for c in cons])
     Pbig = t.Program("big_nl")
@@ -187,7 +188,7 @@ def section_b(t):
         import numpy as np
 
         import pops
-        from pops import dsl
+        from pops.physics.facade import Model
     except Exception as exc:  # noqa: BLE001
         print("-- (B) skipped: pops/numpy unavailable: %s --" % exc)
         return
@@ -222,7 +223,7 @@ def section_b(t):
 
     # ---- compile the Program + a native reaction block, run one implicit step ----
     try:
-        compiled = pops.compile_problem(model=reaction_model(dsl, "react_prog", k),
+        compiled = pops.compile_problem(model=reaction_model("react_prog", k),
                                        time=reaction_program(t, "react_step"))
     except RuntimeError as exc:  # no compiler / no Kokkos visible / .so compile failed
         _skip("compile_problem could not build the .so: %s" % str(exc)[:160])
@@ -231,7 +232,7 @@ def section_b(t):
 
     sim = pops.System(n=n, L=1.0, periodic=True)
     try:
-        compiled_model = reaction_model(dsl, "react_block", k).compile(backend="production")
+        compiled_model = reaction_model("react_block", k).compile(backend="production")
     except RuntimeError as exc:
         _skip("model compile could not build the .so: %s" % str(exc)[:160])
     sim.add_equation("blk", compiled_model,

@@ -1,4 +1,4 @@
-"""DSL Phase A : l'API utilisateur stable (dsl.Model facade + Param + CompiledModel + add_equation +
+"""DSL Phase A : l'API utilisateur stable (Model facade + Param + CompiledModel + add_equation +
 FiniteVolume + run). PUR-PYTHON au-dessus de HyperbolicModel : aucune numerique nouvelle. cf.
 docs/DSL_MODEL_DESIGN.md.
 
@@ -19,15 +19,18 @@ import tempfile
 import numpy as np
 
 import pops
-from pops import dsl
+from pops.codegen.loader import CompiledModel
+from pops.ir.ops import sqrt
+from pops.physics.facade import Model
+from pops.physics.model import Param
 
 INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "include"))
 GAMMA = 1.6667
 
 
 def build_euler(name="euler_pa"):
-    """Euler 2D ecrit via la FACADE dsl.Model (kwargs primitive_vars, param gamma nomme)."""
-    m = dsl.Model(name)
+    """Euler 2D ecrit via la FACADE Model (kwargs primitive_vars, param gamma nomme)."""
+    m = Model(name)
     rho, rhou, rhov, E = m.conservative_vars(
         "rho", "rho_u", "rho_v", "E",
         roles=["Density", "MomentumX", "MomentumY", "Energy"])
@@ -36,7 +39,7 @@ def build_euler(name="euler_pa"):
     v = rhov / rho
     p = (g - 1.0) * (E - 0.5 * rho * (u * u + v * v))
     H = (E + p) / rho
-    c = dsl.sqrt(g * p / rho)
+    c = sqrt(g * p / rho)
     m.flux(x=[rhou, rhou * u + p, rhou * v, rho * H * u],
            y=[rhov, rhov * u, rhov * v + p, rho * H * v])   # DECLARATEUR
     m.eigenvalues(x=[u - c, u, u + c], y=[v - c, v, v + c])
@@ -53,7 +56,7 @@ def build_euler_predef(name="euler_predef"):
     passees en SELF-REFERENCE a primitive_vars(rho=rho, u=u, v=v, p=p). C'est le style cible avec des
     Var pre-definies : sans le garde-fou self-ref, u=u redefinirait la primitive en `const Real u = u;`
     (auto-init -> NaN). Doit produire le MEME modele que build_euler (formes equivalentes)."""
-    m = dsl.Model(name)
+    m = Model(name)
     rho, rhou, rhov, E = m.conservative_vars(
         "rho", "rho_u", "rho_v", "E",
         roles=["Density", "MomentumX", "MomentumY", "Energy"])
@@ -62,7 +65,7 @@ def build_euler_predef(name="euler_predef"):
     v = m.primitive("v", rhov / rho)
     p = m.primitive("p", (g - 1.0) * (E - 0.5 * rho * (u * u + v * v)))
     H = (E + p) / rho
-    c = dsl.sqrt(g * p / rho)
+    c = sqrt(g * p / rho)
     m.flux(x=[rhou, rhou * u + p, rhou * v, rho * H * u],
            y=[rhov, rhov * u, rhov * v + p, rho * H * v])
     m.eigenvalues(x=[u - c, u, u + c], y=[v - c, v, v + c])
@@ -94,14 +97,14 @@ def pure_python_checks():
     # Param nomme + identite ; runtime SUPPORTE (P7-b)
     m = build_euler()
     g = m.params["gamma"]
-    assert isinstance(g, dsl.Param) and g.name == "gamma" and abs(g.value - GAMMA) < 1e-12 \
+    assert isinstance(g, Param) and g.name == "gamma" and abs(g.value - GAMMA) < 1e-12 \
         and g.kind == "const", "Param identite"
     assert abs(float(g) - GAMMA) < 1e-12, "Param float()"
     # P7-b : les parametres runtime sont desormais implementes (cf. test_dsl_runtime_params). L'ancienne
     # assertion "runtime rejete -> NotImplementedError" etait perimee depuis l'arrivee de la feature et
     # echouait en silence (CI auto-decouverte avalant l'echec, cf. ADC-104).
     kp = m.param("kappa", 1.0, kind="runtime")
-    assert isinstance(kp, dsl.Param) and kp.name == "kappa" and kp.kind == "runtime" \
+    assert isinstance(kp, Param) and kp.name == "kappa" and kp.kind == "runtime" \
         and abs(kp.value - 1.0) < 1e-12, "param runtime supporte (Param kind='runtime')"
     print("OK  Param nomme (name/value/kind) + runtime supporte (P7-b)")
 
@@ -134,7 +137,7 @@ def pure_python_checks():
     # add_equation : erreurs sur un CompiledModel FACTICE (pas de .so reel necessaire, les gardes
     # levent AVANT la frontiere C++).
     sys = pops.System(n=16, periodic=True)
-    fake = dsl.CompiledModel(so_path="/inexistant.so", backend="aot", adder="add_compiled_block",
+    fake = CompiledModel(so_path="/inexistant.so", backend="aot", adder="add_compiled_block",
                              cons_names=["rho", "rho_u", "rho_v", "E"],
                              cons_roles=["Density", "MomentumX", "MomentumY", "Energy"],
                              prim_names=["rho", "u", "v"],  # PAS de 'p' -> hllc/roe doit lever
@@ -147,7 +150,7 @@ def pure_python_checks():
                   spatial=pops.FiniteVolume(limiter="weno5")), "weno5 aot : accepte (echec au dlopen)")
     # WENO5 reste rejete (ValueError) sur le backend 'prototype' (JIT, residu hote Rusanov ordre 1,
     # sans assemble_rhs) : ce chemin n'a pas de stencil large a alimenter.
-    fake_proto = dsl.CompiledModel(so_path="/inexistant.so", backend="prototype",
+    fake_proto = CompiledModel(so_path="/inexistant.so", backend="prototype",
                                    adder="add_dynamic_block", cons_names=["rho", "rho_u", "rho_v", "E"],
                                    cons_roles=["Density", "MomentumX", "MomentumY", "Energy"],
                                    prim_names=["rho", "u", "v", "p"], n_vars=4, gamma=GAMMA, n_aux=3,
@@ -159,7 +162,7 @@ def pure_python_checks():
                   spatial=pops.FiniteVolume(riemann="hllc")), "hllc sans pression")
     expect_raises(ValueError, lambda: sys.add_equation("g", fake, names=["a", "b"]),
                   "names= mauvaise longueur")
-    fake_prod = dsl.CompiledModel(so_path="/inexistant.so", backend="production",
+    fake_prod = CompiledModel(so_path="/inexistant.so", backend="production",
                                   adder="add_native_block", cons_names=["rho"], cons_roles=["Density"],
                                   prim_names=["rho"], n_vars=1, gamma=None, n_aux=3, params={},
                                   caps={}, abi_key="k", model_hash="h", cxx="c++", std="c++20")
@@ -176,7 +179,7 @@ def end_to_end_checks(cxx):
         for backend, exp_adder in (("aot", "add_compiled_block"), ("production", "add_native_block")):
             m = build_euler("euler_%s" % backend)
             cm = m.compile(os.path.join(tmp, "m_%s.so" % backend), INCLUDE, backend=backend)
-            assert isinstance(cm, dsl.CompiledModel), "compile -> CompiledModel"
+            assert isinstance(cm, CompiledModel), "compile -> CompiledModel"
             assert cm.backend == backend and cm.adder == exp_adder, \
                 "%s : adder %r (attendu %r)" % (backend, cm.adder, exp_adder)
             assert cm.n_vars == 4 and abs((cm.gamma or 0) - GAMMA) < 1e-12, "metadonnees CompiledModel"

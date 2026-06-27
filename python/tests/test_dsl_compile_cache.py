@@ -25,15 +25,20 @@ import time
 import numpy as np
 
 import pops
-from pops import dsl
+from pops.codegen.cache import _cache_so_path, pops_cache_dir
+from pops.codegen.loader import CompiledModel
+from pops.codegen.toolchain import pops_include
+from pops.ir.expr import Var
+from pops.ir.ops import sqrt
+from pops.physics.facade import Model
 
 INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "include"))
 GAMMA = 1.6667  # gamma NON STANDARD (5/3)
 
 
 def build_euler(name="euler_cache", gamma=GAMMA):
-    """Euler 2D via la facade dsl.Model (param gamma nomme, roles canoniques)."""
-    m = dsl.Model(name)
+    """Euler 2D via la facade Model (param gamma nomme, roles canoniques)."""
+    m = Model(name)
     rho, rhou, rhov, E = m.conservative_vars(
         "rho", "rho_u", "rho_v", "E",
         roles=["Density", "MomentumX", "MomentumY", "Energy"])
@@ -42,7 +47,7 @@ def build_euler(name="euler_cache", gamma=GAMMA):
     v = rhov / rho
     p = (g - 1.0) * (E - 0.5 * rho * (u * u + v * v))
     H = (E + p) / rho
-    c = dsl.sqrt(g * p / rho)
+    c = sqrt(g * p / rho)
     m.flux(x=[rhou, rhou * u + p, rhou * v, rho * H * u],
            y=[rhov, rhov * u, rhov * v + p, rho * H * v])
     m.eigenvalues(x=[u - c, u, u + c], y=[v - c, v, v + c])
@@ -68,14 +73,14 @@ def pure_python_checks():
     old = os.environ.get("POPS_CACHE_DIR")
     os.environ["POPS_CACHE_DIR"] = cache
     try:
-        assert os.path.normpath(dsl.pops_cache_dir()) == os.path.normpath(cache), \
+        assert os.path.normpath(pops_cache_dir()) == os.path.normpath(cache), \
             "pops_cache_dir doit honorer POPS_CACHE_DIR"
         print("OK  pops_cache_dir() honore POPS_CACHE_DIR")
 
         # pops_include : si POPS_INCLUDE pointe sur un include valide, il est retenu en priorite
         if os.path.isdir(INCLUDE):
             os.environ["POPS_INCLUDE"] = INCLUDE
-            assert os.path.normpath(dsl.pops_include()) == os.path.normpath(INCLUDE), \
+            assert os.path.normpath(pops_include()) == os.path.normpath(INCLUDE), \
                 "pops_include doit honorer POPS_INCLUDE"
             del os.environ["POPS_INCLUDE"]
             print("OK  pops_include() honore POPS_INCLUDE")
@@ -84,32 +89,32 @@ def pure_python_checks():
         abi = "fakeabikey"
         m = build_euler()
         h = m._model_hash()
-        p_aot = dsl._cache_so_path(h, abi, "aot", "system", None)
-        p_aot_again = dsl._cache_so_path(h, abi, "aot", "system", None)
+        p_aot = _cache_so_path(h, abi, "aot", "system", None)
+        p_aot_again = _cache_so_path(h, abi, "aot", "system", None)
         assert p_aot == p_aot_again, "cle de cache non deterministe pour un modele identique"
         assert p_aot.startswith(os.path.normpath(cache)), "le .so en cache doit vivre dans le cache dir"
 
         # backend / target / abi differents -> chemins distincts (memes model_hash)
-        assert dsl._cache_so_path(h, abi, "production", "system", None) != p_aot, \
+        assert _cache_so_path(h, abi, "production", "system", None) != p_aot, \
             "backend different doit donner un chemin different"
-        assert dsl._cache_so_path(h, abi, "production", "amr_system", None) != \
-            dsl._cache_so_path(h, abi, "production", "system", None), \
+        assert _cache_so_path(h, abi, "production", "amr_system", None) != \
+            _cache_so_path(h, abi, "production", "system", None), \
             "target different doit donner un chemin different"
-        assert dsl._cache_so_path(h, "autreabi", "aot", "system", None) != p_aot, \
+        assert _cache_so_path(h, "autreabi", "aot", "system", None) != p_aot, \
             "abi_key differente doit donner un chemin different"
 
         # un PARAMETRE different change model_hash, donc le chemin de cache (cache MISS)
         m2 = build_euler(gamma=1.4)
         assert m2._model_hash() != h, "un param different doit changer model_hash"
-        assert dsl._cache_so_path(m2._model_hash(), abi, "aot", "system", None) != p_aot, \
+        assert _cache_so_path(m2._model_hash(), abi, "aot", "system", None) != p_aot, \
             "un param different doit buster le cache"
 
         # une FORMULE differente change aussi model_hash : on ajoute une source non triviale
         m3 = build_euler()
-        rho3 = dsl.Var("rho", "cons")
+        rho3 = Var("rho", "cons")
         m3.source([0.0 * rho3, 0.0 * rho3, 0.0 * rho3, rho3])  # source != defaut -> formules differentes
         assert m3._model_hash() != h, "une formule differente (source) doit changer model_hash"
-        assert dsl._cache_so_path(m3._model_hash(), abi, "aot", "system", None) != p_aot, \
+        assert _cache_so_path(m3._model_hash(), abi, "aot", "system", None) != p_aot, \
             "une formule differente doit buster le cache"
         print("OK  cle de cache : stable pour modele identique, distincte sur param/formule/backend/"
               "target/abi")
@@ -142,7 +147,7 @@ def end_to_end_checks():
 
             # (a) compile SANS so_path NI include -> CompiledModel valide
             cm = m.compile(backend=backend)
-            assert isinstance(cm, dsl.CompiledModel), "compile -> CompiledModel"
+            assert isinstance(cm, CompiledModel), "compile -> CompiledModel"
             assert cm.adder == exp_adder, "%s : adder %r (attendu %r)" % (backend, cm.adder, exp_adder)
             assert cm.so_path and os.path.exists(cm.so_path), "%s : .so absente" % backend
             assert os.path.normpath(cm.so_path).startswith(os.path.normpath(cache)), \

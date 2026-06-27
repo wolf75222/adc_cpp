@@ -74,7 +74,7 @@ diocotron normalization benchmark, not the full Euler-Poisson system.
 
 ## What the model is
 
-The script writes the model symbolically with the symbolic DSL (`pops.dsl.Model`): a single
+The script writes the model symbolically with the symbolic DSL (`pops.physics.facade.Model`): a single
 conservative variable `n`, the auxiliary fields `phi`, `grad_x`, `grad_y` supplied by the solver,
 the E x B advection flux, and the elliptic right-hand side `alpha (n - n_i0)`. Here is the model
 definition from the tested script:

@@ -35,7 +35,9 @@ import tempfile
 import numpy as np
 
 import pops
-from pops import dsl
+from pops.codegen.loader import CompiledModel
+from pops.ir.ops import sqrt
+from pops.physics.facade import Model
 
 GAMMA = 1.4
 INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "include"))
@@ -43,14 +45,14 @@ INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "i
 
 def _euler_formulas(m):
     """Pose les formules Euler compressible (flux + valeurs propres + conversions + gamma) sur la
-    FACADE dsl.Model @p m (dont compile(...) rend un CompiledModel). Renvoie (rho, rho_u, rho_v, E)."""
+    FACADE Model @p m (dont compile(...) rend un CompiledModel). Renvoie (rho, rho_u, rho_v, E)."""
     rho, rhou, rhov, E = m.conservative_vars("rho", "rho_u", "rho_v", "E")
     u = rhou / rho
     v = rhov / rho
     p = (GAMMA - 1.0) * (E - 0.5 * rho * (u * u + v * v))
     pu, pv, pp = m.primitive("u", u), m.primitive("v", v), m.primitive("p", p)
     H = (E + pp) / rho
-    c = dsl.sqrt(GAMMA * pp / rho)
+    c = sqrt(GAMMA * pp / rho)
     m.flux(x=[rhou, rhou * pu + pp, rhou * pv, rho * H * pu],
            y=[rhov, rhov * pu, rhov * pv + pp, rho * H * pv])
     m.eigenvalues(x=[pu - c, pu, pu + c], y=[pv - c, pv, pv + c])
@@ -61,9 +63,9 @@ def _euler_formulas(m):
 
 
 def _build_euler_transport():
-    """Euler PUR (transport seul) via la facade dsl.Model : pas de source, elliptic_rhs NUL. Le solve
+    """Euler PUR (transport seul) via la facade Model : pas de source, elliptic_rhs NUL. Le solve
     elliptique donne phi=0 des deux cotes (zero bruit FP), donc la parite transport est BIT-IDENTIQUE."""
-    m = dsl.Model("euler_transport")
+    m = Model("euler_transport")
     rho, _rhou, _rhov, _E, _u, _v = _euler_formulas(m)
     m.elliptic_rhs(0.0 * rho)  # f = 0 : aucun couplage Poisson (isole le transport)
     return m
@@ -71,8 +73,8 @@ def _build_euler_transport():
 
 def _build_euler_poisson():
     """Euler compressible + force de gravite + couplage self-consistant f = -(rho - 1) (GravityForce +
-    GravityCoupling sign=-1, 4piG=1, rho0=1) : un VRAI bloc couple sur AMR (facade dsl.Model)."""
-    m = dsl.Model("euler_poisson")
+    GravityCoupling sign=-1, 4piG=1, rho0=1) : un VRAI bloc couple sur AMR (facade Model)."""
+    m = Model("euler_poisson")
     rho, rhou, rhov, _E, _u, _v = _euler_formulas(m)
     gx = m.aux("grad_x")
     gy = m.aux("grad_y")
@@ -115,7 +117,7 @@ def main():
         cm_t = et.compile(os.path.join(tmp, "euler_transport_amr.so"), INCLUDE,
                           backend="production", target="amr_system")
         so_t = cm_t.so_path
-        assert isinstance(cm_t, dsl.CompiledModel)
+        assert isinstance(cm_t, CompiledModel)
         assert cm_t.adder == "add_native_block" and cm_t.target == "amr_system"
         assert cm_t.caps.get("amr") is True, "production caps amr=True (Phase D)"
         spec_t = pops.Model(state=pops.FluidState("compressible", gamma=GAMMA),
@@ -206,7 +208,7 @@ def main():
         # La garde-fou pressure reste active : un modele SANS primitive 'p' doit etre rejete.
         # Modele isotherme 3 variables (rho, rho_u, rho_v) avec primitives (rho, u, v) sans 'p' :
         # il compile, mais add_equation(flux=hllc) doit lever ValueError (pression requise).
-        m_iso = dsl.Model("isothermal_no_p")
+        m_iso = Model("isothermal_no_p")
         rho_i, rhou_i, rhov_i = m_iso.conservative_vars("rho", "rho_u", "rho_v")
         cs2 = 0.5
         ui = rhou_i / rho_i
@@ -215,8 +217,8 @@ def main():
         pvi = m_iso.primitive("v", vi)
         m_iso.flux(x=[rhou_i, rhou_i * pui + cs2 * rho_i, rhou_i * pvi],
                    y=[rhov_i, rhov_i * pui, rhov_i * pvi + cs2 * rho_i])
-        m_iso.eigenvalues(x=[pui - dsl.sqrt(cs2), pui, pui + dsl.sqrt(cs2)],
-                          y=[pvi - dsl.sqrt(cs2), pvi, pvi + dsl.sqrt(cs2)])
+        m_iso.eigenvalues(x=[pui - sqrt(cs2), pui, pui + sqrt(cs2)],
+                          y=[pvi - sqrt(cs2), pvi, pvi + sqrt(cs2)])
         m_iso.primitive_vars(rho_i, pui, pvi)
         m_iso.conservative_from([rho_i, rho_i * pui, rho_i * pvi])
         m_iso.elliptic_rhs(0.0 * rho_i)
@@ -326,8 +328,8 @@ def _compile_wrong_abi(model, dst_so, cxx):
     bidon) : le .so est valide mais sa cle d'ABI differe de celle du module -> rejet d'add_native_block.
     On regenere (pas de patch binaire : sur macOS ARM cela invaliderait la signature et tuerait le
     process). Renvoie le chemin du .so."""
-    from pops.dsl import pops_loader_build_flags
-    # model est une facade dsl.Model : le HyperbolicModel backing (_m) porte emit_cpp_native_loader.
+    from pops.codegen.toolchain import pops_loader_build_flags
+    # model est une facade Model : le HyperbolicModel backing (_m) porte emit_cpp_native_loader.
     src = model._m.emit_cpp_native_loader(target="amr_system")
     # adc_cpp est Kokkos-only : le loader inclut les en-tetes pops -> Kokkos + (macOS) -undefined
     # dynamic_lookup via pops_loader_build_flags. SIGNATURE D'EN-TETES FAUSSE conservee (le .so compile

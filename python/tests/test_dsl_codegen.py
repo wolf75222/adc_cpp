@@ -13,13 +13,14 @@ import tempfile
 
 import numpy as np
 
-from pops import dsl
+from pops.ir.ops import sqrt
+from pops.physics.model import HyperbolicModel
 
 GAMMA = 1.4
 
 
 def build_euler():
-    e = dsl.HyperbolicModel("euler")
+    e = HyperbolicModel("euler")
     rho, rhou, rhov, E = e.conservative_vars("rho", "rho_u", "rho_v", "E")
     u = e.primitive("u", rhou / rho)
     v = e.primitive("v", rhov / rho)
@@ -27,7 +28,7 @@ def build_euler():
     H = (E + p) / rho
     e.set_flux(x=[rhou, rhou * u + p, rhou * v, rho * H * u],
                y=[rhov, rhov * u, rhov * v + p, rho * H * v])
-    c = dsl.sqrt(GAMMA * p / rho)
+    c = sqrt(GAMMA * p / rho)
     e.set_eigenvalues(x=[u - c, u, u + c], y=[v - c, v, v + c])
     return e
 

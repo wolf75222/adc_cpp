@@ -15,7 +15,7 @@ The document relies on the architecture already in place (sources read):
   `LinearSolver` / `FieldPostProcess`), 8 (distributed AMR);
 - `docs/ALGORITHMS.md` (FV bricks, elliptic operator, cut-cell Shortley-Weller);
 - `docs/PAPER_ROADMAP.md` (Hoffart reproduction status, Cartesian ring-edge blocker);
-- `docs/DSL_MODEL_DESIGN.md` (`dsl.Model` facade, physical roles, `add_native_block`);
+- `docs/DSL_MODEL_DESIGN.md` (`pops.physics.facade.Model` facade, physical roles, `add_native_block`);
 - `docs/GPU_RUNTIME_PORT.md` (device-clean harness: named functors, no extended lambda);
 - the MERGED polar Phase 1 (#116, commit `004efca`): the MESH abstraction
   (`pops.CartesianMesh` / `pops.PolarMesh` -> `System(mesh=)`), with `pops.FiniteVolume` = recon +
@@ -164,7 +164,7 @@ fluid species that exposes the roles
 - plus access to `phi`, `grad phi`, the field `B_z` / `Omega`, and the constant `alpha`.
 
 It works for a model written in C++ BRICKS (`CompositeModel`, `add_block`) OR in compiled DSL
-(`dsl.Model` -> `add_native_block`), provided the ROLES are present. The drift diocotron
+(`pops.physics.facade.Model` -> `add_native_block`), provided the ROLES are present. The drift diocotron
 is only ONE client; a model with two magnetized species would be another, without an extra line of
 Schur code. This is the exact inverse of a scenario-named solver.
 
@@ -263,7 +263,7 @@ the coefficient -> global solve -> local reconstruction).
 
 At the start, the DSL has NOTHING to add: the condensation is selected by the PRESENCE of the
 required roles (`Density`/`MomentumX`/`MomentumY` + `phi`/`B_z`/`alpha`) and by the choice of the integrator
-on the facade side (section 6). An existing DSL model (`dsl.Model`) that declares these roles is
+on the facade side (section 6). An existing DSL model (`pops.physics.facade.Model`) that declares these roles is
 directly eligible via `add_native_block` (native zero-copy path, GPU/MPI, `docs/
 DSL_MODEL_DESIGN.md`). ONLY LATER, an explicit declarator `m.implicit_coupling(...)`
 (naming `phi`, `v`, `Omega`, `alpha`, `theta`) could make the intention readable in the

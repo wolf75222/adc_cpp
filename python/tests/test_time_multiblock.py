@@ -57,11 +57,12 @@ def raises(exc_types, fn):
     return False
 
 
-def passive_model(dsl, name):
+def passive_model(name):
     """A 1-variable PASSIVE-transport scalar (rho) with a constant advection velocity baked into the
     flux and a NAMED source ``decay`` = -k*rho (a linear sink), EMPTY default source. A complete,
     compilable production block (flux + primitives + eigenvalues + named source_term)."""
-    m = dsl.Model(name)
+    from pops.physics.facade import Model
+    m = Model(name)
     (rho,) = m.conservative_vars("rho")
     a = 0.7  # constant advection speed (x and y)
     u = m.primitive("u", a + 0.0 * rho)
@@ -185,7 +186,7 @@ def section_b(t):
         import numpy as np
 
         import pops
-        from pops import dsl
+        from pops.physics.facade import Model
     except Exception as exc:  # noqa: BLE001 -- numpy or _pops unavailable
         print("-- (B) skipped: pops/numpy unavailable (%s) --" % exc)
         return
@@ -209,11 +210,11 @@ def section_b(t):
 
     # Compile the single-block reference programs (one per block name) and the 2-block program.
     try:
-        comp_a = pops.compile_problem(model=passive_model(dsl, "pa_ref"),
+        comp_a = pops.compile_problem(model=passive_model("pa_ref"),
                                      time=single_block_program(t, "fe_a", "a"))
-        comp_b = pops.compile_problem(model=passive_model(dsl, "pb_ref"),
+        comp_b = pops.compile_problem(model=passive_model("pb_ref"),
                                      time=single_block_program(t, "fe_b", "b"))
-        comp_ab = pops.compile_problem(model=passive_model(dsl, "pab"), time=two_block_program(t))
+        comp_ab = pops.compile_problem(model=passive_model("pab"), time=two_block_program(t))
     except (RuntimeError, ValueError) as exc:  # no compiler / no Kokkos / .so compile failed
         _skip("compile_problem could not build the .so: %s" % str(exc)[:160])
 
@@ -223,7 +224,7 @@ def section_b(t):
         sim = pops.System(n=n, L=1.0, periodic=True)
         for blk in blocks:
             try:
-                cm = passive_model(dsl, "blk_" + blk).compile(backend="production")
+                cm = passive_model("blk_" + blk).compile(backend="production")
             except RuntimeError as exc:  # no compiler / no Kokkos
                 _skip("model compile could not build the .so: %s" % str(exc)[:160])
             sim.add_equation(blk, cm,

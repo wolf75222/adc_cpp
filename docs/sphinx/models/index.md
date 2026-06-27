@@ -8,7 +8,7 @@ an `pops.System` the same way:
 1. **Model with bricks (native)**: you compose generic bricks that are already compiled
    (`pops.Model(state, transport, source, elliptic)`). This is the most direct way to assemble
    an existing model: no just-in-time compilation, full production parity (MPI/AMR/GPU).
-2. **DSL model**: you write the model as symbolic formulas (`pops.dsl.Model`), then you
+2. **DSL model**: you write the model as symbolic formulas (`pops.physics.facade.Model`), then you
    compile it into a `.so`. This is the way when the model you want does not exist as a native brick.
 3. **Hybrid model**: you mix, within a single model, native bricks and partial DSL bricks
    (`pops.CompositeModel`). This is the middle ground: reuse a native brick for one
@@ -118,8 +118,8 @@ model: `sa.add_block("ne", model=model, ...)`.
 
 ## DSL model (written as formulas)
 
-`pops.dsl.Model` lets you write a model as symbolic formulas: Python composes an expression
-tree (the operators `+`, `-`, `*`, `/`, `**`, `pops.dsl.sqrt` build the tree, not a
+`pops.physics.facade.Model` lets you write a model as symbolic formulas: Python composes an expression
+tree (the operators `+`, `-`, `*`, `/`, `**`, `pops.ir.ops.sqrt` build the tree, not a
 function called per cell), which the DSL translates into compilable C++. You declare the conservative
 variables, the primitives (via formulas), the flux, the eigenvalues, the source and the
 elliptic contribution, then you compile.
@@ -131,13 +131,12 @@ formulas; it reproduces exactly the native bricks `ExBVelocity` (transport) and
 
 ```python
 import pops
-from pops import dsl
 
 B0 = 1.0      # champ magnetique de fond (porte la derive E x B)
 ALPHA = 1.0   # facteur du second membre elliptique alpha (n - n_i0)
 
 def diocotron_model(n_i0):
-    m = dsl.Model("diocotron_tutorial")
+    m = pops.physics.facade.Model("diocotron_tutorial")
 
     (n,) = m.conservative_vars("n")     # unique variable conservative : la densite (role Density)
     m.aux("phi")                        # champs auxiliaires fournis par le solveur (canal pops::Aux)
@@ -173,10 +172,10 @@ design [DSL_MODEL_DESIGN.md](https://github.com/wolf75222/adc_cpp/blob/master/do
 
 ## Hybrid model (native brick + DSL within a single model)
 
-`pops.Model(...)` composes 100% native bricks; `pops.dsl.Model(...)` generates a 100%
+`pops.Model(...)` composes 100% native bricks; `pops.physics.facade.Model(...)` generates a 100%
 DSL model. `pops.CompositeModel(transport, source, elliptic)` fills the middle ground: mixing, within a single
 model, native bricks (`pops.ExB`, `pops.PotentialForce`, `pops.ChargeDensity`...) and partial compiled
-DSL bricks (`pops.dsl.HyperbolicBrick`, `pops.dsl.SourceBrick`, `pops.dsl.EllipticBrick`
+DSL bricks (`pops.physics.bricks.HyperbolicBrick`, `pops.physics.bricks.SourceBrick`, `pops.physics.bricks.EllipticBrick`
 followed by `.compile()`).
 
 Each slot accepts either a native brick or a partial compiled DSL brick. At least one
@@ -192,17 +191,16 @@ Example, isothermal DSL transport + native source + native elliptic (excerpt fro
 
 ```python
 import pops
-from pops import dsl
 
 CS2, QOM, Q = 0.7, -1.0, -1.0
 
 # Brique hyperbolique DSL repliquant pops::IsothermalFlux{cs2} (3 variables).
 def build_iso_transport(cs2):
-    b = dsl.HyperbolicBrick("iso")
+    b = pops.physics.bricks.HyperbolicBrick("iso")
     rho, rho_u, rho_v = b.conservative_vars("rho", "rho_u", "rho_v")
     u = b.primitive("u", rho_u / rho)
     v = b.primitive("v", rho_v / rho)
-    c = dsl.sqrt(cs2)
+    c = pops.ir.ops.sqrt(cs2)
     b.flux(x=[rho_u, rho_u * u + cs2 * rho, rho_v * u],
            y=[rho_v, rho_u * v, rho_v * v + cs2 * rho])
     b.eigenvalues(x=[u - c, u, u + c], y=[v - c, v, v + c])

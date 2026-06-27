@@ -33,7 +33,9 @@ import tempfile
 import numpy as np
 
 import pops
-from pops import dsl
+from pops.codegen.cache import _backend_distinct_so_path, _process_so_backend, _record_so_backend
+from pops.ir.ops import sqrt
+from pops.physics.facade import Model
 
 INCLUDE = os.environ.get("POPS_INCLUDE") or os.path.abspath(
     os.path.join(os.path.dirname(__file__), "..", "..", "include"))
@@ -49,8 +51,8 @@ def chk(cond, label):
 
 
 def build_euler(name="euler_cacheb", gamma=1.6667):
-    """Euler 2D minimal via la facade dsl.Model (param gamma nomme, roles canoniques)."""
-    m = dsl.Model(name)
+    """Euler 2D minimal via la facade Model (param gamma nomme, roles canoniques)."""
+    m = Model(name)
     rho, rhou, rhov, E = m.conservative_vars(
         "rho", "rho_u", "rho_v", "E",
         roles=["Density", "MomentumX", "MomentumY", "Energy"])
@@ -59,7 +61,7 @@ def build_euler(name="euler_cacheb", gamma=1.6667):
     v = rhov / rho
     p = (g - 1.0) * (E - 0.5 * rho * (u * u + v * v))
     H = (E + p) / rho
-    c = dsl.sqrt(g * p / rho)
+    c = sqrt(g * p / rho)
     m.flux(x=[rhou, rhou * u + p, rhou * v, rho * H * u],
            y=[rhov, rhov * u, rhov * v + p, rho * H * v])
     m.eigenvalues(x=[u - c, u, u + c], y=[v - c, v, v + c])
@@ -102,26 +104,26 @@ def is_production_so(path):
 def pure_python_checks():
     """(1) Registre EN PROCESS + redirection backend : aucun compilateur requis."""
     # etat propre pour ce sous-test (le registre est global au process)
-    dsl._process_so_backend.clear()
+    _process_so_backend.clear()
     p = "/tmp/adc186/model.so"
 
     # chemin inconnu -> inchange
-    chk(dsl._backend_distinct_so_path(p, "production") == p,
+    chk(_backend_distinct_so_path(p, "production") == p,
         "chemin neuf : inchange (aucun backend ne l'occupe)")
 
     # une fois 'aot' enregistre, un AUTRE backend est redirige, le MEME backend ne l'est pas
-    dsl._record_so_backend(p, "aot")
-    chk(dsl._backend_distinct_so_path(p, "aot") == p,
+    _record_so_backend(p, "aot")
+    chk(_backend_distinct_so_path(p, "aot") == p,
         "meme backend : chemin inchange (pas de collision)")
-    redir = dsl._backend_distinct_so_path(p, "production")
+    redir = _backend_distinct_so_path(p, "production")
     chk(redir == "/tmp/adc186/model.production.so",
         "backend different : redirige vers le frere '.production.so' (recu %r)" % (redir,))
 
     # la redirection insere le backend AVANT l'extension (frere lisible, pas d'ecrasement)
-    dsl._record_so_backend("/a/b.so", "production")
-    chk(dsl._backend_distinct_so_path("/a/b.so", "hybrid-aot") == "/a/b.hybrid-aot.so",
+    _record_so_backend("/a/b.so", "production")
+    chk(_backend_distinct_so_path("/a/b.so", "hybrid-aot") == "/a/b.hybrid-aot.so",
         "le backend est insere avant l'extension")
-    dsl._process_so_backend.clear()
+    _process_so_backend.clear()
 
 
 def _compile_probe():

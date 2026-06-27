@@ -66,7 +66,7 @@ m.check()
 `m.module` is the typed `pops.model.Module` this lowers to (state space, field space,
 and the typed operators `explicit_rate`, `electric`, `lorentz`, `fields_from_state`).
 The spec-1 PDE methods (`m.flux` / `m.source_term` / `m.linear_source` /
-`m.elliptic_field` on `pops.dsl.Model`) remain valid; the board API is sugar over them.
+`m.elliptic_field` on `pops.physics.facade.Model`) remain valid; the board API is sugar over them.
 
 ## Authoring a time scheme (`pops.time.Program` sugar)
 

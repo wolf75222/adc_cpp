@@ -4,9 +4,9 @@ Free functions that receive a ``HyperbolicModel`` instance (or other objects)
 as their first argument and drive the C++ compilation pipeline (source
 emission -> compiler invocation -> .so on disk).
 
-Does NOT import pops.dsl or pops.physics at module level to avoid import
-cycles.  ``pops.dsl`` imports from this module and re-exports each symbol so
-that ``dsl.compile_so(...)`` etc. keep working.
+Does NOT import pops.physics at module level to avoid import cycles; the
+physics facade and aux helpers are imported lazily inside the functions that
+need them.
 
 Public free functions (model compile/emit layer)
 -------------------------------------------------
@@ -585,10 +585,12 @@ def _module_to_model(module):
     second backend.  The Module's typed operators carry dsl ``Expr`` bodies;
     each is mapped to the dsl method of its kind.
 
-    Imported lazily by compile_problem to avoid a top-level pops.dsl import.
+    Imported lazily by compile_problem to avoid a top-level physics import.
     """
-    # Import dsl lazily here (called only at compile_problem time, not at import time).
-    from pops.dsl import Model, AUX_CANONICAL  # noqa: PLC0415
+    # Import the model facade + aux constants lazily here (called only at
+    # compile_problem time, not at import time).
+    from pops.physics.facade import Model  # noqa: PLC0415
+    from pops.physics.aux import AUX_CANONICAL  # noqa: PLC0415
     states = module.state_spaces()
     if len(states) != 1:
         raise ValueError("compile_problem: a Module must declare exactly one StateSpace to compile "
@@ -696,8 +698,8 @@ def compile_problem(so_path=None, *, model=None, time=None, backend="production"
 
     library_manifests = []
     if libraries:
-        # Lazy import to avoid a top-level pops.dsl chain at import time.
-        from pops.library import read_library_manifest  # type: ignore[attr-defined]
+        # Lazy import to avoid a top-level library chain at import time.
+        from pops.codegen.library import read_library_manifest  # type: ignore[attr-defined]
         for lib_obj in libraries:
             library_manifests.append(read_library_manifest(lib_obj))
 

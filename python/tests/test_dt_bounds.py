@@ -28,7 +28,7 @@ import tempfile
 import numpy as np
 
 import pops
-from pops import dsl
+from pops.physics.facade import Model
 
 fails = 0
 INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "include"))
@@ -147,7 +147,7 @@ if not cxx or not os.path.isdir(INCLUDE):
 
 def scalar_model(name, stab_speed=None, stab_dt=None, src_freq=None):
     """Advection scalaire a vitesse constante (1, 0) : lambda_max = 1 connu analytiquement."""
-    m = dsl.Model(name)
+    m = Model(name)
     (rho,) = m.conservative_vars("rho", roles=["Density"])
     m.flux(x=[1.0 * rho], y=[0.0 * rho])
     m.eigenvalues(x=[1.0 + 0.0 * rho], y=[0.0 * rho])
@@ -211,7 +211,7 @@ try:
     chk(s.last_dt_bound() == "source_frequency:s",
         f"borne active = source_frequency:s (recu {s.last_dt_bound()!r})")
     try:
-        bad = dsl.Model("freq_sans_source")
+        bad = Model("freq_sans_source")
         (r2,) = bad.conservative_vars("rho", roles=["Density"])
         bad.flux(x=[1.0 * r2], y=[0.0 * r2]); bad.eigenvalues(x=[1.0 + 0.0 * r2], y=[0.0 * r2])
         bad.primitive_vars(r2); bad.conservative_from([r2]); bad.elliptic_rhs(0.0 * r2)

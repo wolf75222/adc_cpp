@@ -10,14 +10,14 @@ Run: python3 examples/spec3/scheduled_fields_subcycled_transport.py
 """
 import pops.model as model
 import pops.time as adctime
-from pops import dsl
+from pops.ir.expr import Var
 
 
 def plasma_module():
     mod = model.Module("scheduled_plasma")
     u = mod.state_space("U", ("rho", "mx", "my"))
     fields = mod.field_space("fields", ("phi",))
-    rho = dsl.Var("rho", "cons")
+    rho = Var("rho", "cons")
     mod.operator(name="fields_from_state", signature=(u,) >> fields,
                  kind="field_operator", expr=rho)
     mod.operator(name="flux", signature=(u,) >> model.Rate(u), kind="grid_operator",

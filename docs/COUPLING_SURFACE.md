@@ -9,7 +9,7 @@ public, internal or deprecated?"
 ## User entry point (PUBLIC Python)
 
 The user entry point is NOT a C++ coupling class: it is the Python pair
-`pops.System` / `pops.AmrSystem` plus the DSL (`pops.dsl.HyperbolicModel`,
+`pops.System` / `pops.AmrSystem` plus the DSL (`pops.physics.model.HyperbolicModel`,
 `m.compile(...)`). The classes below are internal C++ facades; they
 are not part of the documented public API.
 
@@ -68,7 +68,7 @@ C++20 concept defining the contract of an inter-species coupling source
 ### `coupled_source_program.hpp` -- bytecode `CoupledSourceProgram`
 
 Generic coupled-source evaluator by postfix bytecode (device-clean POD).
-Allows running symbolic Python sources (`pops.dsl.CoupledSource`) inside
+Allows running symbolic Python sources (`pops.physics.multispecies.CoupledSource`) inside
 a `for_each_cell` device without a per-cell Python callback.
 **Classification: INTERNAL**
 

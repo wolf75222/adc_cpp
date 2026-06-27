@@ -96,9 +96,10 @@ def test_tableau_rejects_inconsistent_weights(t):
 
 
 # ---- (B) compiled trajectory parity: skips cleanly without the full toolchain ----
-def _passive_model(dsl, name):
+def _passive_model(name):
     """A 1-variable model (rho), ZERO flux, default LINEAR source S = c*rho (R changes every stage)."""
-    m = dsl.Model(name)
+    from pops.physics.facade import Model
+    m = Model(name)
     (rho,) = m.conservative_vars("rho")
     u = m.primitive("u", 0.0 * rho)
     m.primitive_vars(rho=rho, u=u)
@@ -114,7 +115,7 @@ def _run_section_b(t):
         import numpy as np
 
         import pops
-        from pops import dsl
+        from pops.physics.facade import Model
     except Exception as exc:  # noqa: BLE001
         print("-- (B) skipped: pops/numpy unavailable: %s --" % exc)
         return
@@ -126,7 +127,7 @@ def _run_section_b(t):
         P = t.Program(name)
         build(P)
         try:
-            return pops.compile_problem(model=_passive_model(dsl, name + "_m"), time=P)
+            return pops.compile_problem(model=_passive_model(name + "_m"), time=P)
         except RuntimeError as exc:
             print("-- (B) skipped: compile_problem could not build the .so: %s --" % str(exc)[:160])
             return None
@@ -146,7 +147,7 @@ def _run_section_b(t):
     def run(handle):
         sim = pops.System(n=n, L=1.0, periodic=True)
         try:
-            cm = _passive_model(dsl, "rk_block").compile(backend="production")
+            cm = _passive_model("rk_block").compile(backend="production")
         except RuntimeError as exc:
             print("-- (B) skipped: model compile failed: %s --" % str(exc)[:160])
             return None

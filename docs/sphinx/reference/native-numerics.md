@@ -29,7 +29,7 @@ lacks a required capability is rejected with a clear message, e.g.
 
 ## Selecting them from Python
 
-Today, a `dsl.Model` selects the solver/reconstruction by string
+Today, a `pops.physics.facade.Model` selects the solver/reconstruction by string
 (`pops.FiniteVolume(riemann="hllc", reconstruction="weno5z")`) and generates the model hooks
 from physical roles via `m.enable_hllc()` / `m.enable_roe()` (the hooks become `POPS_HD` C++
 functions the native solver calls statically; no Python callback, no per-cell string lookup).

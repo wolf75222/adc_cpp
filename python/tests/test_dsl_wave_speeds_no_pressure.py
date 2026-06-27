@@ -34,7 +34,9 @@ import tempfile
 import numpy as np
 
 import pops
-from pops import dsl
+from pops.codegen.toolchain import _default_cxx
+from pops.physics.bricks import HyperbolicBrick
+from pops.physics.facade import Model
 
 fails = 0
 INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "include"))
@@ -66,7 +68,7 @@ def err_msg(fn):
 def toy_model(name="acoustic2"):
     """Acoustique lineaire 2-var SANS pression : vitesses signees explicites, PAS d'eigenvalues
     (exerce aussi le fallback max_wave_speed = max(|smin|, |smax|))."""
-    m = dsl.Model(name)
+    m = Model(name)
     q1, q2 = m.conservative_vars("q1", "q2")
     a = m.param("a", A)
     b = m.param("b", B)
@@ -127,7 +129,7 @@ rep = m.check_model(samples=U0.reshape(2, -1))
 chk(rep["ok"], "check_model passe (finitude + coherence ws <-> max_wave_speed)")
 
 print("== (5) gardes (sans compilateur) ==")
-m_none = dsl.Model("nospeed")
+m_none = Model("nospeed")
 r1, r2 = m_none.conservative_vars("r1", "r2")
 m_none.flux(x=[r2, r1], y=[r2, r1])
 m_none.primitive_vars(r1, r2)
@@ -136,7 +138,7 @@ msg = err_msg(lambda: m_none._m.emit_cpp_brick())
 chk("set_wave_speeds" in msg and "set_eigenvalues" in msg,
     f"ni eigenvalues ni wave_speeds -> emission refusee, remede nomme ({msg[:60]}...)")
 
-cxx = dsl._default_cxx(None)
+cxx = _default_cxx(None)
 if not cxx:
     print("pas de compilateur C++ : tests (2)-(4)/(6) sautes")
     sys.exit(1 if fails else 0)
@@ -164,7 +166,7 @@ for label, riemann in (("(3) riemann='hll'", "hll"), ("(4) riemann='rusanov'", "
     chk(d < 1e-13, f"eval_rhs {riemann} == divergence {riemann} numpy (dmax = {d:.2e})")
 
 print("== (5b) eigenvalues sans 'p' ni paire : hll toujours rejete (historique) ==")
-m_eig = dsl.Model("eigonly")
+m_eig = Model("eigonly")
 e1, e2 = m_eig.conservative_vars("e1", "e2")
 ae = m_eig.param("a", A)
 m_eig.flux(x=[ae * e2, ae * e1], y=[ae * e2, ae * e1])
@@ -181,7 +183,7 @@ chk("wave_speeds" in msg,
     f"hll rejete par le gate C++ avec remede ({msg[:60]}...)")
 
 print("== (6) retro-compat : modele AVEC 'p' emet toujours wave_speeds ==")
-m_p = dsl.Model("withp")
+m_p = Model("withp")
 rho, mx, my = m_p.conservative_vars("rho", "m_x", "m_y",
                                     roles=["Density", "MomentumX", "MomentumY"])
 u = m_p.primitive("u", mx / rho)
@@ -205,7 +207,7 @@ print("== (7) briques hybrides : flag has_wave_speeds propage (sans compilateur 
 # les MEMES regles ('p' OU paire explicite). CompiledBrick.has_wave_speeds porte l'info jusqu'au
 # CompiledModel hybride (HybridModel._compiled_model) -- sans quoi la garde precoce hll
 # bloquerait a tort un hybride compressible (revue adverse).
-bp = dsl.HyperbolicBrick("hybp")
+bp = HyperbolicBrick("hybp")
 hrho, hmx, hmy = bp.conservative_vars("rho", "m_x", "m_y",
                                       roles=["Density", "MomentumX", "MomentumY"])
 hu = bp.primitive("u", hmx / hrho)
@@ -219,7 +221,7 @@ cbp = bp.compile()
 chk(cbp.has_wave_speeds and "wave_speeds" in cbp.struct_src,
     "brique AVEC 'p' : has_wave_speeds vrai, struct emet wave_speeds")
 
-bn = dsl.HyperbolicBrick("hybn")
+bn = HyperbolicBrick("hybn")
 hc, = bn.conservative_vars("c")
 bn.flux(x=[1.0 * hc], y=[0.0 * hc])
 bn.eigenvalues(x=[1.0 + 0.0 * hc], y=[0.0 * hc])
@@ -229,7 +231,7 @@ cbn = bn.compile()
 chk((not cbn.has_wave_speeds) and "wave_speeds" not in cbn.struct_src,
     "brique SANS 'p' ni paire : has_wave_speeds faux, struct sans wave_speeds")
 
-bw = dsl.HyperbolicBrick("hybw")
+bw = HyperbolicBrick("hybw")
 hq, = bw.conservative_vars("q")
 bw.flux(x=[2.0 * hq], y=[0.5 * hq])
 bw.wave_speeds(x=(0.0 * hq, 2.0 + 0.0 * hq), y=(0.0 * hq, 0.5 + 0.0 * hq))
@@ -240,7 +242,7 @@ chk(cbw.has_wave_speeds and "wave_speeds" in cbw.struct_src,
     "brique a PAIRE explicite sans 'p' : has_wave_speeds vrai (miroir HyperbolicBrick.wave_speeds)")
 
 print("== (8) wave_speeds_value : formes mixtes (valeur propre constante + dependante de l'etat) ==")
-mm = dsl.Model("mixshape")
+mm = Model("mixshape")
 w1, w2 = mm.conservative_vars("w1", "w2")
 mm.flux(x=[w2, w1], y=[w2, w1])
 mm.eigenvalues(x=[1.0 + 0.0 * w1, w1], y=[0.0 * w1, w2])  # melange scalaire-constant / tableau

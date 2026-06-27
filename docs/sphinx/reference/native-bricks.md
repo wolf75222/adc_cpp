@@ -54,7 +54,7 @@ The transport brick writes the hyperbolic physical flux. It is the `transport=` 
 | `IsothermalFlux` | `pops.IsothermalFlux()` | Isothermal Euler flux (`cs2` comes from `FluidState`). Sets `spec.transport="isothermal"`. C++ struct `pops::IsothermalFlux`. | `FluidState(isothermal)` |
 
 There is no other native transport brick. For a novel hyperbolic flux, you go
-through the DSL (`pops.dsl.HyperbolicBrick`, cf. [models page](../models/index.md)).
+through the DSL (`pops.physics.bricks.HyperbolicBrick`, cf. [models page](../models/index.md)).
 
 ## Source
 
@@ -85,7 +85,7 @@ block's RHS). They link two blocks (or three for ionization) by their name.
 | `Collision` | `pops.Collision(a, b, rate)` | Inter-species friction : force `k (u_a - u_b)`, momentum conserved. Routes to `add_collision`. | fluid blocks (>= 3 variables) |
 | `ThermalExchange` | `pops.ThermalExchange(a, b, rate)` | Thermal exchange `k (T_a - T_b)`, energy conserved. Routes to `add_thermal_exchange`. | Euler blocks (4 variables) |
 
-`add_coupling` also accepts a `dsl.CompiledCoupledSource` (generic coupling described in
+`add_coupling` also accepts a `pops.physics.multispecies.CompiledCoupledSource` (generic coupling described in
 formulas, carried as bytecode and interpreted on the C++ side) ; cf. [models page](../models/index.md).
 
 ## Elliptic right-hand side (elliptic)
@@ -179,13 +179,13 @@ model = pops.Model(
 
 `pops.CompositeModel(transport, source, elliptic, name="hybrid")` mixes, in a single model,
 native bricks (`pops.ExB`, `pops.PotentialForce`, `pops.ChargeDensity`...) and partial compiled DSL
-bricks (`pops.dsl.HyperbolicBrick(...).compile()`, `SourceBrick`, `EllipticBrick`).
+bricks (`pops.physics.bricks.HyperbolicBrick(...).compile()`, `SourceBrick`, `EllipticBrick`).
 Each slot accepts either a native brick or a compiled DSL brick.
 
 - At least one slot must be a DSL brick : an all-native composition is written with
   `pops.Model(...)` (otherwise `CompositeModel` raises a `ValueError`).
 - A brick placed in the wrong slot raises a `ValueError` (the slot is checked).
-- `CompositeModel(...)` returns a `dsl.HybridModel` ; you call `.compile(backend="aot")` for
+- `CompositeModel(...)` returns a `pops.physics.hybrid.HybridModel` ; you call `.compile(backend="aot")` for
   a `CompiledModel` pluggable via `System.add_equation`. Prototype : only `backend="aot"` is
   wired.
 

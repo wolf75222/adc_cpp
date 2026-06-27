@@ -13,7 +13,7 @@ via pops.moments (Gaussian closure, NO dependency on adc_cases):
      -- filtering removes dead code, the live values are unchanged;
  (c) OPT-IN HOIST: by default the source contains no inv_; enabled, it contains inv_ and its
      flux matches the default flux to rtol 1e-13 (rounding changes, it is NOT bit-exact);
- (d) _is_zero: a closure returning dsl.Const(0.0) does not emit the higher-order
+ (d) _is_zero: a closure returning Const(0.0) does not emit the higher-order
      reconstruction primitives (same behavior as the float zero 0.0).
 
 Points (b) and (c) compile a STANDALONE brick (header-only pops headers, without Kokkos) on the
@@ -27,8 +27,8 @@ import tempfile
 
 import numpy as np
 
-import pops.moments as M
-from pops import dsl
+import pops.lib.moments as M
+from pops.ir.expr import Const
 
 INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "include"))
 ORDER = 3          # order=3 -> 10 moments ; top order 4 (pair) -> sqrt (sx, sy) VIVANTS dans le flux
@@ -116,11 +116,11 @@ def check_a_filtrage(m):
 
 
 def check_d_is_zero():
-    print("== (d) _is_zero recognizes dsl.Const(0.0) ==")
+    print("== (d) _is_zero recognizes Const(0.0) ==")
     top = ["C%d%d" % (p, ORDER + 1 - p) for p in range(ORDER + 2)]
 
     def zconst(S):
-        return {"S%d%d" % (p, ORDER + 1 - p): dsl.Const(0.0) for p in range(ORDER + 2)}
+        return {"S%d%d" % (p, ORDER + 1 - p): Const(0.0) for p in range(ORDER + 2)}
 
     def zfloat(S):
         return {"S%d%d" % (p, ORDER + 1 - p): 0.0 for p in range(ORDER + 2)}

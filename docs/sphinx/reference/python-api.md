@@ -184,16 +184,22 @@ ionization, inter-species friction, thermal exchange.
 
 ## Symbolic model DSL
 
-The `pops.dsl` submodule describes a model in symbolic formulas (conservative variables,
-auxiliaries, flux, eigenvalues, primitives, elliptic right-hand side), checks it, then
-compiles it into a `.so` pluggable via `System.add_equation`. `dsl.Model` is the facade;
-`dsl.CompiledModel` is the result of `m.compile(...)` (it carries the `.so` and the dispatch
-metadata); `dsl.HybridModel` mixes native bricks and partial DSL bricks in a single
+The `pops.physics` and `pops.ir` packages describe a model in symbolic formulas (conservative
+variables, auxiliaries, flux, eigenvalues, primitives, elliptic right-hand side), check it, then
+compiles it into a `.so` pluggable via `System.add_equation`. `pops.physics.facade.Model` is the facade;
+`pops.codegen.loader.CompiledModel` is the result of `m.compile(...)` (it carries the `.so` and the dispatch
+metadata); `pops.physics.hybrid.HybridModel` mixes native bricks and partial DSL bricks in a single
 model (produced by `pops.CompositeModel(...)`).
 
 ```{eval-rst}
-.. automodule:: pops.dsl
-   :members: Model, CompiledModel, HybridModel
+.. autoclass:: pops.physics.facade.Model
+   :members:
+
+.. autoclass:: pops.codegen.loader.CompiledModel
+   :members:
+
+.. autoclass:: pops.physics.hybrid.HybridModel
+   :members:
 
 .. autofunction:: pops.CompositeModel
 ```
@@ -209,7 +215,7 @@ are CPU-only (no MPI/AMR/GPU); `production` is CPU + MPI + AMR. See
 
 ## Moment models
 
-The `pops.moments` submodule generates a `dsl.Model` for a 2D velocity-moment hierarchy from a
+The `pops.lib.moments` submodule generates a `pops.physics.facade.Model` for a 2D velocity-moment hierarchy from a
 single closure: the central and standardized moments, the flux, and the signed wave speeds are
 derived, so you write only the closure (and, optionally, the sources). For the concept see
 [moments and closures](../concepts/moments-and-closures.md), for the worked example
@@ -217,7 +223,7 @@ derived, so you write only the closure (and, optionally, the sources). For the c
 [moment models](moment-models.md).
 
 ```{eval-rst}
-.. automodule:: pops.moments
+.. automodule:: pops.lib.moments
    :members: build_moment_model, gaussian_closure, lorentz_sources, moment_names, moment_indices
 ```
 

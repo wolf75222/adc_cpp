@@ -40,7 +40,7 @@ try:
     import numpy as np
 
     import pops
-    from pops import dsl
+    from pops.physics.facade import Model
     from pops import time as adctime
 except Exception as exc:  # noqa: BLE001  -- numpy or _pops unavailable in this interpreter
     _skip("pops/numpy unavailable: %s" % exc)
@@ -61,7 +61,7 @@ def advect_model(name="adv_rhs", a=1.0, c=0.7):
     A complete, compilable production block. F_x != 0 so -div F is NON-zero on a non-uniform field: this
     is what lets the probe distinguish a flux=False (source-only) stage from a flux=True one -- on the
     zero-flux model ADC-425 used, the two would be indistinguishable (the very masking ADC-430 fixes)."""
-    m = dsl.Model(name)
+    m = Model(name)
     (rho,) = m.conservative_vars("rho")
     zero = 0.0 * rho
     m.flux(x=[a * rho], y=[zero])          # NON-zero flux F_x = a*rho
@@ -75,7 +75,7 @@ def advect_model(name="adv_rhs", a=1.0, c=0.7):
 def advect_model_with_named(name="adv_rhs_named", a=1.0, c=0.7, d=0.5):
     """Same non-zero-flux scalar with BOTH a default source S = c*rho and a NAMED source 'decay' = d*rho.
     Lets (A) check that a flux=False named-only rhs emits the named axpy and NO flux base."""
-    m = dsl.Model(name)
+    m = Model(name)
     (rho,) = m.conservative_vars("rho")
     zero = 0.0 * rho
     m.flux(x=[a * rho], y=[zero])

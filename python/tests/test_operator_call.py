@@ -9,7 +9,8 @@ the .so source text without compiling); skips cleanly if pops is not importable.
 import sys
 
 try:
-    from pops import dsl
+    from pops.ir.expr import Const, Var
+    from pops.physics.facade import Model
     from pops import time as adctime
 except Exception as exc:  # pops not importable here -> skip, never fake
     print("skip test_operator_call (pops unavailable: %s)" % exc)
@@ -17,7 +18,7 @@ except Exception as exc:  # pops not importable here -> skip, never fake
 
 
 def build_model():
-    m = dsl.Model("euler_poisson_lorentz")
+    m = Model("euler_poisson_lorentz")
     rho, mx, my = m.conservative_vars("rho", "mx", "my")
     m.aux("phi")
     gx = m.aux("grad_x")
@@ -25,7 +26,7 @@ def build_model():
     bz = m.aux("B_z")
     m.flux(x=[mx, mx * mx / rho, mx * my / rho],
            y=[my, mx * my / rho, my * my / rho])
-    m.source_term("electric", [dsl.Const(0.0), rho * (-gx), rho * (-gy)])
+    m.source_term("electric", [Const(0.0), rho * (-gx), rho * (-gy)])
     m.linear_source("lorentz", [[0.0, 0.0, 0.0],
                                 [0.0, 0.0, bz],
                                 [0.0, -bz, 0.0]])
@@ -87,12 +88,12 @@ def test_call_default_source():
     """P.call('source_default', ...) reaches the default source (m._source), which is NOT a named
     source_term: it must lower to the source-only rhs, identical to P.rhs(flux=False,
     sources=['default'])."""
-    m = dsl.Model("ds")
+    m = Model("ds")
     rho, mx, my = m.conservative_vars("rho", "mx", "my")
     gx = m.aux("grad_x")
     gy = m.aux("grad_y")
     m.flux(x=[mx, mx * mx / rho, mx * my / rho], y=[my, mx * my / rho, my * my / rho])
-    m.source_term("default", [dsl.Const(0.0), -rho * gx, -rho * gy])  # reads the fields
+    m.source_term("default", [Const(0.0), -rho * gx, -rho * gy])  # reads the fields
     m.elliptic_rhs(rho - 1.0)
 
     def shortcut(P, _m):
@@ -178,7 +179,7 @@ def test_default_resolution_and_ambiguity():
     assert reg.default_of_kind("field_operator").name == "fields_from_state"
     assert reg.default_of_kind("grid_operator").name == "flux_default"
     # Add a SECOND, non-privileged field operator; the privileged default still wins.
-    m.elliptic_field("psi", rhs=dsl.Var("rho", "cons"), aux=["psi_x"])
+    m.elliptic_field("psi", rhs=Var("rho", "cons"), aux=["psi_x"])
     reg2 = m.operator_registry()
     assert len(reg2.operators_of_kind("field_operator")) == 2
     assert reg2.default_of_kind("field_operator").name == "fields_from_state"
@@ -186,10 +187,10 @@ def test_default_resolution_and_ambiguity():
 
 
 def test_rate_operator_alias_not_in_hash():
-    m = dsl.Model("m")
+    m = Model("m")
     rho, mx, my = m.conservative_vars("rho", "mx", "my")
     m.flux(x=[mx, mx, mx], y=[my, my, my])
-    m.source_term("relax", [dsl.Const(0.0), -mx, -my])
+    m.source_term("relax", [Const(0.0), -mx, -my])
     h0 = m._model_hash()
     m.rate_operator("explicit_rhs", flux=True, sources=["relax"])
     assert m._model_hash() == h0, "a rate_operator alias must not change the model hash"

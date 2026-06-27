@@ -4,14 +4,16 @@ module_hash folds the spaces, parameters, aux and -- per operator -- name, kind,
 capabilities, requirements and a body identity. It is deterministic for an identical module and
 invalidated by an operator body / signature / capability / space change, so a compiled artifact
 keyed on it is rebuilt when the operator spec changes. The dsl codegen sensitivity to a formula
-change stays with the existing dsl.Model._model_hash; module_hash adds the operator-spec layer.
+change stays with the existing Model._model_hash; module_hash adds the operator-spec layer.
 Pure Python; skips if pops is not importable.
 """
 import sys
 
 try:
     from pops import model
-    from pops import dsl
+    from pops.ir.expr import Const, Var
+    from pops.ir.ops import sqrt
+    from pops.physics.facade import Model
 except Exception as exc:  # pops not importable here -> skip, never fake
     print("skip test_module_hash (pops unavailable: %s)" % exc)
     sys.exit(0)
@@ -129,20 +131,20 @@ def test_eigenvalues_change_invalidates():
         mod = model.Module("m")
         mod.state_space("U", ("rho", "mx"))
         mod.field_space("fields", ("phi",))
-        rho, mx = dsl.Var("rho", "cons"), dsl.Var("mx", "cons")
+        rho, mx = Var("rho", "cons"), Var("mx", "cons")
         mod.eigenvalues(x=[mx / rho - speed, mx / rho + speed],
                         y=[mx / rho - speed, mx / rho + speed])
         return mod
 
-    assert build(dsl.sqrt(0.5)).module_hash() != build(dsl.sqrt(0.7)).module_hash()
+    assert build(sqrt(0.5)).module_hash() != build(sqrt(0.7)).module_hash()
     print("OK  an eigenvalue (wave-speed) change invalidates module_hash")
 
 
 def test_dsl_backed_module_hashes():
-    m = dsl.Model("ep")
+    m = Model("ep")
     rho, mx, my = m.conservative_vars("rho", "mx", "my")
     m.flux(x=[mx, mx, mx], y=[my, my, my])
-    m.source_term("electric", [dsl.Const(0.0), rho, rho])
+    m.source_term("electric", [Const(0.0), rho, rho])
     h = m.module.module_hash()
     assert isinstance(h, str) and len(h) == 64
     print("OK  a dsl-backed Module produces a module_hash")

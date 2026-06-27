@@ -16,7 +16,7 @@ import tempfile
 import numpy as np
 
 import pops
-from pops import dsl
+from pops.physics.bricks import SourceBrick
 
 GAMMA = 1.4
 INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "include"))
@@ -24,7 +24,7 @@ INCLUDE = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "i
 
 def build_gravity_source():
     """Source DSL repliquant pops::GravityForce sur 4 variables : rho g, g = -grad phi (travail inclus)."""
-    s = dsl.SourceBrick("grav")
+    s = SourceBrick("grav")
     rho, rho_u, rho_v, E = s.conservative_vars("rho", "rho_u", "rho_v", "E")
     gx = s.aux("grad_x")
     gy = s.aux("grad_y")

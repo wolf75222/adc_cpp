@@ -39,7 +39,9 @@ import tempfile
 import numpy as np
 
 import pops
-from pops import dsl
+from pops.codegen.loader import CompiledModel
+from pops.ir.ops import sqrt
+from pops.physics.facade import Model
 
 CS2 = 0.25       # isothermal sound speed^2 (p = cs2 rho): flooring rho floors the pressure
 N = 48
@@ -59,7 +61,7 @@ def chk(cond, label):
 def build_iso_model():
     """Isothermal block (3 var, Density role at component 0) written in DSL formulas: compile(...) turns
     it into a production .so loader. elliptic_rhs = 0 isolates the transport (no Poisson noise)."""
-    m = dsl.Model("iso_floor")
+    m = Model("iso_floor")
     rho, rhou, rhov = m.conservative_vars("rho", "rho_u", "rho_v")
     u = rhou / rho
     v = rhov / rho
@@ -67,8 +69,8 @@ def build_iso_model():
     pv = m.primitive("v", v)
     m.flux(x=[rhou, rhou * pu + CS2 * rho, rhou * pv],
            y=[rhov, rhov * pu, rhov * pv + CS2 * rho])
-    m.eigenvalues(x=[pu - dsl.sqrt(CS2), pu, pu + dsl.sqrt(CS2)],
-                  y=[pv - dsl.sqrt(CS2), pv, pv + dsl.sqrt(CS2)])
+    m.eigenvalues(x=[pu - sqrt(CS2), pu, pu + sqrt(CS2)],
+                  y=[pv - sqrt(CS2), pv, pv + sqrt(CS2)])
     m.primitive_vars(rho, pu, pv)
     m.conservative_from([rho, rho * pu, rho * pv])
     m.elliptic_rhs(0.0 * rho)
@@ -122,7 +124,7 @@ def main():
     try:
         cm = build_iso_model().compile(os.path.join(tmp, "iso_floor_amr.so"), INCLUDE,
                                        backend="production", target="amr_system")
-        assert isinstance(cm, dsl.CompiledModel)
+        assert isinstance(cm, CompiledModel)
         assert cm.adder == "add_native_block" and cm.target == "amr_system"
 
         # --- (1) no longer raises + the floor rides the .so; floored run finite on the 1e6 spike ------

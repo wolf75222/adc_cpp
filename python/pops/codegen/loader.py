@@ -149,7 +149,7 @@ class CompiledModel:
                 "CompiledModel.check_runtime: only target='system' is re-verifiable in an "
                 "ephemeral System; a target='amr_system' loader is checked installed in its "
                 "AmrSystem (AMR test invariants), not in isolation.")
-        from pops import System, FiniteVolume, Explicit  # lazy: avoids top-level pops.dsl import
+        from pops import System, FiniteVolume, Explicit  # lazy: avoids a top-level runtime import
         sim = System(n=int(n), L=1.0, periodic=True)
         sim.set_poisson()
         sim.add_equation("check", model=self,

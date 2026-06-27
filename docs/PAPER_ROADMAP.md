@@ -96,7 +96,7 @@ Two recommended user entry points, both on native bricks (GPU/MPI path):
 - **Compose native bricks**: `pops.Model(state, transport, source, elliptic)` assembles a
   model from state / transport / source / elliptic bricks, consumed by
   `System.add_block(...)` (or `AmrSystem`). This is the path of the sweep diocotron cases.
-- **Write a model in formulas**: `pops.dsl.Model(...)` describes the equations symbolically, then
+- **Write a model in formulas**: `pops.physics.facade.Model(...)` describes the equations symbolically, then
   `m.compile(...)` produces a `.so`. For production, `backend="production"` is the recommended
   default (native zero-copy loader -> `add_native_block`, GPU/MPI path).
 

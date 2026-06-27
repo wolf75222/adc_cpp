@@ -98,10 +98,11 @@ def test_npz_key_scheme_roundtrips(_t):
 
 
 # ---- shared engine setup for (B)/(C) ----
-def _passive_source_model(dsl, name):
+def _passive_source_model(name):
     """A 1-variable model (rho), ZERO flux, default LINEAR source S(rho) = _C*rho (R = c*rho changes
     every step). A complete compilable block (flux + primitive + eigenvalue + source)."""
-    m = dsl.Model(name)
+    from pops.physics.facade import Model
+    m = Model(name)
     (rho,) = m.conservative_vars("rho")
     u = m.primitive("u", 0.0 * rho)
     m.primitive_vars(rho=rho, u=u)
@@ -117,16 +118,16 @@ def _build_system(pops, np, n):
     sim = pops.System(n=n, L=1.0, periodic=True)
     if not hasattr(sim, "install_program") or not hasattr(sim, "history_names"):
         return None, None
-    from pops import dsl
+    from pops.physics.facade import Model
     try:
-        compiled_model = _passive_source_model(dsl, "ckpt_block").compile(backend="production")
+        compiled_model = _passive_source_model("ckpt_block").compile(backend="production")
     except RuntimeError as exc:  # no compiler / no Kokkos visible
         print("-- skipped: model compile could not build the .so: %s --" % str(exc)[:160])
         return None, None
     sim.add_equation("blk", compiled_model,
                      spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
                      time=pops.Explicit(method="euler"))
-    return sim, dsl
+    return sim, True
 
 
 def _rho0(np, n):
@@ -135,13 +136,13 @@ def _rho0(np, n):
     return 1.0 + 0.3 * np.sin(2 * np.pi * X) * np.cos(2 * np.pi * Y)
 
 
-def _compile_program(pops, dsl, t, builder, prog_name, model_name):
+def _compile_program(pops, t, builder, prog_name, model_name):
     """compile_problem for the program built by @p builder (e.g. t.std.adams_bashforth2). Returns the
     handle or None if the toolchain is absent."""
     P = t.Program(prog_name)
     builder(P, "blk")
     try:
-        return pops.compile_problem(model=_passive_source_model(dsl, model_name), time=P)
+        return pops.compile_problem(model=_passive_source_model(model_name), time=P)
     except RuntimeError as exc:  # no compiler / no Kokkos visible / .so compile failed
         print("-- skipped: compile_problem could not build the .so: %s --" % str(exc)[:160])
         return None
@@ -158,12 +159,12 @@ def _run_section_b(t):
         return None
 
     n = 16
-    sim_cont, dsl = _build_system(pops, np, n)
+    sim_cont, has_engine = _build_system(pops, np, n)
     if sim_cont is None:
         print("-- (B) skipped: _pops lacks the install_program/history bindings (rebuild _pops) --")
         return None
 
-    compiled = _compile_program(pops, dsl, t, t.std.adams_bashforth2, "ab2_ckpt", "ab2_prog_b")
+    compiled = _compile_program(pops, t, t.std.adams_bashforth2, "ab2_ckpt", "ab2_prog_b")
     if compiled is None:
         return None
 
@@ -244,13 +245,13 @@ def _run_section_c(t):
         return None
 
     n = 8
-    sim, dsl = _build_system(pops, np, n)
+    sim, has_engine = _build_system(pops, np, n)
     if sim is None:
         print("-- (C) skipped: _pops lacks the install_program/history bindings (rebuild _pops) --")
         return None
 
-    ab2 = _compile_program(pops, dsl, t, t.std.adams_bashforth2, "ab2_c", "ab2_prog_c")
-    fe = _compile_program(pops, dsl, t, t.std.forward_euler, "fe_c", "fe_prog_c")
+    ab2 = _compile_program(pops, t, t.std.adams_bashforth2, "ab2_c", "ab2_prog_c")
+    fe = _compile_program(pops, t, t.std.forward_euler, "fe_c", "fe_prog_c")
     if ab2 is None or fe is None:
         return None
     assert ab2.program_hash != fe.program_hash, \

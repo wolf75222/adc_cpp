@@ -46,7 +46,8 @@ try:
     import numpy as np
 
     import pops
-    from pops import dsl
+    from pops.ir.ops import sqrt
+    from pops.physics.facade import Model
     from pops import time as adctime
 except Exception as exc:  # noqa: BLE001  -- numpy or _pops unavailable in this interpreter
     _skip("pops/numpy unavailable: %s" % exc)
@@ -82,7 +83,7 @@ def _base_block(m):
     m.primitive_vars(rho=rho, u=u, v=v, p=p)
     m.conservative_from([rho, rho * u, rho * v])
     m.flux(x=[mx, mx * u + p, my * u], y=[my, mx * v, my * v + p])
-    cs = dsl.sqrt(cs2)
+    cs = sqrt(cs2)
     m.eigenvalues(x=[u - cs, u, u + cs], y=[v - cs, v, v + cs])
     m.elliptic_rhs(rho)  # Poisson rhs f = rho (so solve_fields populates a non-trivial grad)
     gx = m.aux("grad_x")
@@ -94,7 +95,7 @@ def _base_block(m):
 def named_source_model(name="pc_named"):
     """Default source EMPTY (NoSource); the electric force is a NAMED source_term (opt-in). The
     Lorentz operator is a named linear_source. This is the model the Program drives."""
-    m = dsl.Model(name)
+    m = Model(name)
     rho, mx, my, gx, gy, bz = _base_block(m)
     m.source_term("electric", [0.0, -rho * gx, -rho * gy])
     m.linear_source("lorentz", [[0.0, 0.0, 0.0],
@@ -107,7 +108,7 @@ def default_source_model(name="pc_default"):
     """Same physics, but the electric force is the model's DEFAULT source (m.source): eval_rhs then
     returns -div F + electric directly. Used to build the offline reference for the named-source path
     (named-source path == default-source path)."""
-    m = dsl.Model(name)
+    m = Model(name)
     rho, mx, my, gx, gy, bz = _base_block(m)
     m.source([0.0, -rho * gx, -rho * gy])
     m.linear_source("lorentz", [[0.0, 0.0, 0.0],
@@ -163,7 +164,7 @@ chk(raises(ValueError, lambda: _unknown_source_program().emit_cpp_program(model=
 # (default source NOT folded) + the extra axpy -- no double-count; sources=["default","extra"] folds the
 # default via ctx.rhs_into + the extra axpy. Both are sound and emit, not refused.
 def _both_source_model(name="pc_both"):
-    m = dsl.Model(name)
+    m = Model(name)
     rho, mx, my, gx, gy, bz = _base_block(m)
     m.source([0.0, -rho * gx, -rho * gy])          # non-empty DEFAULT source
     m.source_term("extra", [0.0, 0.5 * rho, 0.0])  # a distinct NAMED source

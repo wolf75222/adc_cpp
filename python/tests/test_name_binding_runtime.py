@@ -46,10 +46,11 @@ def raises_with(fn, needle):
     return False
 
 
-def passive_model(dsl, name):
+def passive_model(name):
     """A 1-variable PASSIVE-transport scalar (rho): linear advection flux + a named linear sink, EMPTY
     default source (mirrors test_time_multiblock; avoids the default-source path so the step is exact)."""
-    m = dsl.Model(name)
+    from pops.physics.facade import Model
+    m = Model(name)
     (rho,) = m.conservative_vars("rho")
     a = 0.7
     u = m.primitive("u", a + 0.0 * rho)
@@ -78,7 +79,7 @@ def _run():
 
         import pops
         import pops.time as t
-        from pops import dsl
+        from pops.physics.facade import Model
     except Exception as exc:  # noqa: BLE001 -- numpy / _pops / pops.time unavailable
         _skip("pops / pops.time / numpy unavailable: %s" % exc)
 
@@ -98,7 +99,7 @@ def _run():
 
     # Compile the 2-block .so ONCE (production model + compiled Program). Needs compiler + Kokkos.
     try:
-        comp = pops.compile_problem(model=passive_model(dsl, "nb_model"), time=two_block_program(t))
+        comp = pops.compile_problem(model=passive_model("nb_model"), time=two_block_program(t))
     except (RuntimeError, ValueError) as exc:  # no compiler / no Kokkos / .so compile failed
         _skip("compile_problem could not build the .so: %s" % str(exc)[:160])
 
@@ -107,7 +108,7 @@ def _run():
         sim = pops.System(n=n, L=1.0, periodic=True)
         for blk in add_order:
             try:
-                cm = passive_model(dsl, "nb_blk_" + blk).compile(backend="production")
+                cm = passive_model("nb_blk_" + blk).compile(backend="production")
             except RuntimeError as exc:  # no compiler / no Kokkos
                 _skip("model compile could not build the .so: %s" % str(exc)[:160])
             sim.add_equation(blk, cm, spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),

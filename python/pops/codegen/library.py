@@ -12,7 +12,7 @@ library-descriptor reader (:func:`read_library_manifest`) and by
 The manifest, the ABI key and the content hash are numerics-free (no Python solve).
 ``compile_library(..., emit=True)`` ALSO emits the C++ of the library's bricks
 (:mod:`pops.codegen.library_codegen`) and compiles a real ``.so`` with the same Kokkos toolchain a
-problem ``.so`` uses (:func:`pops.dsl.pops_loader_build_flags`, ``POPS_KOKKOS_ROOT``), exporting
+problem ``.so`` uses (:func:`pops.codegen.toolchain.pops_loader_build_flags`, ``POPS_KOKKOS_ROOT``), exporting
 the metadata, the ABI key, the brick list / signatures / requirements / capabilities and the
 generated symbols. :func:`read_library_manifest` reads that descriptor back from the ``.so``
 (dlopen) and rejects an ABI / Kokkos mismatch as a HARD error. ``pops.compile_problem(...,
@@ -21,7 +21,7 @@ libraries=[...])`` reads + validates the compiled ``.so`` (the consume path).
 import hashlib
 import json
 
-from .lib import BrickDescriptor
+from ..lib import BrickDescriptor
 
 __all__ = ["LibraryManifest", "compile_library", "read_library_manifest"]
 
@@ -159,7 +159,7 @@ def compile_library(name, objects, *, backend="production", emit=False, so_path=
     With ``emit=False`` (default) it returns the MANIFEST only (numerics-free, no
     compiler needed). With ``emit=True`` it ALSO emits the library C++
     (:func:`pops.codegen.library_codegen.emit_library_cpp`) and compiles a REAL ``.so`` with the
-    same Kokkos toolchain a problem ``.so`` uses (:func:`pops.dsl.pops_loader_build_flags`,
+    same Kokkos toolchain a problem ``.so`` uses (:func:`pops.codegen.toolchain.pops_loader_build_flags`,
     ``POPS_KOKKOS_ROOT``); the returned manifest carries the artifact ``so_path``. Without
     an explicit ``so_path`` the ``.so`` is cached out-of-source keyed by the content hash +
     ABI key (``force=True`` recompiles). The ``.so`` exports the metadata, the ABI key, the
@@ -187,32 +187,32 @@ def compile_library(name, objects, *, backend="production", emit=False, so_path=
 def _emit_and_compile(manifest, *, so_path=None, cxx=None, force=False):
     """Emit @p manifest's C++ and compile the library ``.so``; return its path.
 
-    Reuses the production toolchain helpers (:mod:`pops.dsl`): the same Kokkos compiler,
-    flags and ABI-keyed cache path a problem ``.so`` uses, so the library ``.so`` is
-    ABI-compatible with the loaded ``_pops`` module. Kokkos is mandatory (adc_cpp is
-    Kokkos-only); a missing ``POPS_KOKKOS_ROOT`` is a clear error from
-    :func:`pops.dsl.pops_loader_build_flags`.
+    Reuses the production toolchain helpers (:mod:`pops.codegen.toolchain`,
+    :mod:`pops.codegen.cache`): the same Kokkos compiler, flags and ABI-keyed cache path a
+    problem ``.so`` uses, so the library ``.so`` is ABI-compatible with the loaded ``_pops``
+    module. Kokkos is mandatory (adc_cpp is Kokkos-only); a missing ``POPS_KOKKOS_ROOT`` is a
+    clear error from :func:`pops.codegen.toolchain.pops_loader_build_flags`.
     """
     import os
     import tempfile
 
-    from . import dsl
-    from .codegen.library_codegen import emit_library_cpp
+    from . import toolchain, cache
+    from .library_codegen import emit_library_cpp
 
     src = emit_library_cpp(manifest)
-    include = dsl.pops_include()
-    sig = dsl.pops_header_signature(include)
-    cc, cflags, lflags = dsl.pops_loader_build_flags(cxx)
-    eff_std = dsl._probe_cxx_std(cc, dsl.loader_cxx_std())
+    include = toolchain.pops_include()
+    sig = toolchain.pops_header_signature(include)
+    cc, cflags, lflags = toolchain.pops_loader_build_flags(cxx)
+    eff_std = toolchain._probe_cxx_std(cc, toolchain.loader_cxx_std())
 
     if so_path is None:
         key = "%s|%s|%s" % (sig, cc, eff_std)
-        so_path = dsl._cache_so_path(manifest.content_hash, key, "library-production",
-                                     "library", manifest.name)
+        so_path = cache._cache_so_path(manifest.content_hash, key, "library-production",
+                                       "library", manifest.name)
         if not force and os.path.isfile(so_path):
             return so_path
 
-    optflags = dsl._dsl_optflags()
+    optflags = cache._dsl_optflags()
     with tempfile.TemporaryDirectory() as tmp:
         cpp = os.path.join(tmp, "library.cpp")
         with open(cpp, "w") as f:
@@ -220,7 +220,7 @@ def _emit_and_compile(manifest, *, so_path=None, cxx=None, force=False):
         flags = ["-shared", "-fPIC", "-std=" + eff_std, *optflags,
                  "-DPOPS_HEADER_SIG=\"%s\"" % sig, *cflags]
         cmd = [cc, *flags, "-I", include, cpp, "-o", so_path, *lflags]
-        dsl._run_compile(cmd, "compile_library (backend production)")
+        toolchain._run_compile(cmd, "compile_library (backend production)")
     return so_path
 
 
@@ -344,7 +344,7 @@ def _abi_key():
     interpreter exercising the pure-Python manifest layer). The key namespaces a
     library to the exact toolchain that will dlopen its bricks."""
     try:
-        from . import abi_key as _key  # pops.abi_key delegates to _pops.abi_key()
+        from .. import abi_key as _key  # pops.abi_key delegates to _pops.abi_key()
         return _key()
     except Exception:
         return "abi_key=unavailable"

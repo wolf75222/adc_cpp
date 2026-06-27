@@ -1,11 +1,10 @@
 """Generic moment-model builder: index helpers and build_moment_model.
 
-Extracted from pops.moments (flat module); symbols are re-exported via
-python/pops/lib/moments/__init__.py.
+Symbols are re-exported via python/pops/lib/moments/__init__.py.
 
 The symbolic IR primitives (``Const`` / ``sqrt`` / ``abs_``) come from
 :mod:`pops.ir` at module scope (the IR is lightweight and lib may import it).
-The PDE-model facade (``physics.PdeModel``, the old ``dsl.Model``) is imported
+The PDE-model facade (``physics.PdeModel``) is imported
 LAZILY inside :func:`build_moment_model` because :mod:`pops.physics` pulls the
 compile machinery transitively, and ``lib`` must stay importable without it.
 """
