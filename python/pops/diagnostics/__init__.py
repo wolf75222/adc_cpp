@@ -12,8 +12,14 @@ Spec 5 sec.5.13 / 14.2.7 also names a diagnostic with a TYPED object (a
 :class:`~pops.diagnostics.measures.Norm` / :class:`~pops.diagnostics.measures.Integral` /
 :class:`~pops.diagnostics.measures.MinMax` / :class:`~pops.diagnostics.measures.ConservationCheck`
 descriptor) rather than ``diagnostics.norm(kind="l2")``. Those typed measures live in
-:mod:`pops.diagnostics.measures` and lower to the SAME native reduction schemes the factory
-functions here already name. The legacy factories stay for now.
+:mod:`pops.diagnostics.measures` and are the SINGLE SOURCE of the native reduction scheme
+labels: the legacy ``norm`` / ``integral`` factories below read their scheme from
+:class:`~pops.diagnostics.measures.Norm` / :class:`~pops.diagnostics.measures.Integral` rather
+than re-spelling the literal, so a scheme label exists in exactly ONE place. The factory still
+returns the historical ``BrickDescriptor`` (``category="diagnostic"``) consumers depend on; the
+typed class is the canonical authoring form. The reductions with no typed counterpart
+(``mass`` / ``momentum`` / ``energy`` / ``invariant_error`` / ``residual``) keep their own
+self-named scheme.
 """
 from types import SimpleNamespace
 
@@ -22,14 +28,18 @@ from .invariants import invariants
 from .measures import ConservationCheck, Integral, MinMax, Norm
 
 
-def _diag(_dname, **o):
-    return BrickDescriptor(_dname, "macro", category="diagnostic", scheme=_dname,
+def _diag(_dname, *, scheme=None, **o):
+    """An inert ``diagnostic`` macro descriptor; @p scheme defaults to the reduction name."""
+    return BrickDescriptor(_dname, "macro", category="diagnostic",
+                           scheme=scheme if scheme is not None else _dname,
                            options=o or None)
 
 
 diagnostics = SimpleNamespace(
-    integral=lambda expr=None, **o: _diag("integral", expr=expr, **o),
-    norm=lambda kind="l2", **o: _diag("norm", kind=kind, **o),
+    # ``integral`` / ``norm`` borrow their scheme label from the typed measure classes, so the
+    # native reduction label lives in ONE place (pops.diagnostics.measures), not two.
+    integral=lambda expr=None, **o: _diag("integral", scheme=Integral.scheme, expr=expr, **o),
+    norm=lambda kind="l2", **o: _diag("norm", scheme=Norm.scheme, kind=kind, **o),
     mass=lambda **o: _diag("mass", **o),
     momentum=lambda **o: _diag("momentum", **o),
     energy=lambda **o: _diag("energy", **o),
