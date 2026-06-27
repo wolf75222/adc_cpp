@@ -45,7 +45,7 @@ class CompiledReport:
     """
 
     def __init__(self, *, name, backend, platform, layout, blocks, fields, program, inputs,
-                 artifacts, status):
+                 artifacts, status, env=None):
         self.name = name
         self.backend = backend
         self.platform = platform
@@ -56,6 +56,12 @@ class CompiledReport:
         self.inputs = dict(inputs)        # {states, params, aux} -> [names]
         self.artifacts = dict(artifacts)  # {so_path, abi_key, cache_key}
         self.status = status
+        # Active codegen POPS_* environment (Spec 5 sec.12.4, #47-48): the resolved CodegenEnv as a
+        # plain dict (log_level / codegen_dir / keep_generated / dump_ir / dump_cpp / cache_dir /
+        # profile / autotune / jit_backdoor), or {} when the handle carried no env snapshot. Surfaced
+        # so the env state that governed the compile -- including the UNSAFE jit_backdoor gate -- is
+        # inspectable, never hidden.
+        self.env = dict(env) if env else {}
 
     def to_dict(self):
         """A plain-dict view of the whole report (JSON-ready)."""
@@ -63,7 +69,7 @@ class CompiledReport:
                 "layout": self.layout, "blocks": [dict(b) for b in self.blocks],
                 "fields": [dict(f) for f in self.fields], "program": dict(self.program),
                 "inputs": {k: list(v) for k, v in self.inputs.items()},
-                "artifacts": dict(self.artifacts), "status": self.status}
+                "artifacts": dict(self.artifacts), "status": self.status, "env": dict(self.env)}
 
     def to_json(self, path=None, *, indent=2):
         """Serialise :meth:`to_dict` to JSON; write to ``path`` if given, else return the string."""
@@ -102,6 +108,22 @@ class CompiledReport:
         lines.append("    so_path  : %s" % art.get("so_path"))
         lines.append("    abi_key  : %s" % art.get("abi_key"))
         lines.append("    cache_key: %s" % art.get("cache_key"))
+        if self.env:
+            lines.append("  environment (active POPS_*):")
+            lines.append("    log_level     : %s" % self.env.get("log_level"))
+            lines.append("    codegen_dir   : %s" % self.env.get("codegen_dir"))
+            lines.append("    keep_generated: %s" % self.env.get("keep_generated"))
+            lines.append("    dump_ir       : %s" % self.env.get("dump_ir"))
+            lines.append("    dump_cpp      : %s" % self.env.get("dump_cpp"))
+            lines.append("    cache_dir     : %s" % self.env.get("cache_dir"))
+            lines.append("    profile       : %s" % self.env.get("profile"))
+            lines.append("    autotune      : %s%s"
+                         % (self.env.get("autotune"),
+                            "  (no-op stub: no autotune engine today)"
+                            if self.env.get("autotune") not in (None, "off") else ""))
+            backdoor = self.env.get("jit_backdoor")
+            lines.append("    jit_backdoor  : %s%s"
+                         % (backdoor, "  *** UNSAFE debug gate ENABLED ***" if backdoor else ""))
         lines.append("  status   : %s" % self.status)
         return "\n".join(lines)
 
@@ -161,11 +183,17 @@ def build_compiled_report(compiled):
                  "abi_key": _short(getattr(compiled, "abi_key", None)),
                  "cache_key": _short(getattr(compiled, "cache_key", None))}
 
+    # The active codegen POPS_* environment snapshot (sec.12.4, #47-48): the resolved CodegenEnv as a
+    # plain dict, or {} for a handle that carries none. Surfacing it keeps the env state -- including
+    # the UNSAFE jit_backdoor gate -- inspectable rather than hidden.
+    codegen_env = getattr(compiled, "codegen_env", None)
+    env = codegen_env.to_dict() if codegen_env is not None else {}
+
     return CompiledReport(
         name=prog_summary["name"], backend="production", platform=platform, layout=layout,
         blocks=blocks, fields=fields, program=prog_summary,
         inputs={"states": states, "params": req_params, "aux": req_aux},
-        artifacts=artifacts, status="compiled, waiting for pops.bind(...)")
+        artifacts=artifacts, status="compiled, waiting for pops.bind(...)", env=env)
 
 
 # ---------------------------------------------------------------------------

@@ -26,7 +26,8 @@ class CompiledProblem:
     """
 
     def __init__(self, so_path, program, model, abi_key, cxx, std, libraries=None,
-                 problem_hash=None, cache_key=None, compile_command=None, generated_sources=None):
+                 problem_hash=None, cache_key=None, compile_command=None, generated_sources=None,
+                 codegen_env=None):
         self.so_path = so_path
         self.program = program          # the pops.time.Program that was lowered
         self.model = model              # the physical model (optional; added as a block in the MVP)
@@ -51,6 +52,12 @@ class CompiledProblem:
         self._cache_key = cache_key
         self._compile_command = compile_command
         self._generated_sources = list(generated_sources) if generated_sources else []
+        # Active codegen POPS_* environment snapshot (Spec 5 sec.12.4, #47-48): the resolved
+        # CodegenEnv that governed this compile (log level, codegen dir, keep-generated, dump flags,
+        # cache dir, profile, autotune, and the UNSAFE jit-backdoor gate). Recorded so the env state
+        # is inspectable in inspect(); None for a handle built outside compile_problem (no env was
+        # resolved -- a documented absence, not a fabricated default).
+        self._codegen_env = codegen_env
 
     def __fspath__(self):
         return self.so_path
@@ -98,10 +105,21 @@ class CompiledProblem:
     def generated_sources(self):
         """The generated source files written for inspection (sec.12.4, #49).
 
-        The ``.cpp`` files ``compile_problem(debug=True)`` persisted next to the ``.so`` (the
-        default keeps the source only in a TemporaryDirectory, so this is empty unless ``debug``
-        was set). A list (possibly empty), never ``None``."""
+        The ``.cpp`` files ``compile_problem(debug=True)`` (or ``POPS_KEEP_GENERATED``) persisted next
+        to the ``.so`` (the default keeps the source only in a TemporaryDirectory, so this is empty
+        unless one of those was set). A list (possibly empty), never ``None``."""
         return list(self._generated_sources)
+
+    @property
+    def codegen_env(self):
+        """The resolved codegen ``POPS_*`` environment snapshot that governed this compile (sec.12.4).
+
+        A :class:`pops.codegen.env.CodegenEnv` recording the EFFECTIVE settings (env defaults already
+        overridden by any explicit argument): log level, codegen dir, keep-generated, dump-IR /
+        dump-CPP, cache dir, profile, autotune level, and the UNSAFE :attr:`CodegenEnv.jit_backdoor`
+        gate. Surfaced in :meth:`inspect` so the active env state is never hidden (criterion #47).
+        ``None`` for a handle built outside ``compile_problem``."""
+        return self._codegen_env
 
     # --- operator introspection (Spec 2, S2-5): metadata read from the carried model,
     # no need to load or run the .so.

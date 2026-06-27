@@ -194,11 +194,13 @@ reviewed = "6f84dc22b95d6f69edd347e153ae037f6dfe1401"
 owner = "Romain"
 mode = "warning"
 depends_on = ["python/pops/codegen/toolchain.py", "python/pops/codegen/cache.py",
+              "python/pops/codegen/env.py", "python/pops/codegen/compile_drivers.py",
               "python/pops/runtime/threading.py", "python/pops/runtime/profile.py",
+              "python/pops/runtime/doctor.py",
               "include/pops/mesh/execution/for_each.hpp",
               "include/pops/numerics/elliptic/mg/geometric_mg.hpp",
               "include/pops/runtime/system/system_field_solver.hpp"]
-tested_by = []
+tested_by = ["python/tests/test_pops_env.py"]
 testable = false
 reviewed = "3d8086bf52a060bbbda56a2f4e911c01ce6fee13"
 

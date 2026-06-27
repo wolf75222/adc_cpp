@@ -122,6 +122,20 @@ def doctor(verbose=True):
                          % (os.environ.get("OMP_NUM_THREADS", "(default)"),
                             _threading._first_system_built))
 
+    # 7. POPS_JIT_BACKDOOR (Spec 5 sec.12.4, criterion #48): the UNSAFE debug gate must never be
+    # silently honored. Surface it loudly here (in addition to compiled.inspect()) so a stray export
+    # is visible at a glance. OK when unset / disabled; FAIL (loud) when enabled -- a debug-only
+    # escape hatch in a healthy environment. No backdoor behavior is wired; this is the guard only.
+    # Read the env directly (no codegen import, so doctor stays lightweight even without numpy); the
+    # truthy convention mirrors pops.codegen.env.jit_backdoor_enabled.
+    _backdoor = os.environ.get("POPS_JIT_BACKDOOR", "").strip().lower() in ("1", "on", "true",
+                                                                            "yes", "y")
+    if _backdoor:
+        checks["jit_backdoor"] = (False, "POPS_JIT_BACKDOOR is SET -> the UNSAFE debug JIT gate is "
+                                         "ENABLED. Never set this in production; unset it to disable.")
+    else:
+        checks["jit_backdoor"] = (True, "disabled (POPS_JIT_BACKDOOR unset -- the safe default)")
+
     if verbose:
         for cname, (ok, detail) in checks.items():
             print("[%s] %-16s %s" % ("OK " if ok else "FAIL", cname, detail))

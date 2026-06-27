@@ -370,6 +370,15 @@ def compile_problem(so_path=None, *, model=None, time=None, backend="production"
     import hashlib
     import tempfile
     from pops.codegen.loader import CompiledProblem
+    from pops.codegen.env import CodegenEnv
+
+    # ADDITIVE (Spec 5 sec.12.4, #47-48): resolve the codegen POPS_* environment ONCE. An explicit
+    # argument wins over the env -- debug=True forces keep-generated regardless of POPS_KEEP_GENERATED,
+    # and the resolver leaves the JIT-backdoor gate OFF unless POPS_JIT_BACKDOOR is itself set (loud
+    # warning emitted in from_env when it is). The snapshot is recorded on the returned handle so the
+    # active env state is inspectable (criterion #47), never hidden.
+    cenv = CodegenEnv.from_env(keep_generated=debug)
+    cenv.log("compile_problem: backend=%s target=%s force=%s" % (backend, target, force))
 
     # ADDITIVE (Spec 5 sec.8.15): accept a typed backend descriptor (Production()) as well as the
     # legacy string; lower it before the production-only guard so both selectors behave the same.
@@ -418,18 +427,30 @@ def compile_problem(so_path=None, *, model=None, time=None, backend="production"
     if so_path is None:
         so_path = _cache_so_path(program_hash, abi_key, "program-production", target,
                                  getattr(time, "name", "problem"))
+        # POPS_CODEGEN_DIR (sec.12.4, #47): redirect the out-of-source .so (and any kept source /
+        # dump) into the requested directory, keeping the collision-free cache file name. An explicit
+        # so_path bypasses this -- the caller pinned the path. Created on demand, never inside the repo.
+        if cenv.codegen_dir:
+            os.makedirs(cenv.codegen_dir, exist_ok=True)
+            so_path = os.path.join(cenv.codegen_dir, os.path.basename(so_path))
         if not force and os.path.isfile(so_path):
-            return CompiledProblem(so_path, time, model, abi_key, cc, eff_std,
-                                   libraries=library_manifests, problem_hash=program_hash,
-                                   cache_key=cache_key)
+            cenv.log("compile_problem: cache HIT -> %s" % so_path)
+            compiled = CompiledProblem(so_path, time, model, abi_key, cc, eff_std,
+                                       libraries=library_manifests, problem_hash=program_hash,
+                                       cache_key=cache_key, codegen_env=cenv)
+            cenv.run_dumps(compiled)
+            return compiled
 
     optflags = _dsl_optflags()
-    gen_src_path = os.path.splitext(so_path)[0] + ".cpp" if debug else None
+    # POPS_KEEP_GENERATED (sec.12.4, #47): keep the emitted .cpp next to the .so -- the same effect
+    # debug=True has (debug=True already set keep_generated in cenv, explicit-arg-wins). When neither
+    # is set the source lives only in the TemporaryDirectory below and is discarded.
+    gen_src_path = os.path.splitext(so_path)[0] + ".cpp" if cenv.keep_generated else None
     with tempfile.TemporaryDirectory() as tmp:
         cpp = os.path.join(tmp, "problem.cpp")
         with open(cpp, "w") as f:
             f.write(src)
-        if debug:
+        if gen_src_path:
             try:
                 with open(gen_src_path, "w") as f:
                     f.write(src)
@@ -443,11 +464,16 @@ def compile_problem(so_path=None, *, model=None, time=None, backend="production"
         # (or "<generated>") rather than the vanished temp path; redact secrets/env in the tokens.
         compile_command = _redact_compile_command(cmd, tmp_cpp=cpp,
                                                   gen_src=gen_src_path or "<generated>")
+        cenv.log("compile_problem: invoking %s" % compile_command, level="debug")
         _run_compile(cmd, "compile_problem (backend production)")
-    return CompiledProblem(so_path, time, model, abi_key, cc, eff_std,
-                           libraries=library_manifests, problem_hash=program_hash,
-                           cache_key=cache_key, compile_command=compile_command,
-                           generated_sources=[gen_src_path] if gen_src_path else [])
+    cenv.log("compile_problem: compiled -> %s" % so_path)
+    compiled = CompiledProblem(so_path, time, model, abi_key, cc, eff_std,
+                               libraries=library_manifests, problem_hash=program_hash,
+                               cache_key=cache_key, compile_command=compile_command,
+                               generated_sources=[gen_src_path] if gen_src_path else [],
+                               codegen_env=cenv)
+    cenv.run_dumps(compiled)
+    return compiled
 
 
 def _redact_compile_command(cmd, *, tmp_cpp, gen_src):

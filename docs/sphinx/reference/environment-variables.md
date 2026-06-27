@@ -34,7 +34,34 @@ the DSL loader `.so`; they change neither the ABI key nor the numerics.
 | `POPS_KOKKOS_CXX` | Explicit compiler for the Kokkos DSL loader (for example an `nvcc_wrapper` for a CUDA build). Used instead of the default host compiler. | Unset (falls back to `POPS_CXX`, then the `_pops` build compiler). | `_native_kokkos_compiler()` in `python/pops/codegen/toolchain.py` |
 | `POPS_KOKKOS_USE_NVCC_WRAPPER` | Opt-in switch to select the `nvcc_wrapper` found under `<kokkos>/bin`. Truthy values: `1`, `on`, `true`, `yes`, `y`. CUDA selection is never implicit: without this flag (or `POPS_KOKKOS_CXX`) the host compiler is used, so a CPU job on a Kokkos install that ships an `nvcc_wrapper` is not silently broken. | Unset / false (host compiler). | `_native_kokkos_compiler()` in `python/pops/codegen/toolchain.py` |
 | `POPS_DSL_OPTFLAGS` | Overrides the optimization flags of the `production`/`aot` DSL `.so` (whitespace-split). Enters the cache key, so changing it produces a distinct cached `.so`. Affects neither the ABI nor portability. | `-O3 -DNDEBUG`. | `_dsl_optflags()` in `python/pops/codegen/cache.py` |
-| `POPS_CACHE_DIR` | Directory for the out-of-source `.so` cache written by `m.compile()` when no explicit `so_path` is given. | `$XDG_CACHE_HOME/pops/dsl`, else `~/.cache/pops/dsl`. | `pops_cache_dir()` in `python/pops/codegen/cache.py` |
+| `POPS_CACHE_DIR` | Directory for the out-of-source `.so` cache written by `m.compile()` when no explicit `so_path` is given. Also recorded in `compiled.inspect()`. | `$XDG_CACHE_HOME/pops/dsl`, else `~/.cache/pops/dsl`. | `pops_cache_dir()` in `python/pops/codegen/cache.py` |
+
+## Codegen logging, dumps, and autotune
+
+These are read by `compile_problem` through the resolver in
+`python/pops/codegen/env.py`. They supply DEFAULTS for the codegen step; an
+explicit argument to `compile_problem` always wins (for example
+`compile_problem(debug=True)` forces keep-generated regardless of
+`POPS_KEEP_GENERATED`). Coercion is lenient: an unrecognised value falls back to
+the safe default instead of raising. Every one of them is surfaced in
+`compiled.inspect()` (criterion #47), so the env state that governed a compile is
+inspectable rather than hidden.
+
+| Variable | Effect | Default | Read in |
+|----------|--------|---------|---------|
+| `POPS_LOG` | Log level for the compile/codegen path: `info` / `1` / `on` -> info traces, `debug` / `verbose` / `2` -> verbose traces, anything falsey / unset -> quiet. `POPS_CODEGEN_LOG` (below) wins over this broader name. | Unset (quiet). | `resolve_log_level()` in `python/pops/codegen/env.py` |
+| `POPS_CODEGEN_LOG` | Codegen-specific log level (same level vocabulary as `POPS_LOG`). When both are set, this one wins. | Unset (falls back to `POPS_LOG`, else quiet). | `resolve_log_level()` in `python/pops/codegen/env.py` |
+| `POPS_CODEGEN_DIR` | Directory the compiled `.so` (and any kept generated source / IR / C++ dump) is written to. Redirects the out-of-source cache file (keeping its collision-free name); created on demand. An explicit `so_path=` on `compile_problem` bypasses it. | Unset (the `POPS_CACHE_DIR` cache directory). | `compile_problem` in `python/pops/codegen/compile_drivers.py` |
+| `POPS_KEEP_GENERATED` | Keep the generated `.cpp` next to the `.so` instead of discarding the temporary build directory. Truthy values: `1`, `on`, `true`, `yes`, `y`. `compile_problem(debug=True)` has the same effect and always wins. | Unset / false (source kept only in a temporary directory). | `compile_problem` in `python/pops/codegen/compile_drivers.py` |
+| `POPS_DUMP_IR` | After a successful compile (or a cache hit), dump the serialized Program IR (JSON) into `POPS_CODEGEN_DIR` via `compiled.dump_ir()`. Truthy values as above. | Unset / false (no dump). | `compile_problem` in `python/pops/codegen/compile_drivers.py` |
+| `POPS_DUMP_CPP` | After a successful compile (or a cache hit), dump the generated C++ source into `POPS_CODEGEN_DIR` via `compiled.dump_cpp()`. Truthy values as above. | Unset / false (no dump). | `compile_problem` in `python/pops/codegen/compile_drivers.py` |
+| `POPS_AUTOTUNE` | Requested autotune level: `off` (default), `basic`, `aggressive`. There is no autotune engine today, so any non-`off` value is an HONEST no-op stub: it is recorded and surfaced in `compiled.inspect()` but changes nothing in the emitted code, and therefore does NOT enter the cache key. If a future tuner ever changes codegen, it must then enter the cache key. | Unset (`off`). | `resolve_autotune()` in `python/pops/codegen/env.py` |
+
+## Debug / unsafe gate
+
+| Variable | Effect | Default | Read in |
+|----------|--------|---------|---------|
+| `POPS_JIT_BACKDOOR` | A DEBUG / UNSAFE gate. **Disabled by default** and **never enabled implicitly** by any other option. No backdoor behavior is wired today; this variable's only effect is the GUARD: if it is set truthy (`1` / `on` / `true` / `yes` / `y`), `compile_problem` emits a LOUD warning (plus a stderr line) and the flag is surfaced in `compiled.inspect()` and flagged by `pops.doctor()`, so it can never be silently honored. Never set this in production. | Unset / false (disabled). | `jit_backdoor_enabled()` / `CodegenEnv.from_env` in `python/pops/codegen/env.py`; surfaced by `doctor()` in `python/pops/runtime/doctor.py` |
 
 ## Python runtime defaults
 
@@ -46,7 +73,7 @@ rejection than passing the argument directly).
 | Variable | Effect | Default | Read in |
 |----------|--------|---------|---------|
 | `POPS_THREADS` | Default thread count for `pops.set_threads()` called with no argument (a positive integer). An explicit `pops.set_threads(n)` always wins; an unset / non-integer / `< 1` value is ignored. | Unset (falls back to `os.cpu_count()`). | `_threads_from_env()` in `python/pops/runtime/threading.py` |
-| `POPS_PROFILE` | Default level for `sim.profile()` called with no argument: `advanced` / `full` -> `Profile.Advanced()`, `off` / `0` / `false` / `no` / `none` -> the call's own default (`Profile.Basic()`), anything else -> `Profile.Basic()`. An explicit `sim.profile(Profile.Advanced())` always wins. | Unset (the call's default level). | `Profile.from_env()` in `python/pops/runtime/profile.py` |
+| `POPS_PROFILE` | Default level for `sim.profile()` called with no argument: `advanced` / `full` -> `Profile.Advanced()`, `off` / `0` / `false` / `no` / `none` -> the call's own default (`Profile.Basic()`), anything else -> `Profile.Basic()`. An explicit `sim.profile(Profile.Advanced())` always wins. Also recorded in `compiled.inspect()`. | Unset (the call's default level). | `Profile.from_env()` in `python/pops/runtime/profile.py` |
 
 ## Runtime diagnostics
 
@@ -73,23 +100,7 @@ backend picks up the thread count:
 The cache directory resolution also reads the standard `XDG_CACHE_HOME` (see
 `POPS_CACHE_DIR` above).
 
-## Planned / not yet implemented
-
-The variable names below appear in design discussions but are **not** read by any
-current code path. They are listed here so that nobody assumes they work; setting
-them today has no effect.
-
-- `POPS_LOG`, `POPS_CODEGEN_LOG` -- no logging-verbosity variable is honored
-  today.
-- `POPS_CODEGEN_DIR`, `POPS_KEEP_GENERATED` -- the generated `.cpp` is written to
-  a temporary path and not retained; there is no env switch to redirect or keep
-  it. Use `so_path=` on `m.compile(...)` to control the `.so` output instead.
-- `POPS_DUMP_IR`, `POPS_DUMP_CPP` -- no env-gated dump of the IR or the emitted
-  C++ exists.
-- `POPS_AUTOTUNE` -- there is no environment-driven autotuning hook.
-- `POPS_JIT_BACKDOOR` -- absent. No backdoor into the JIT path exists, implicit or
-  otherwise. If such a debug-only escape hatch is ever added, it must be explicit
-  and opt-in, never triggered implicitly.
+## Test-only knobs
 
 Two further names exist only inside the GPU validation harness
 (`python/tests/gpu/gpu_dsl_production_validate.cpp`): `POPS_DSLPROD_SOLVER` and
