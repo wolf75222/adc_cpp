@@ -20,6 +20,9 @@ cf. test docstring de AmrSystem.checkpoint). Ce test ne valide donc PAS une repr
 l'ETAT (impossible) ; il valide l'horloge + la cadence, qui sont independantes et utiles seules
 (p.ex. pour piloter une sortie write a cadence fixe et reprendre la phase regrid/stride).
 """
+from pops.numerics.reconstruction import FirstOrder
+from pops.numerics.reconstruction.limiters import Minmod
+from pops.numerics.riemann import Rusanov
 import numpy as np
 
 import pops
@@ -41,9 +44,9 @@ def _build_stride(n=32):
     compteur de macro-pas, ce que macro_step()/set_clock() exposent et restaurent."""
     sim = pops.AmrSystem(n=n, L=1.0, periodic=True, regrid_every=0)
     sim.add_block("ions", _scalar_charge(+1.0),
-                  spatial=pops.Spatial(limiter="none", flux="rusanov"))
+                  spatial=pops.Spatial(limiter=FirstOrder(), flux=Rusanov()))
     sim.add_block("slow", _scalar_charge(-1.0),
-                  spatial=pops.Spatial(limiter="minmod", flux="rusanov"),
+                  spatial=pops.Spatial(limiter=Minmod(), flux=Rusanov()),
                   time=pops.Explicit(stride=2))  # bloc lent : cadence stride=2
     sim.set_poisson(bc="periodic")
     sim.set_density("ions", _bump(n, 0.40))

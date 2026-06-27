@@ -16,6 +16,8 @@ emitted, and a Program WITHOUT a dt bound emits ``has_dt_bound() -> false``. Sec
 (needs _pops + a compiler + a visible Kokkos via POPS_KOKKOS_ROOT) and self-skips cleanly otherwise; it
 never fakes the engine.
 """
+from pops.numerics.reconstruction import FirstOrder
+from pops.numerics.riemann import Rusanov
 import sys
 
 
@@ -151,7 +153,7 @@ CFL = 0.4
 def make_sim():
     sim = pops.System(n=N, L=1.0, periodic=True)
     sim.add_block("ions", transport_model(),
-                  spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                  spatial=pops.FiniteVolume(limiter=FirstOrder(), riemann=Rusanov()),
                   time=pops.Explicit(method="euler"))
     sim.set_poisson("charge_density", "geometric_mg")
     x = (np.arange(N) + 0.5) / N

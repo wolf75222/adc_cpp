@@ -150,10 +150,12 @@ class CompiledModel:
                 "ephemeral System; a target='amr_system' loader is checked installed in its "
                 "AmrSystem (AMR test invariants), not in isolation.")
         from pops import System, FiniteVolume, Explicit  # lazy: avoids a top-level runtime import
+        from pops.numerics.reconstruction.limiters import Minmod
+        from pops.numerics.riemann import Rusanov
         sim = System(n=int(n), L=1.0, periodic=True)
         sim.set_poisson()
         sim.add_equation("check", model=self,
-                         spatial=FiniteVolume(limiter="minmod", riemann="rusanov"),
+                         spatial=FiniteVolume(limiter=Minmod(), riemann=Rusanov()),
                          time=Explicit())
         x = (np.arange(n) + 0.5) / float(n)
         X, Y = np.meshgrid(x, x, indexing="xy")

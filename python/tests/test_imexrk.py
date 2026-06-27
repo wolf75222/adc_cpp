@@ -26,6 +26,7 @@ Verifie :
 Modeles NATIFS uniquement (le chemin compile .so rejette IMEXRK cote C++). Invariants par assert ;
 imprime "OK test_imexrk" en cas de succes.
 """
+from pops.numerics.reconstruction.limiters import Minmod
 import sys
 
 import numpy as np
@@ -53,7 +54,7 @@ def cyclotron_model(q):
 
 def build(time_policy, q, B0, rho0=1.0, u0=1.0, v0=0.0, n=8):
     sim = pops.System(n=n, L=1.0, periodic=True)
-    sim.add_block("e", cyclotron_model(q), spatial=pops.FiniteVolume(limiter="minmod"),
+    sim.add_block("e", cyclotron_model(q), spatial=pops.FiniteVolume(limiter=Minmod()),
                   time=time_policy)
     sim.set_poisson(rhs="charge_density", solver="geometric_mg", bc="periodic")
     sim.set_magnetic_field(B0 * np.ones(n * n))
@@ -122,7 +123,7 @@ print("== (d) rejets explicites : AMR / polaire / Strang / masque partiel ==")
 # (d1) AMR
 amr = pops.AmrSystem(n=16, L=1.0, periodic=True, regrid_every=0)
 try:
-    amr.add_block("e", cyclotron_model(1.0), spatial=pops.FiniteVolume(limiter="minmod"),
+    amr.add_block("e", cyclotron_model(1.0), spatial=pops.FiniteVolume(limiter=Minmod()),
                   time=pops.IMEXRK())
     chk(False, "AMR + IMEXRK aurait du lever")
 except (RuntimeError, ValueError, TypeError) as e:
@@ -153,7 +154,7 @@ try:
     # pops.IMEXRK n'expose pas implicit_vars ; on force l'attribut pour exercer la garde C++.
     pol = pops.IMEXRK()
     pol.implicit_vars = ["rho_u"]
-    sim_mask.add_block("e", cyclotron_model(1.0), spatial=pops.FiniteVolume(limiter="minmod"),
+    sim_mask.add_block("e", cyclotron_model(1.0), spatial=pops.FiniteVolume(limiter=Minmod()),
                        time=pol)
     chk(False, "IMEXRK + implicit_vars aurait du lever")
 except (RuntimeError, ValueError) as e:

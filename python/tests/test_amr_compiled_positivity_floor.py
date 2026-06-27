@@ -31,6 +31,8 @@ native path (tests/test_amr_positivity_floor.cpp, python/tests/test_amr_positivi
 Needs a C++ compiler + the pops headers + POPS_KOKKOS_ROOT (the production loader is Kokkos-only):
 auto-skips (exit 0) without a compiler, like test_dsl_production_amr. Validated under CI (ci-kokkos*).
 """
+from pops.numerics.riemann import Rusanov
+from pops.numerics.reconstruction import WENO5
 import os
 import shutil
 import sys
@@ -105,7 +107,7 @@ def compiled_single(cm, pf, state):
     s = pops.AmrSystem(n=N, L=1.0, periodic=True)
     s.set_refinement(1e30)
     s.add_equation("gas", cm,
-                   spatial=pops.Spatial(limiter="weno5", flux="rusanov", positivity_floor=pf),
+                   spatial=pops.Spatial(limiter=WENO5(), flux=Rusanov(), positivity_floor=pf),
                    time=pops.Explicit())
     s.set_conservative_state("gas", state)
     for _ in range(38):
@@ -159,9 +161,9 @@ def main():
         band[:, N // 3:2 * N // 3] = 1.0
         sm = pops.AmrSystem(n=N, L=1.0, periodic=True)
         sm.set_refinement(1e30)
-        sm.add_equation("a", cm, spatial=pops.Spatial(limiter="weno5", flux="rusanov",
+        sm.add_equation("a", cm, spatial=pops.Spatial(limiter=WENO5(), flux=Rusanov(),
                                                      positivity_floor=1e-8))
-        sm.add_equation("b", cm, spatial=pops.Spatial(limiter="weno5", flux="rusanov",
+        sm.add_equation("b", cm, spatial=pops.Spatial(limiter=WENO5(), flux=Rusanov(),
                                                      positivity_floor=1e-8))
         sm.set_density("a", band.ravel().copy())
         sm.set_density("b", band.ravel().copy())

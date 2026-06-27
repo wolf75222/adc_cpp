@@ -27,6 +27,10 @@ add_compiled_model). On verifie :
 
 S'auto-saute (exit 0) sans compilateur C++ ou en-tetes pops (comme test_dsl_production).
 """
+from pops.numerics.variables import Conservative, Primitive
+from pops.numerics.riemann import HLLC, Roe
+from pops.numerics.reconstruction.limiters import Minmod
+from pops.numerics.riemann import Rusanov
 import os
 import shutil
 import subprocess
@@ -128,7 +132,7 @@ def main():
             "gas", so_t, limiter="minmod", riemann="rusanov", recon="conservative",
             time="explicit", gamma=GAMMA, substeps=1))
         B = _amr(n, L, lambda s: s.add_block(
-            "gas", spec_t, spatial=pops.Spatial(minmod=True, flux="rusanov", recon="conservative"),
+            "gas", spec_t, spatial=pops.Spatial(minmod=True, flux=Rusanov(), recon=Conservative()),
             time=pops.Explicit()))
         assert A.n_patches() == B.n_patches(), "n_patches initial production != add_block"
         dt = 2e-4
@@ -161,7 +165,7 @@ def main():
             "gas", so_p, limiter="minmod", riemann="rusanov", recon="conservative",
             time="explicit", gamma=GAMMA, substeps=1), poisson(s)))
         D = _amr(n, L, lambda s: (s.add_block(
-            "gas", spec_p, spatial=pops.Spatial(minmod=True, flux="rusanov", recon="conservative"),
+            "gas", spec_p, spatial=pops.Spatial(minmod=True, flux=Rusanov(), recon=Conservative()),
             time=pops.Explicit()), poisson(s)))
         assert C.n_patches() == D.n_patches()
         m0c, m0d = C.mass(), D.mass()
@@ -186,7 +190,7 @@ def main():
             """add_equation(riemann, recon) BIT-IDENTIQUE a add_block (dmax==0)."""
             R = _amr(n, L, lambda s: s.add_equation(
                 "gas", cm_t,
-                spatial=pops.FiniteVolume(limiter="minmod", riemann=riem, variables=recon)))
+                spatial=pops.FiniteVolume(limiter=Minmod(), riemann=riem, variables=recon)))
             S = _amr(n, L, lambda s: s.add_block(
                 "gas", spec_t,
                 spatial=pops.Spatial(minmod=True, flux=riem, recon=recon),
@@ -200,10 +204,10 @@ def main():
             assert np.isfinite(dr).all() and float(np.max(np.abs(ds))) > 1e-6
             print("OK  (3) %s : add_equation BIT-IDENTIQUE a add_block (dmax=%.0f)" % (label, dmax))
 
-        parity_riemann("hllc", "conservative", "hllc/conservative")
-        parity_riemann("hllc", "primitive",    "hllc/primitive")
-        parity_riemann("roe",  "conservative", "roe/conservative")
-        parity_riemann("roe",  "primitive",    "roe/primitive")
+        parity_riemann(HLLC(), Conservative(), "hllc/conservative")
+        parity_riemann(HLLC(), Primitive(),    "hllc/primitive")
+        parity_riemann(Roe(),  Conservative(), "roe/conservative")
+        parity_riemann(Roe(),  Primitive(),    "roe/primitive")
 
         # La garde-fou pressure reste active : un modele SANS primitive 'p' doit etre rejete.
         # Modele isotherme 3 variables (rho, rho_u, rho_v) avec primitives (rho, u, v) sans 'p' :
@@ -229,7 +233,7 @@ def main():
         try:
             s_nop = pops.AmrSystem(n=n, L=L, periodic=True)
             s_nop.add_equation("gas", cm_iso,
-                               spatial=pops.Spatial(minmod=True, flux="hllc"))
+                               spatial=pops.Spatial(minmod=True, flux=HLLC()))
         except ValueError as ex:
             raised = True
             assert "hllc" in str(ex).lower()
@@ -243,7 +247,7 @@ def main():
             "gas", so_t, limiter="weno5", riemann="rusanov", recon="conservative",
             time="explicit", gamma=GAMMA, substeps=1))
         Bw = _amr(n, L, lambda s: s.add_block(
-            "gas", spec_t, spatial=pops.Spatial(weno5=True, flux="rusanov", recon="conservative"),
+            "gas", spec_t, spatial=pops.Spatial(weno5=True, flux=Rusanov(), recon=Conservative()),
             time=pops.Explicit()))
         assert Aw.n_patches() == Bw.n_patches(), "weno5 : n_patches initial production != add_block"
         for _ in range(12):
@@ -262,7 +266,7 @@ def main():
         # Reutilise cm_t (transport pur) : pas de Poisson, tourne sans set_poisson.
         Gw = pops.AmrSystem(n=n, L=L, periodic=True)
         Gw.add_equation("gas", cm_t,
-                        spatial=pops.Spatial(weno5=True, flux="rusanov", recon="conservative"))
+                        spatial=pops.Spatial(weno5=True, flux=Rusanov(), recon=Conservative()))
         Gw.set_refinement(1.2)
         Gw.set_density("gas", _bubble(n))
         for _ in range(4):
@@ -275,7 +279,7 @@ def main():
         E = pops.AmrSystem(n=n, L=L, periodic=True)
         E.set_poisson("charge_density", "geometric_mg")
         E.add_equation("gas", cm_t,
-                       spatial=pops.Spatial(minmod=True, flux="rusanov", recon="conservative"))
+                       spatial=pops.Spatial(minmod=True, flux=Rusanov(), recon=Conservative()))
         E.set_refinement(1.2)
         E.set_density("gas", _bubble(n))
         for _ in range(4):
@@ -298,7 +302,7 @@ def main():
         raised = False
         try:
             s.add_equation("gas", sys_cm,
-                           spatial=pops.Spatial(minmod=True, flux="rusanov", recon="conservative"))
+                           spatial=pops.Spatial(minmod=True, flux=Rusanov(), recon=Conservative()))
         except ValueError as ex:
             raised = True
             assert "target='system'" in str(ex) or "amr_system" in str(ex)

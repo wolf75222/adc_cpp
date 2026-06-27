@@ -30,6 +30,8 @@ Runs on the gate's Kokkos Serial shard (CI auto-discovers python/tests/test_*.py
 _pops/numpy is unavailable, the install_program / scheduler bindings are missing, or no compiler /
 visible Kokkos can build the .so -- never asserting a fake pass.
 """
+from pops.numerics.reconstruction import FirstOrder
+from pops.numerics.riemann import Rusanov
 import sys
 
 
@@ -73,7 +75,7 @@ EVERY = 2  # the field solve recomputes every 2 macro-steps and holds the cached
 def make_sim():
     sim = pops.System(n=N, L=1.0, periodic=True)
     sim.add_block("ions", plasma_model(),
-                  spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                  spatial=pops.FiniteVolume(limiter=FirstOrder(), riemann=Rusanov()),
                   time=pops.Explicit(method="euler"))
     sim.set_poisson("charge_density", "geometric_mg")
     x = (np.arange(N) + 0.5) / N
@@ -179,7 +181,7 @@ chk(len(py_calls) == 0,
 orphan = pops.System(n=N, L=1.0, periodic=True)
 _m = plasma_model()
 orphan.add_block("ions", _m,
-                 spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                 spatial=pops.FiniteVolume(limiter=FirstOrder(), riemann=Rusanov()),
                  time=pops.Explicit(method="euler"))
 orphan.set_poisson("charge_density", "geometric_mg")
 _x = (np.arange(N) + 0.5) / N

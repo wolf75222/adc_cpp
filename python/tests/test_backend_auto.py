@@ -11,6 +11,7 @@ construit, backend_auto_reason dit pourquoi).
 
 Invariants par assert ; imprime "OK test_backend_auto" en cas de succes.
 """
+from pops.numerics.reconstruction.limiters import Minmod
 import os
 import shutil
 import sys
@@ -66,7 +67,7 @@ try:
     n = 16
     sim = pops.System(n=n, L=1.0, periodic=True)
     sim.set_poisson()
-    sim.add_equation("f", model=cm, spatial=pops.FiniteVolume(limiter="minmod"),
+    sim.add_equation("f", model=cm, spatial=pops.FiniteVolume(limiter=Minmod()),
                      time=pops.Explicit())
     x = (np.arange(n) + 0.5) / n
     X, Y = np.meshgrid(x, x, indexing="xy")

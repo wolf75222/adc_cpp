@@ -23,6 +23,9 @@ exactement ceux exiges par set_source_stage). Aucun compilateur ni DSL : CI-safe
 Calque sur test_schur_via_system.py.
 """
 
+from pops.numerics.variables import Conservative
+from pops.numerics.reconstruction.limiters import Minmod
+from pops.numerics.riemann import Rusanov
 import inspect
 import sys
 
@@ -73,8 +76,8 @@ def build_block(n, L, B0, alpha, cs2):
     sim.add_equation(
         "ions",
         model=iso_fluid_model(cs2=cs2, alpha=alpha),
-        spatial=pops.FiniteVolume(limiter="minmod", riemann="rusanov",
-                                 variables="conservative"),
+        spatial=pops.FiniteVolume(limiter=Minmod(), riemann=Rusanov(),
+                                 variables=Conservative()),
         time=pops.Explicit(),
     )
     rho0, u0, v0 = smooth_profile(n, L)

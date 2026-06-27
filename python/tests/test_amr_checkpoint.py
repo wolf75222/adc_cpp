@@ -28,6 +28,8 @@ est refuse (la cadence regrid post-restart re-divergerait la hierarchie).
 
 Lancement : PYTHONPATH=<build>/python python3 python/tests/test_amr_checkpoint.py
 """
+from pops.numerics.reconstruction.limiters import Minmod
+from pops.numerics.riemann import Rusanov
 import os
 import tempfile
 
@@ -53,7 +55,7 @@ def _build(n=32, regrid_every=0, block="ne"):
     sim.add_block(block,
                   pops.Model(pops.Scalar(), pops.ExB(B0=1.0), pops.NoSource(),
                             pops.BackgroundDensity(alpha=1.0, n0=float(rho0.mean()))),
-                  spatial=pops.Spatial(limiter="minmod", flux="rusanov"),
+                  spatial=pops.Spatial(limiter=Minmod(), flux=Rusanov()),
                   time=pops.Explicit())
     sim.set_refinement(threshold=1.5)  # rho > 1.5 -> patchs centraux (pic 2.0, plancher 1.0)
     sim.set_poisson(rhs="charge_density", solver="geometric_mg")
@@ -162,7 +164,7 @@ def test_amr_checkpoint_rejects_multiblock():
         sim.add_block(nm,
                       pops.Model(pops.Scalar(), pops.ExB(B0=1.0), pops.NoSource(),
                                 pops.ChargeDensity(charge=q)),
-                      spatial=pops.Spatial(limiter="minmod", flux="rusanov"))
+                      spatial=pops.Spatial(limiter=Minmod(), flux=Rusanov()))
     sim.set_poisson(bc="periodic")
     sim.set_density("ions", rho0)
     sim.set_density("elec", rho0)

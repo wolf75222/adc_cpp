@@ -30,6 +30,8 @@ Section B (gated, self-skip): the OFFLINE REFERENCE is the engine's own default 
 
 Skips cleanly (exit 0) without numpy / _pops / a compiler / a visible Kokkos -- never fakes the engine.
 """
+from pops.numerics.reconstruction import FirstOrder
+from pops.numerics.riemann import Rusanov
 import sys
 
 
@@ -246,7 +248,7 @@ def make_sim(model):
     except RuntimeError as exc:
         _skipB("model compile could not build the .so: %s" % str(exc)[:160])
     sim.add_equation("plasma", compiled,
-                     spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                     spatial=pops.FiniteVolume(limiter=FirstOrder(), riemann=Rusanov()),
                      time=pops.Explicit(method="euler"))
     sim.set_poisson("composite", "geometric_mg")  # f = sum of the per-block elliptic bricks
     sim.set_state("plasma", _ic())

@@ -190,6 +190,9 @@ Each slot accepts either a native brick or a compiled DSL brick.
   wired.
 
 ```python
+from pops.numerics.riemann import Rusanov
+from pops.numerics.reconstruction.limiters import Minmod
+
 m = pops.CompositeModel(
     transport=build_iso_transport(0.7).compile(),  # transport DSL
     source=pops.PotentialForce(charge=-1.0),        # source native
@@ -197,7 +200,7 @@ m = pops.CompositeModel(
 )
 compiled = m.compile(backend="aot")                # -> CompiledModel
 sim.add_equation("gas", compiled,
-                 spatial=pops.FiniteVolume(limiter="minmod", riemann="rusanov"),
+                 spatial=pops.FiniteVolume(limiter=Minmod(), riemann=Rusanov()),
                  names=["rho", "rho_u", "rho_v"])
 ```
 
@@ -226,23 +229,27 @@ The spatial scheme is carried by the block (`spatial=` argument of `add_block` /
 not by the model. It combines reconstruction (limiter) + Riemann numerical flux + reconstructed
 variables.
 
-`pops.Spatial(limiter="minmod", flux="rusanov", recon="conservative", *, none=False,
-minmod=False, vanleer=False, weno5=False, primitive=False, positivity_floor=None)` :
+Every scheme is chosen with a TYPED `pops.numerics` descriptor (Spec 5 sec.7); a bare string raises
+a `TypeError` naming the typed alternative. `pops.Spatial(limiter=None, flux=None, recon=None, *,
+none=False, minmod=False, vanleer=False, weno5=False, primitive=False, reconstruction=None,
+positivity_floor=None)` :
 
-| Argument | Values | Detail |
+| Argument | Typed descriptors | Detail |
 |---|---|---|
-| `limiter` | `"none"`, `"minmod"`, `"vanleer"`, `"weno5"` | MUSCL reconstruction (none / minmod / vanleer, 2 ghosts) or WENO5-Z. `weno5` = order 5 in smooth zone, 5-point stencil -> 3 ghosts ; only the native `add_block` path (and the `aot` / `production` / AMR backends) expose it ; the `prototype` backend (JIT) rejects it. Boolean shortcuts `none=` / `minmod=` / `vanleer=` / `weno5=`. |
-| `flux` | `"rusanov"`, `"hll"`, `"hllc"`, `"roe"` | Riemann numerical flux. `rusanov` = minimal generic (only `max_wave_speed` required). `hll` = generic with signed waves : requires `model.wave_speeds` (native isothermal / compressible model, or DSL model with primitive `p` declared) ; it is the recommended path for a NON Euler model with signed waves (`hll` + `minmod`). `hllc` / `roe` = contact-resolving (HLLC) and Roe-linearized solvers. The canonical native path is 2D Euler (4 variables + perfect gas pressure : `FluidState(compressible)`) ; they are also GENERIC on a model that supplies the hooks `HasHLLCStructure` (`contact_speed` + `hllc_star_state`) or `HasRoeDissipation` (`roe_dissipation`), emitted in the DSL via `m.enable_hllc()` / `m.enable_roe()` (e.g. a 3-variable isothermal system). All paths read a pressure : declare a primitive `p` ; without `p` (and without the capability) the wiring raises a `ValueError`. |
-| `recon` | `"conservative"`, `"primitive"` | Reconstructed variables. `primitive` is more stable for Euler (positivity of `rho` and `p`). Shortcut `primitive=`. |
+| `limiter` (alias `reconstruction`) | `pops.numerics.reconstruction.FirstOrder()`, `.limiters.Minmod()`, `.limiters.VanLeer()`, `.WENO5()` / `.WENO5Z()`, `.MUSCL(limiter=...)` | MUSCL reconstruction (first-order / minmod / vanleer, 2 ghosts) or WENO5-Z. `WENO5()` = order 5 in smooth zone, 5-point stencil -> 3 ghosts ; only the native `add_block` path (and the `aot` / `production` / AMR backends) expose it ; the `prototype` backend (JIT) rejects it. Boolean shortcuts `none=` / `minmod=` / `vanleer=` / `weno5=` stay valid. |
+| `flux` | `pops.numerics.riemann.Rusanov()`, `HLL()`, `HLLC()`, `Roe()` | Riemann numerical flux. `Rusanov()` = minimal generic (only `max_wave_speed` required). `HLL()` = generic with signed waves : requires `model.wave_speeds` (native isothermal / compressible model, or DSL model with primitive `p` declared) ; it is the recommended path for a NON Euler model with signed waves (`HLL()` + `Minmod()`). `HLLC()` / `Roe()` = contact-resolving (HLLC) and Roe-linearized solvers. The canonical native path is 2D Euler (4 variables + perfect gas pressure : `FluidState(compressible)`) ; they are also GENERIC on a model that supplies the hooks `HasHLLCStructure` (`contact_speed` + `hllc_star_state`) or `HasRoeDissipation` (`roe_dissipation`), emitted in the DSL via `m.enable_hllc()` / `m.enable_roe()` (e.g. a 3-variable isothermal system). All paths read a pressure : declare a primitive `p` ; without `p` (and without the capability) the wiring raises a `ValueError`. |
+| `recon` | `pops.numerics.variables.Conservative()`, `Primitive()` | Reconstructed variables. `Primitive()` is more stable for Euler (positivity of `rho` and `p`). Shortcut `primitive=`. |
 | `positivity_floor` | `None` or a float | Zhang-Shu positivity floor on reconstructed face densities (default `None` = off). Clamps the reconstructed value to `>= floor`, for high-contrast initial conditions where WENO5 can reconstruct a negative density. |
 
-`pops.FiniteVolume(limiter="minmod", riemann="rusanov", variables="conservative")` is the stable
+`pops.FiniteVolume(limiter=Minmod(), riemann=Rusanov(), variables=Conservative())` is the stable
 surface factory : it remaps onto `pops.Spatial`. The numerical flux is named `riemann` there (and not
-`flux`, reserved for the physical flux of the DSL model `m.flux`, so as not to collide the two senses) :
+`flux`, reserved for the physical flux of the DSL model `m.flux`, so as not to collide the two senses).
+`FiniteVolume` forwards the boolean shortcuts (`none=` / `minmod=` / ... / `primitive=`) and the
+`reconstruction=` alias identically :
 
 | `FiniteVolume(...)` | -> | `Spatial(...)` |
 |---|---|---|
-| `limiter` | -> | `Spatial.limiter` |
+| `limiter` (alias `reconstruction`) | -> | `Spatial.limiter` |
 | `riemann` | -> | `Spatial.flux` |
 | `variables` | -> | `Spatial.recon` |
 
@@ -431,6 +438,9 @@ native bricks (no `models.diocotron` helper) :
 ```python
 import numpy as np
 import pops
+from pops.numerics.riemann import Rusanov
+from pops.numerics.reconstruction.limiters import Minmod
+from pops.numerics.variables import Conservative
 
 # --- maillage + systeme (carre cartesien, non periodique pour le mur conducteur) ---
 n = 192
@@ -452,7 +462,7 @@ model = pops.Model(
 sim.add_block(
     "ne",
     model=model,
-    spatial=pops.FiniteVolume(limiter="minmod", riemann="rusanov", variables="conservative"),
+    spatial=pops.FiniteVolume(limiter=Minmod(), riemann=Rusanov(), variables=Conservative()),
     time=pops.Explicit(),                  # SSPRK2, substeps=1, stride=1
 )
 

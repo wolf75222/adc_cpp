@@ -20,6 +20,9 @@ On verifie cote Python :
 
 Test PUR Python (aucune compilation .so) : ne gate sur rien, toujours execute.
 """
+from pops.numerics.reconstruction import FirstOrder
+from pops.numerics.reconstruction.limiters import Minmod
+from pops.numerics.riemann import Rusanov
 import numpy as np
 
 import pops
@@ -41,7 +44,7 @@ def _scalar_charge(q, B0=1.0):
 def _check_mono(n=32):
     sim = pops.AmrSystem(n=n, L=1.0, periodic=True, regrid_every=4)
     sim.add_block("ne", _scalar_charge(+1.0),
-                  spatial=pops.Spatial(limiter="minmod", flux="rusanov"),
+                  spatial=pops.Spatial(limiter=Minmod(), flux=Rusanov()),
                   time=pops.Explicit(ssprk3=True))  # SSPRK3 mono-bloc (chemin AmrCouplerMP)
     sim.set_poisson(bc="periodic")
     sim.set_refinement(1.05)  # seuil bas -> le bump tague et raffine (patchs fins actifs)
@@ -61,10 +64,10 @@ def _check_mono(n=32):
 def _check_multi(n=32):
     sim = pops.AmrSystem(n=n, L=1.0, periodic=True, regrid_every=4)
     sim.add_block("ions", _scalar_charge(+1.0),
-                  spatial=pops.Spatial(limiter="none", flux="rusanov"),
+                  spatial=pops.Spatial(limiter=FirstOrder(), flux=Rusanov()),
                   time=pops.Explicit(ssprk3=True))     # SSPRK3 multi-blocs (moteur AmrRuntime)
     sim.add_block("electrons", _scalar_charge(-1.0),
-                  spatial=pops.Spatial(limiter="minmod", flux="rusanov"),
+                  spatial=pops.Spatial(limiter=Minmod(), flux=Rusanov()),
                   time=pops.Explicit(ssprk3=True))     # 2e bloc ssprk3, SCHEMA SPATIAL DIFFERENT
     sim.set_poisson(bc="periodic")
     sim.set_refinement(1.05)  # union des tags -> patchs fins actifs
@@ -90,7 +93,7 @@ def _check_default_bit_identical(n=32):
     def run_euler():
         s = pops.AmrSystem(n=n, L=1.0, periodic=True, regrid_every=0)
         s.add_block("ne", _scalar_charge(+1.0),
-                    spatial=pops.Spatial(limiter="minmod", flux="rusanov"))  # time defaut = Explicit() euler
+                    spatial=pops.Spatial(limiter=Minmod(), flux=Rusanov()))  # time defaut = Explicit() euler
         s.set_poisson(bc="periodic")
         s.set_density("ne", _bump(n, 0.40))
         s.advance(0.002, 10)
@@ -109,7 +112,7 @@ def _build_advect(n, kind):
     temporelle (time) change entre les runs -> l'erreur mesuree est purement TEMPORELLE."""
     s = pops.AmrSystem(n=n, L=1.0, periodic=True, regrid_every=0)
     s.add_block("ne", _scalar_charge(+1.0),
-                spatial=pops.Spatial(limiter="none", flux="rusanov"),  # MEME schema spatial pour tous
+                spatial=pops.Spatial(limiter=FirstOrder(), flux=Rusanov()),  # MEME schema spatial pour tous
                 time=pops.Explicit(ssprk3=True) if kind == "ssprk3" else pops.Explicit())
     s.set_poisson(bc="periodic")
     s.set_density("ne", _bump(n, 0.40))

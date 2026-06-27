@@ -29,6 +29,8 @@ matrix-free apply sub-block, perturbing the frozen Newton iterate).
     runs (> 1 iteration). BDF2 is checked the same way (a cold-start history). Self-skips (exit 0)
     without numpy / _pops / install_program / a compiler / a visible Kokkos -- never fakes the engine.
 """
+from pops.numerics.reconstruction import FirstOrder
+from pops.numerics.riemann import Rusanov
 import sys
 
 
@@ -304,7 +306,7 @@ def _run_section_b(t):
     def _make_sim():
         sim = pops.System(n=n, L=1.0, periodic=True)
         sim.add_equation("blk", _nonlinear_flux_model(),
-                         spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                         spatial=pops.FiniteVolume(limiter=FirstOrder(), riemann=Rusanov()),
                          time=pops.Explicit(method="euler"))
         sim.set_poisson("charge_density", "geometric_mg")
         sim.set_state("blk", init)

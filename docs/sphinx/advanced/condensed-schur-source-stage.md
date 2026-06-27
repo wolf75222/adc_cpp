@@ -12,6 +12,8 @@ It is composed with an explicit transport stage via `pops.Split`:
 
 ```python
 import pops
+from pops.numerics.riemann import Rusanov
+from pops.numerics.reconstruction.limiters import Minmod
 
 time_policy = pops.Split(
     hyperbolic=pops.Explicit(),
@@ -25,7 +27,7 @@ time_policy = pops.Split(
 sim.add_equation(
     "ions",
     model=model,                        # roles requis : Density / MomentumX / MomentumY (Energy optionnel)
-    spatial=pops.FiniteVolume(limiter="minmod", riemann="rusanov"),
+    spatial=pops.FiniteVolume(limiter=Minmod(), riemann=Rusanov()),
     time=time_policy,
 )
 ```

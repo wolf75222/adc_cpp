@@ -20,6 +20,8 @@ validation errors #18/#19.
     Self-skips (exit 0) without numpy / _pops / a compiler / a visible Kokkos -- never fakes the engine.
 (C) Validation #18 (pure Python, mocked System) + #19 (skips without the engine).
 """
+from pops.numerics.reconstruction import FirstOrder
+from pops.numerics.riemann import Rusanov
 import sys
 
 
@@ -329,7 +331,7 @@ def _run_section_b(t):
         print("-- (B) skipped: model compile could not build the .so: %s --" % str(exc)[:200])
         return None
     sim.add_equation("blk", compiled_model,
-                     spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                     spatial=pops.FiniteVolume(limiter=FirstOrder(), riemann=Rusanov()),
                      time=pops.Explicit(method="euler"))
 
     # A KNOWN field with distinct min / max / sum: rho(i,j) = 1 + (linear ramp in [0, 1]).
@@ -413,7 +415,7 @@ def _run_section_b2(t):
         return None
     # A positivity floor makes the block carry a real projection closure (else project is a no-op).
     sim.add_equation("blk", compiled_model,
-                     spatial=pops.FiniteVolume(limiter="none", riemann="rusanov",
+                     spatial=pops.FiniteVolume(limiter=FirstOrder(), riemann=Rusanov(),
                                               positivity_floor=1e-12),
                      time=pops.Explicit(method="euler"))
     x = (np.arange(n) + 0.5) / n

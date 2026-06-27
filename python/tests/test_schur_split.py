@@ -22,6 +22,9 @@ On valide :
 Lance avec python3. Saute proprement (skip) si aucun compilateur C++ n'est disponible (le modele
 magnetise a roles passe par le DSL compile -- pas de modele natif a roles rho/mx/my accessible sinon).
 """
+from pops.numerics.variables import Conservative
+from pops.numerics.reconstruction.limiters import Minmod
+from pops.numerics.riemann import Rusanov
 import os
 import shutil
 import tempfile
@@ -94,8 +97,8 @@ def build_sim(compiled, n=32, L=1.0, B0=4.0, alpha=3.0, theta=1.0, with_bz=True,
     else:
         time = pops.Explicit()
     sim.add_equation("ions", model=compiled,
-                     spatial=pops.FiniteVolume(limiter="minmod", riemann="rusanov",
-                                              variables="conservative"),
+                     spatial=pops.FiniteVolume(limiter=Minmod(), riemann=Rusanov(),
+                                              variables=Conservative()),
                      time=time)
     rho0, u0, v0 = smooth_init(n, L)
     sim.set_primitive_state("ions", rho=rho0, u=u0, v=v0)

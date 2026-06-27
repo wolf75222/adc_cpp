@@ -11,6 +11,9 @@ Three parts:
 (c) NUMERIC PARITY (auto-skip without compiler / Kokkos): the same model compiled via aot and via
     production yields the SAME state after a few steps (same production bricks, same flags).
 """
+from pops.numerics.riemann import HLLC
+from pops.numerics.reconstruction.limiters import Minmod
+from pops.numerics.variables import Primitive
 import hashlib
 import os
 import shutil
@@ -168,8 +171,8 @@ def check_numeric_parity():
                 os.path.join(tmp, "m_prod.so"), INCLUDE, backend="production")
             for backend, cm in (("aot", cm_aot), ("production", cm_prod)):
                 s = pops.System(n=n, periodic=True)
-                s.add_equation("gas", cm, spatial=pops.FiniteVolume(limiter="minmod", riemann="hllc",
-                                                                   variables="primitive"))
+                s.add_equation("gas", cm, spatial=pops.FiniteVolume(limiter=Minmod(), riemann=HLLC(),
+                                                                   variables=Primitive()))
                 s.set_poisson(rhs="charge_density", solver="geometric_mg")
                 s.set_state("gas", initial_state(n))
                 nsteps = s.run(t_end=0.02, cfl=0.4)

@@ -36,6 +36,9 @@ Validations :
      bloc Explicit lui-meme reste deterministe (bit-identique sur deux runs).
 """
 
+from pops.numerics.variables import Conservative
+from pops.numerics.reconstruction.limiters import Minmod
+from pops.numerics.riemann import Rusanov
 import sys
 import numpy as np
 
@@ -102,8 +105,8 @@ def build_system(n=24, L=1.0, B0=4.0, alpha=3.0, theta=1.0, with_schur=True,
     sim.add_equation(
         "ions",
         model=iso_fluid_model(cs2=cs2, alpha=alpha),
-        spatial=pops.FiniteVolume(limiter="minmod", riemann="rusanov",
-                                 variables="conservative"),
+        spatial=pops.FiniteVolume(limiter=Minmod(), riemann=Rusanov(),
+                                 variables=Conservative()),
         time=time_policy,
     )
     rho0, u0, v0 = smooth_profile(n, L)

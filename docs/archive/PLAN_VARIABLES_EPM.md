@@ -23,8 +23,8 @@ second correction is to **not hard-code Poisson** but to make it an instance of 
   converts the stencil U->P, limits on P, reconverts P->U; numerical flux unchanged; update
   always conservative. Choice carried by a RUNTIME flag `recon_prim` (no template explosion),
   conservative fallback if the model does not expose the conversions.
-- Exposed: `add_block(..., recon="conservative"|"primitive", ...)`; Python
-  `pops.Spatial(recon="primitive")` or `Spatial(primitive=True)`. AMR rejects the primitive
+- Exposed: `add_block(..., recon=Conservative()|Primitive(), ...)`; Python
+  `pops.Spatial(recon=Primitive())` or `Spatial(primitive=True)`. AMR rejects the primitive
   cleanly (the AMR cases use NoSlope, or prim == cons).
 - Tests: `tests/test_primitive_recon.cpp` (round-trip + concept) + Python test (Euler recon
   cons vs prim: mass conserved ~1e-15 in both, positivity, finite).
@@ -315,9 +315,11 @@ not only the ideal gas.
 
 ### Diocotron case, target with explicit EPM
 ```python
+from pops.numerics.riemann import Rusanov
+
 sim = pops.AmrSystem(n=n, L=L, regrid_every=10, periodic=True)
 sim.add_block("ne", model=models.diocotron(B0=1.0, alpha=1.0),
-              spatial=pops.Spatial(none=True, flux="rusanov"))
+              spatial=pops.Spatial(none=True, flux=Rusanov()))
 sim.add_elliptic_model("phi", model=models.elliptic(
     unknown="phi", operator=models.div_eps_grad(epsilon=1.0),
     rhs=models.charge_density(species={"ne": -1.0}, background=n_i0),

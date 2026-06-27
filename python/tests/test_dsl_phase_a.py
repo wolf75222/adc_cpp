@@ -12,6 +12,10 @@ Deux niveaux :
     add_native_block), add_equation + run ; aot et production donnent le MEME etat (memes briques de
     production). Prouve que production passe bien par le chemin NATIF add_native_block (#85), pas aot.
 """
+from pops.numerics.riemann import HLLC
+from pops.numerics.reconstruction.limiters import Minmod
+from pops.numerics.variables import Primitive
+from pops.numerics.reconstruction import WENO5
 import os
 import shutil
 import tempfile
@@ -120,7 +124,7 @@ def pure_python_checks():
     print("OK  primitive_vars kwargs : layout ordonne, rho conservatif rejoint le layout")
 
     # FiniteVolume : riemann (PAS flux) -> Spatial.flux ; variables -> recon
-    fv = pops.FiniteVolume(limiter="minmod", riemann="hllc", variables="primitive")
+    fv = pops.FiniteVolume(limiter=Minmod(), riemann=HLLC(), variables=Primitive())
     assert fv.flux == "hllc" and fv.limiter == "minmod" and fv.recon == "primitive", \
         "FiniteVolume(riemann=) -> Spatial.flux"
     print("OK  FiniteVolume(limiter=, riemann=, variables=) remappe sur Spatial")
@@ -147,7 +151,7 @@ def pure_python_checks():
     # block_n_ghost(limiter) = 3 ghosts) : un fake aot+weno5 passe le garde Python et echoue plus loin
     # au dlopen (.so inexistant) -> RuntimeError, PAS ValueError (la garde weno5-aot n'existe plus).
     expect_raises(RuntimeError, lambda: sys.add_equation("g", fake,
-                  spatial=pops.FiniteVolume(limiter="weno5")), "weno5 aot : accepte (echec au dlopen)")
+                  spatial=pops.FiniteVolume(limiter=WENO5())), "weno5 aot : accepte (echec au dlopen)")
     # WENO5 reste rejete (ValueError) sur le backend 'prototype' (JIT, residu hote Rusanov ordre 1,
     # sans assemble_rhs) : ce chemin n'a pas de stencil large a alimenter.
     fake_proto = CompiledModel(so_path="/inexistant.so", backend="prototype",
@@ -157,9 +161,9 @@ def pure_python_checks():
                                    params={}, caps={}, abi_key="k", model_hash="h", cxx="c++",
                                    std="c++20")
     expect_raises(ValueError, lambda: sys.add_equation("g", fake_proto,
-                  spatial=pops.FiniteVolume(limiter="weno5")), "weno5 sur prototype (JIT)")
+                  spatial=pops.FiniteVolume(limiter=WENO5())), "weno5 sur prototype (JIT)")
     expect_raises(ValueError, lambda: sys.add_equation("g", fake,
-                  spatial=pops.FiniteVolume(riemann="hllc")), "hllc sans pression")
+                  spatial=pops.FiniteVolume(riemann=HLLC())), "hllc sans pression")
     expect_raises(ValueError, lambda: sys.add_equation("g", fake, names=["a", "b"]),
                   "names= mauvaise longueur")
     fake_prod = CompiledModel(so_path="/inexistant.so", backend="production",
@@ -189,8 +193,8 @@ def end_to_end_checks(cxx):
                   % (backend, cm.adder, cm.n_vars, cm.abi_key))
 
             s = pops.System(n=n, periodic=True)
-            s.add_equation("gas", cm, spatial=pops.FiniteVolume(limiter="minmod", riemann="hllc",
-                                                               variables="primitive"))
+            s.add_equation("gas", cm, spatial=pops.FiniteVolume(limiter=Minmod(), riemann=HLLC(),
+                                                               variables=Primitive()))
             s.set_poisson(rhs="charge_density", solver="geometric_mg")
             s.set_state("gas", initial_state(n))
             nsteps = s.run(t_end=0.02, cfl=0.4)
@@ -212,8 +216,8 @@ def end_to_end_checks(cxx):
         mp = build_euler_predef("euler_predef")
         cmp_ = mp.compile(os.path.join(tmp, "m_predef.so"), INCLUDE, backend="aot")
         sp = pops.System(n=n, periodic=True)
-        sp.add_equation("gas", cmp_, spatial=pops.FiniteVolume(limiter="minmod", riemann="hllc",
-                                                              variables="primitive"))
+        sp.add_equation("gas", cmp_, spatial=pops.FiniteVolume(limiter=Minmod(), riemann=HLLC(),
+                                                              variables=Primitive()))
         sp.set_poisson(rhs="charge_density", solver="geometric_mg")
         sp.set_state("gas", initial_state(n))
         sp.run(t_end=0.02, cfl=0.4)

@@ -11,6 +11,9 @@ bloc hybride resolvent la friction au bon endroit. On verifie aussi que la colli
 (la qte de mvt des ions differe du cas sans collision) et que la qte de mvt totale est conservee.
 Lance avec python3.
 """
+from pops.numerics.variables import Conservative
+from pops.numerics.reconstruction.limiters import Minmod
+from pops.numerics.riemann import Rusanov
 import os
 import shutil
 import tempfile
@@ -44,7 +47,7 @@ def main():
     n, L = 40, 1.0
     Ue, Ui = _states(n)
     Ueflat, Uiflat = Ue.reshape(-1).tolist(), Ui.reshape(-1).tolist()
-    spatial = pops.FiniteVolume(limiter="minmod", riemann="rusanov", variables="conservative")
+    spatial = pops.FiniteVolume(limiter=Minmod(), riemann=Rusanov(), variables=Conservative())
 
     spec_e = pops.Model(state=pops.FluidState("isothermal", cs2=CS2), transport=pops.IsothermalFlux(),
                        source=pops.NoSource(), elliptic=pops.ChargeDensity(charge=-1.0))

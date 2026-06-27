@@ -24,6 +24,8 @@ On verifie :
 
 S'auto-saute (exit 0) sans compilateur pour (4)-(6).
 """
+from pops.numerics.reconstruction import FirstOrder
+from pops.numerics.riemann import HLL
 import os
 import sys
 import tempfile
@@ -214,7 +216,7 @@ def expected_rhs_hll(U, n):
 print("== (5) riemann='hll' via System : vitesses exactes par cellule ==")
 sim = pops.System(n=n, L=1.0, periodic=True)
 sim.add_equation("burg", model=c_burg,
-                 spatial=pops.FiniteVolume(limiter="none", riemann="hll"),
+                 spatial=pops.FiniteVolume(limiter=FirstOrder(), riemann=HLL()),
                  time=pops.Explicit())
 U = toy_state(n)
 sim.set_state("burg", U)
@@ -227,7 +229,7 @@ print("== (6) eig='fd' == eig='numeric' ==")
 c_fd = burgers_toy(eig="fd").compile(os.path.join(tmp, "jacburg_fd.so"), INCLUDE, backend="aot")
 sim_fd = pops.System(n=n, L=1.0, periodic=True)
 sim_fd.add_equation("burg", model=c_fd,
-                    spatial=pops.FiniteVolume(limiter="none", riemann="hll"),
+                    spatial=pops.FiniteVolume(limiter=FirstOrder(), riemann=HLL()),
                     time=pops.Explicit())
 sim_fd.set_state("burg", U)
 rhs_fd = np.array(sim_fd.eval_rhs("burg"))

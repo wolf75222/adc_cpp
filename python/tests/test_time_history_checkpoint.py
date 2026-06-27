@@ -27,6 +27,8 @@ as before.
 Sections (B)/(C) self-skip (never fake the engine) without numpy / _pops / install_program / a compiler /
 a visible Kokkos, exactly like test_time_history.py.
 """
+from pops.numerics.reconstruction import FirstOrder
+from pops.numerics.riemann import Rusanov
 import os
 import sys
 import tempfile
@@ -127,7 +129,7 @@ def _build_system(pops, np, n):
         print("-- skipped: model compile could not build the .so: %s --" % str(exc)[:160])
         return None, None
     sim.add_equation("blk", compiled_model,
-                     spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                     spatial=pops.FiniteVolume(limiter=FirstOrder(), riemann=Rusanov()),
                      time=pops.Explicit(method="euler"))
     return sim, True
 

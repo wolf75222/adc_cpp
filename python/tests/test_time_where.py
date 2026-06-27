@@ -17,6 +17,8 @@ scalar runtime branch ``if_``. The 0/1 mask is built per cell with ``P.cell_ge``
     SOME take b (non-vacuous). Self-skips without numpy / _pops / a compiler / Kokkos / install_program
     (never faking the engine).
 """
+from pops.numerics.reconstruction import FirstOrder
+from pops.numerics.riemann import Rusanov
 import sys
 
 
@@ -214,7 +216,7 @@ def _run_section_b(t):
         print("-- (B) skipped: model compile could not build the .so: %s --" % str(exc)[:160])
         return None
     sim.add_equation("blk", compiled_model,
-                     spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                     spatial=pops.FiniteVolume(limiter=FirstOrder(), riemann=Rusanov()),
                      time=pops.Explicit(method="euler"))
     # An IC that STRADDLES the floor: a sine swinging through 0.5 so some cells are >= floor and some
     # are < floor (the select must genuinely vary per cell -- non-vacuous).

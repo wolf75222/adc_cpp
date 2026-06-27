@@ -40,6 +40,8 @@ reference would witness it -- Euler keeps the native cross-check exact.
 
 Run with python3 (PYTHONPATH = built pops package).
 """
+from pops.numerics.reconstruction import FirstOrder
+from pops.numerics.riemann import Rusanov
 import sys
 
 
@@ -168,7 +170,7 @@ def make_sim():
     """A System with ONE uncoupled isothermal block (Forward Euler hyperbolic stage) + inert Poisson."""
     sim = pops.System(n=N, L=1.0, periodic=True)
     sim.add_block("ions", transport_model(),
-                  spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                  spatial=pops.FiniteVolume(limiter=FirstOrder(), riemann=Rusanov()),
                   time=pops.Explicit(method="euler"))
     sim.set_poisson("charge_density", "geometric_mg")  # inert: BackgroundDensity n0=0, flux reads no phi
     x = (np.arange(N) + 0.5) / N

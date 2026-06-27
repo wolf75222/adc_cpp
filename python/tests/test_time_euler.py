@@ -25,6 +25,8 @@ On verifie :
 Modele natif pur transport (isotherme sans source ni Poisson) pour (1)-(5) : aucun
 compilateur requis ; (6) s'auto-saute sans compilateur ou sans Kokkos.
 """
+from pops.numerics.reconstruction import FirstOrder
+from pops.numerics.riemann import Rusanov
 import os
 import sys
 import tempfile
@@ -65,7 +67,7 @@ def make_sim(method):
     n = 24
     sim = pops.System(n=n, L=1.0, periodic=True)
     sim.add_block("ions", transport_model(),
-                  spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                  spatial=pops.FiniteVolume(limiter=FirstOrder(), riemann=Rusanov()),
                   time=pops.Explicit(method=method))
     x = (np.arange(n) + 0.5) / n
     X, Y = np.meshgrid(x, x, indexing="ij")
@@ -100,7 +102,7 @@ print("== (3) no-default-change : defaut == ssprk2 ==")
 sd = make_sim("ssprk2")
 s_def = pops.System(n=24, L=1.0, periodic=True)
 s_def.add_block("ions", transport_model(),
-                spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                spatial=pops.FiniteVolume(limiter=FirstOrder(), riemann=Rusanov()),
                 time=pops.Explicit())
 s_def.set_state("ions", np.array(sd.get_state("ions")))
 sd.step(dt)
@@ -119,7 +121,7 @@ chk(d > 1e-8, f"euler != ssprk2 sur un pas (ecart max {d:.2e})")
 print("== (5) AMR : rejet explicite ==")
 amr = pops.AmrSystem(n=32, L=1.0, periodic=True, regrid_every=0)
 msg = err_msg(lambda: amr.add_block("ions", transport_model(),
-                                    spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                                    spatial=pops.FiniteVolume(limiter=FirstOrder(), riemann=Rusanov()),
                                     time=pops.Explicit(method="euler")))
 chk("euler" in msg or "explicit" in msg, f"AmrSystem rejette time='euler' ({msg[:60]}...)")
 
@@ -159,7 +161,7 @@ def make_prod_sim(method):
     n = 16
     sim = pops.System(n=n, L=1.0, periodic=True)
     sim.add_equation("q", model=prod,
-                     spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                     spatial=pops.FiniteVolume(limiter=FirstOrder(), riemann=Rusanov()),
                      time=pops.Explicit(method=method))
     x = (np.arange(n) + 0.5) / n
     X, Y = np.meshgrid(x, x, indexing="ij")
@@ -183,8 +185,8 @@ chk(np.array_equal(gotp, refp) or ep < 1e-15,
 aot = adv_model().compile(os.path.join(tmp, "eulaot.so"), INCLUDE, backend="aot")
 sim_a = pops.System(n=16, L=1.0, periodic=True)
 msg = err_msg(lambda: sim_a.add_equation("q", model=aot,
-                                         spatial=pops.FiniteVolume(limiter="none",
-                                                                  riemann="rusanov"),
+                                         spatial=pops.FiniteVolume(limiter=FirstOrder(),
+                                                                  riemann=Rusanov()),
                                          time=pops.Explicit(method="euler")))
 chk("production" in msg and "SSPRK2" in msg,
     f"AOT : euler rejete en pointant production/natif ({msg[:60]}...)")

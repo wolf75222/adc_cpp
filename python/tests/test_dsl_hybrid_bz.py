@@ -9,6 +9,8 @@ ChargeDensity. Le terme B_z n'entre QUE par la source DSL ; le flux de derive ne
 prouve la lecture de B_z dans le composite hybride. On verifie aussi que le transport natif contribue
 (residu non trivial a B_z=0). Lance avec python3.
 """
+from pops.numerics.reconstruction import FirstOrder
+from pops.numerics.riemann import Rusanov
 import os
 import shutil
 import tempfile
@@ -54,7 +56,7 @@ def main():
         dens = 1.0 + 0.2 * np.exp(-((X - 0.5) ** 2 + (Y - 0.5) ** 2) / 0.03)  # non uniforme -> derive
 
         sim = pops.System(n=n, L=L, periodic=True)
-        sim.add_equation("bz", co, spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+        sim.add_equation("bz", co, spatial=pops.FiniteVolume(limiter=FirstOrder(), riemann=Rusanov()),
                          names=["n"])
         sim.set_poisson(rhs="charge_density", solver="geometric_mg")
         sim.set_density("bz", dens)

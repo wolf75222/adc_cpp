@@ -21,6 +21,8 @@ Run::
 Requires a compiler + a visible Kokkos (``POPS_KOKKOS_ROOT``); prints a skip notice and exits 0
 otherwise (run it on ROMEO). cf. docs/sphinx/reference/operator-modules.md.
 """
+from pops.numerics.reconstruction import FirstOrder
+from pops.numerics.riemann import Rusanov
 import sys
 
 try:
@@ -113,7 +115,7 @@ def make_sim(block_model):
     sim = pops.System(n=N, L=1.0, periodic=True)
     compiled = block_model.compile(backend="production")
     sim.add_equation("plasma", compiled,
-                     spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                     spatial=pops.FiniteVolume(limiter=FirstOrder(), riemann=Rusanov()),
                      time=pops.Explicit(method="euler"))
     sim.set_poisson("charge_density", "geometric_mg")
     sim.set_magnetic_field(BZ * np.ones(N * N))
@@ -160,8 +162,8 @@ def main():
     sim = pops.System(n=N, L=1.0, periodic=True)
     sim.install(compiled,
                 instances={"plasma": {"model": mod.to_dsl(),
-                                      "spatial": pops.FiniteVolume(limiter="none",
-                                                                   riemann="rusanov"),
+                                      "spatial": pops.FiniteVolume(limiter=FirstOrder(),
+                                                                   riemann=Rusanov()),
                                       "time": pops.Explicit(method="euler"),
                                       "initial": u0}},
                 aux={"B_z": BZ * np.ones(N * N)},

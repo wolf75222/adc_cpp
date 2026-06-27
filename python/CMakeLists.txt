@@ -974,6 +974,7 @@ foreach(t
     test_projection_hook      # ADC-177 : projection ponctuelle POST-PAS ENTIER (m.projection -> trait HasPointwiseProjection) : no-default-change, etat post-pas == transport puis projection numpy (production + aot), sign() DSL, rejets prototype/AMR (auto-skip)
     test_projection_eig       # ADC-289 : temoin de VALEURS PROPRES dans m.projection (dsl.eig_max_im/eig_lmin/eig_lmax -> foncteur nomme + real_eig_minmax) : eval == np.linalg.eigvals, brique generee project() == numpy cellule par cellule, semantique post-pas (_pops), extension additive (auto-skip)
     test_capabilities         # ADC-297/291 : contrat de coherence de pops.capabilities() (surface aux nommee + parite limite C++/Python)
+    test_destring_finite_volume  # ADC-497 (Spec 5 sec.7) : FiniteVolume/Spatial choisissent le schema par descripteurs TYPES pops.numerics ; une chaine brute (limiter/riemann/flux/recon/variables) est rejetee (TypeError pointant l'objet type), les descripteurs sont abaisses au token C++ canonique, raccourcis booleens conserves
     test_compile_cache_backend)  # ADC-186 : cache de compile keye PAR BACKEND -- un so_path explicite reutilise en process par un AUTRE backend est redirige vers un frere distinct (le cache de handles dlopen ne ressert plus un artefact aot a un chemin production)
   add_test(NAME ${t}
            COMMAND ${Python_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/${t}.py)

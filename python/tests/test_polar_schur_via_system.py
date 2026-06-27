@@ -29,6 +29,9 @@ Validations :
       (theta=1, Euler retrograde) -- le verrou de PR6.
 """
 
+from pops.numerics.variables import Conservative
+from pops.numerics.reconstruction.limiters import Minmod
+from pops.numerics.riemann import Rusanov
 import math
 import sys
 
@@ -122,7 +125,7 @@ def build_system(nr, nth, B0, alpha, theta, with_schur, cs2=1.0):
     sim.add_equation(
         "ions",
         model=iso_fluid_model(cs2=cs2, alpha=alpha),
-        spatial=pops.FiniteVolume(limiter="minmod", riemann="rusanov", variables="conservative"),
+        spatial=pops.FiniteVolume(limiter=Minmod(), riemann=Rusanov(), variables=Conservative()),
         time=time_policy,
     )
     rho = _annular_density(nr, nth)

@@ -27,6 +27,9 @@ Ce qui n'est PAS teste ici (deja couvert) :
 Note sur PolarMesh : config.n = nr (cf. python/pops/__init__.py), donc set_epsilon_field
 exige un tableau de taille nr*nr.
 """
+from pops.numerics.riemann import HLL
+from pops.numerics.riemann import HLLC
+from pops.numerics.riemann import Roe
 import numpy as np
 import pytest
 
@@ -120,7 +123,7 @@ def test_polar_rejects_non_rusanov_flux():
     msg = ""
     try:
         sim.add_block("ne", model=_exb_model(),
-                      spatial=pops.Spatial(flux="hllc"), time=pops.Explicit())
+                      spatial=pops.Spatial(flux=HLLC()), time=pops.Explicit())
     except RuntimeError as e:
         raised = True
         msg = str(e)
@@ -136,7 +139,7 @@ def test_polar_rejects_roe_flux():
     raised = False
     try:
         sim.add_block("ne", model=_exb_model(),
-                      spatial=pops.Spatial(flux="roe"), time=pops.Explicit())
+                      spatial=pops.Spatial(flux=Roe()), time=pops.Explicit())
     except RuntimeError:
         raised = True
     assert raised, "add_block avec flux='roe' sur PolarMesh aurait du lever RuntimeError"
@@ -155,7 +158,7 @@ def test_polar_rejects_hll_on_scalar_exb():
     msg = ""
     try:
         sim.add_block("ne", model=_exb_model(),
-                      spatial=pops.Spatial(flux="hll"), time=pops.Explicit())
+                      spatial=pops.Spatial(flux=HLL()), time=pops.Explicit())
     except RuntimeError as e:
         raised = True
         msg = str(e)

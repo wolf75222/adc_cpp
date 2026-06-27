@@ -13,6 +13,7 @@ simple transport :
 (C) le bloc couple tourne dans le System (transport + Poisson + force a chaque pas) en restant physique
     et en conservant la masse (la source de gravite n'agit pas sur la densite).
 """
+from pops.numerics.riemann import Rusanov
 import os
 import shutil
 import tempfile
@@ -88,7 +89,7 @@ def main():
                          source=pops.GravityForce(),
                          elliptic=pops.GravityCoupling(sign=-1.0, four_pi_G=1.0, rho0=1.0))
         cmp = pops.System(n=n, L=L, periodic=True)
-        cmp.add_block("gas", spec, spatial=pops.Spatial(none=True, flux="rusanov"),
+        cmp.add_block("gas", spec, spatial=pops.Spatial(none=True, flux=Rusanov()),
                       time=pops.Explicit())
         cmp.set_poisson(rhs="charge_density", solver="geometric_mg")
         cmp.set_state("gas", Uflat)

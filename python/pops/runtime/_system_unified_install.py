@@ -7,7 +7,7 @@ other mixins' methods) and ``self._s``.
 """
 
 from pops._bootstrap import ModelSpec
-from pops.runtime.bricks import Spatial, FiniteVolume
+from pops.runtime.bricks import Spatial
 
 
 class _SystemUnifiedInstall:
@@ -160,15 +160,18 @@ class _SystemUnifiedInstall:
             return Spatial()
         if isinstance(spatial, Spatial):
             return spatial
-        # A lib BrickDescriptor carries the scheme options in .options.
+        # A lib BrickDescriptor carries the scheme options as STRING tokens in .options. Lower them
+        # to the canonical Spatial tokens directly (Spatial._from_tokens bypasses the public typed-
+        # descriptor guard, which the runtime FiniteVolume now enforces -- Spec 5 sec.7).
         opts = getattr(spatial, "options", None)
         if isinstance(opts, dict):
             limiter = opts.get("reconstruction", opts.get("limiter", "minmod"))
             riemann = opts.get("riemann", opts.get("flux", "rusanov"))
             variables = opts.get("variables", opts.get("recon", "conservative"))
-            return FiniteVolume(limiter=limiter, riemann=riemann, variables=variables,
-                                positivity_floor=opts.get("positivity_floor"),
-                                wave_speed_cache=bool(opts.get("wave_speed_cache", False)))
+            return Spatial._from_tokens(
+                limiter, riemann, variables,
+                positivity_floor=opts.get("positivity_floor"),
+                wave_speed_cache=bool(opts.get("wave_speed_cache", False)))
         raise TypeError("install: spatial must be an pops.FiniteVolume / pops.Spatial or an "
                         "pops.lib.spatial.FiniteVolume(...) descriptor; got %r"
                         % type(spatial).__name__)

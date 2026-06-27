@@ -8,6 +8,8 @@ simulation did not provide it") instead of a cryptic failure mid-step. The negat
 cases both need a compiler + a visible Kokkos (POPS_KOKKOS_ROOT) to build the .so; the test prints a
 skip notice and exits 0 otherwise (run it on ROMEO). cf. docs/sphinx/reference/operator-modules.md.
 """
+from pops.numerics.reconstruction import FirstOrder
+from pops.numerics.riemann import Rusanov
 import sys
 
 try:
@@ -54,7 +56,7 @@ def lie_program(name="adc446_prog"):
 def make_sim(block_model, with_bz):
     sim = pops.System(n=N, L=1.0, periodic=True)
     sim.add_equation("plasma", block_model.compile(backend="production"),
-                     spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                     spatial=pops.FiniteVolume(limiter=FirstOrder(), riemann=Rusanov()),
                      time=pops.Explicit(method="euler"))
     sim.set_poisson("charge_density", "geometric_mg")
     if with_bz:

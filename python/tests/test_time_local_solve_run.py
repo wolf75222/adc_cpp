@@ -20,6 +20,8 @@ cell by cell via a dense per-cell inverse) -- reusing ProgramContext + for_each_
     once _pops is rebuilt; skips if _pops lacks install_program, numpy/_pops is absent, no compiler/Kokkos
     is visible, or the .so compile fails -- never faking the engine.
 """
+from pops.numerics.reconstruction import FirstOrder
+from pops.numerics.riemann import Rusanov
 import sys
 
 
@@ -139,7 +141,7 @@ def make_sim():
     except RuntimeError as exc:  # no compiler / no Kokkos visible
         _skip("model compile could not build the .so: %s" % str(exc)[:160])
     sim.add_equation("plasma", compiled_model,
-                     spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                     spatial=pops.FiniteVolume(limiter=FirstOrder(), riemann=Rusanov()),
                      time=pops.Explicit(method="euler"))
     bz = 3.0
     sim.set_magnetic_field(bz * np.ones(n * n))  # constant B_z over the grid

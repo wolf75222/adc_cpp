@@ -90,9 +90,12 @@ force, and `Q` with the charge of the elliptic coupling.
    `conservative_vars` in step 2.
 
    ```python
+   from pops.numerics.riemann import Rusanov
+   from pops.numerics.reconstruction.limiters import Minmod
+
    sim = pops.System(n=48, L=1.0, periodic=True)
    sim.add_equation("gas", compiled,
-                    spatial=pops.FiniteVolume(limiter="minmod", riemann="rusanov"),
+                    spatial=pops.FiniteVolume(limiter=Minmod(), riemann=Rusanov()),
                     names=["rho", "rho_u", "rho_v"])
    ```
 

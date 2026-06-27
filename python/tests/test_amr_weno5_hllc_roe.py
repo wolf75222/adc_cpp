@@ -19,6 +19,8 @@ Verifie (bloc NATIF pops.Model -> AUCUN compilateur requis ; le dispatch est exe
 
 Invariants par assert ; imprime "OK test_amr_weno5_hllc_roe" en cas de succes.
 """
+from pops.numerics.riemann import HLLC, Roe
+from pops.numerics.reconstruction import WENO5
 import sys
 
 import numpy as np
@@ -60,24 +62,24 @@ n = 32
 rho = bump(n)
 
 # --- 1. MONO-BLOC (dispatch_amr_compiled) : weno5 + hllc, puis weno5 + roe ---------------------------
-for riem in ("hllc", "roe"):
-    print(f"== mono-bloc Euler : weno5 + {riem} (dispatch_amr_compiled) ==")
+for riem in (HLLC(), Roe()):
+    print(f"== mono-bloc Euler : weno5 + {riem.scheme} (dispatch_amr_compiled) ==")
     s = pops.AmrSystem(n=n, L=1.0, periodic=True)
     s.set_refinement(1e30)  # mono-niveau : le sujet est le ROUTAGE du dispatch (exerce au build)
     s.add_block("gas", euler_spec(),
-                spatial=pops.FiniteVolume(limiter="weno5", riemann=riem), time=pops.Explicit())
+                spatial=pops.FiniteVolume(limiter=WENO5(), riemann=riem), time=pops.Explicit())
     s.set_density("gas", rho.copy())
     for _ in range(3):
         s.step(1e-4)
     d = np.asarray(s.density("gas"))
-    chk(np.all(np.isfinite(d)), f"weno5 + {riem} : densite finie sur 3 pas (build OK, plus de 'limiter inconnu')")
+    chk(np.all(np.isfinite(d)), f"weno5 + {riem.scheme} : densite finie sur 3 pas (build OK, plus de 'limiter inconnu')")
 
 # --- 2. MULTI-BLOCS (dispatch_amr_block) : deux blocs Euler weno5 + hllc -----------------------------
 print("== multi-blocs Euler : 2 blocs weno5 + hllc (dispatch_amr_block) ==")
 s = pops.AmrSystem(n=n, L=1.0, periodic=True)
 s.set_refinement(1e30)
-s.add_block("a", euler_spec(), spatial=pops.FiniteVolume(limiter="weno5", riemann="hllc"), time=pops.Explicit())
-s.add_block("b", euler_spec(), spatial=pops.FiniteVolume(limiter="weno5", riemann="hllc"), time=pops.Explicit())
+s.add_block("a", euler_spec(), spatial=pops.FiniteVolume(limiter=WENO5(), riemann=HLLC()), time=pops.Explicit())
+s.add_block("b", euler_spec(), spatial=pops.FiniteVolume(limiter=WENO5(), riemann=HLLC()), time=pops.Explicit())
 s.set_density("a", rho.copy())
 s.set_density("b", rho.copy())
 for _ in range(3):
@@ -91,7 +93,7 @@ try:
     s = pops.AmrSystem(n=n, L=1.0, periodic=True)
     s.set_refinement(1e30)
     s.add_block("iso", iso_spec(),
-                spatial=pops.FiniteVolume(limiter="weno5", riemann="hllc"), time=pops.Explicit())
+                spatial=pops.FiniteVolume(limiter=WENO5(), riemann=HLLC()), time=pops.Explicit())
     s.set_density("iso", rho.copy())
     s.step(1e-4)
     chk(False, "weno5 + hllc sur isotherme aurait du lever (capability)")

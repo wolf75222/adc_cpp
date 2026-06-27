@@ -15,6 +15,8 @@ nothing, so re-solving from a stage state vs the current state is bit-identical 
 field-coupled case is exercised by test_time_solve_fields_from_state). Skips cleanly (exit 0)
 without the install_program binding / numpy / a compiler / a visible Kokkos -- never fakes the engine.
 """
+from pops.numerics.reconstruction import FirstOrder
+from pops.numerics.riemann import Rusanov
 import sys
 
 
@@ -54,7 +56,7 @@ N = 24
 def make_sim(method="euler"):
     sim = pops.System(n=N, L=1.0, periodic=True)
     sim.add_block("ions", transport_model(),
-                  spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                  spatial=pops.FiniteVolume(limiter=FirstOrder(), riemann=Rusanov()),
                   time=pops.Explicit(method=method))
     sim.set_poisson("charge_density", "geometric_mg")
     x = (np.arange(N) + 0.5) / N

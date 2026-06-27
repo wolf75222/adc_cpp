@@ -7,6 +7,7 @@ le canal aux partage (ensure_aux_width(5)) et marshale 5 composantes vers l'ABI 
 lit a.T_e). Un bloc fluide COMPRESSIBLE fournit T = p/rho via set_electron_temperature_from. On
 verifie de bout en bout cote Python : eval_rhs du bloc compile = source = T_e * n.
 """
+from pops.numerics.riemann import Rusanov
 import os
 import shutil
 import tempfile
@@ -57,7 +58,7 @@ def main():
 
         sim = pops.System(n=n, L=L, periodic=True)
         sim.add_block("gas", model=gas_model(gamma),
-                      spatial=pops.Spatial(flux="rusanov"), time=pops.Explicit())
+                      spatial=pops.Spatial(flux=Rusanov()), time=pops.Explicit())
         # add_compiled_block : pops_compiled_naux()=5 -> ensure_aux_width(5)
         sim.add_compiled_block("probe", so, limiter="none", riemann="rusanov",
                                recon="conservative", time="explicit", names=["n"])

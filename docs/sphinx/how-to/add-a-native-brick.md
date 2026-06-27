@@ -51,7 +51,10 @@ native `add_block` path, which preserves MPI, AMR and GPU.
 6. Plug the model into a block, with a spatial scheme and a time integrator.
 
    ```python
-   sim.add_block("ne", model=model, spatial=pops.FiniteVolume(limiter="minmod", riemann="rusanov"), time=pops.Explicit())
+   from pops.numerics.riemann import Rusanov
+   from pops.numerics.reconstruction.limiters import Minmod
+
+   sim.add_block("ne", model=model, spatial=pops.FiniteVolume(limiter=Minmod(), riemann=Rusanov()), time=pops.Explicit())
    ```
 
 The same `ModelSpec` plugs into `pops.AmrSystem` for adaptive refinement without changing the

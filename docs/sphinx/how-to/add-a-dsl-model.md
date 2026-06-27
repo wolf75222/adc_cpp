@@ -89,11 +89,14 @@ generated `.so` between runs (default `~/.cache/pops/dsl`).
 
    ```python
    import pops
+   from pops.numerics.riemann import HLLC
+   from pops.numerics.reconstruction.limiters import Minmod
+   from pops.numerics.variables import Primitive
 
    s = pops.System(n=32, L=1.0, periodic=True)
    s.add_equation("gas", compiled,
-                  spatial=pops.FiniteVolume(limiter="minmod", riemann="hllc",
-                                           variables="primitive"))
+                  spatial=pops.FiniteVolume(limiter=Minmod(), riemann=HLLC(),
+                                           variables=Primitive()))
    s.set_poisson(rhs="charge_density", solver="geometric_mg")
    ```
 

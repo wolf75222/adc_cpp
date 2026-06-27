@@ -34,8 +34,11 @@ MG); it is a global implicit (it couples the whole domain). `pops.Split` / `pops
 wired only by `add_equation` (which plugs in the source stage), not by `add_block`.
 
 ```python
+from pops.numerics.riemann import Rusanov
+from pops.numerics.reconstruction.limiters import Minmod
+
 sim.add_equation("ions", model=compiled,
-                 spatial=pops.FiniteVolume(limiter="minmod", riemann="rusanov"),
+                 spatial=pops.FiniteVolume(limiter=Minmod(), riemann=Rusanov()),
                  time=pops.Strang(hyperbolic=pops.Explicit(),
                                  source=pops.CondensedSchur(theta=0.5, alpha=3.0)))
 ```

@@ -17,6 +17,9 @@ Le fluide isotherme polaire expose model.wave_speeds (herite d'IsothermalFlux) :
 du gate 'hll' (identique au cartesien block_builder.hpp). Un transport ExB SCALAIRE ne la fournit pas
 -> rejet, couvert par test_polar_rejections.test_polar_rejects_hll_on_scalar_exb.
 """
+from pops.numerics.variables import Conservative
+from pops.numerics.reconstruction.limiters import Minmod
+from pops.numerics.riemann import Rusanov, HLL
 import math
 
 import numpy as np
@@ -69,7 +72,7 @@ def _build(nr, nth, riemann, cs2=1.0):
     sim.add_equation(
         "ions",
         model=iso_polar_model(cs2=cs2),
-        spatial=pops.FiniteVolume(limiter="minmod", riemann=riemann, variables="conservative"),
+        spatial=pops.FiniteVolume(limiter=Minmod(), riemann=riemann, variables=Conservative()),
         time=pops.Explicit(),
     )
     u0 = _annular_state(nr, nth)
@@ -96,12 +99,12 @@ def test_polar_hll():
     n_steps = 8
 
     # T1 : defaut rusanov reproductible (deux constructions identiques -> bit-identique).
-    s_rus_a = _run(_build(nr, nth, "rusanov", cs2), nr, nth, n_steps, dt)
-    s_rus_b = _run(_build(nr, nth, "rusanov", cs2), nr, nth, n_steps, dt)
+    s_rus_a = _run(_build(nr, nth, Rusanov(), cs2), nr, nth, n_steps, dt)
+    s_rus_b = _run(_build(nr, nth, Rusanov(), cs2), nr, nth, n_steps, dt)
     assert np.array_equal(s_rus_a, s_rus_b), "rusanov polaire : non reproductible (T1)"
 
     # T2 : hll tourne fini.
-    s_hll = _run(_build(nr, nth, "hll", cs2), nr, nth, n_steps, dt)
+    s_hll = _run(_build(nr, nth, HLL(), cs2), nr, nth, n_steps, dt)
     assert np.all(np.isfinite(s_hll)), "hll polaire : etat non fini (T2)"
 
     # T3 : hll differe de rusanov (au-dela du bruit FP) -> le flux injecte est bien HLL.

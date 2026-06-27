@@ -28,12 +28,12 @@ returned model is ready to `compile`, or you may add an `elliptic_rhs` or extra 
 | `name`         | Model name (used for the generated symbol names and the `.so`).                               |
 | `order`        | Truncation order of the hierarchy. `order >= 2` (standardization needs `C20`, `C02`). Order 2 is 6 moments, 3 is 10, 4 is 15. |
 | `closure`      | The closure callable. Its contract is in the "Closure contract" section below.                 |
-| `exact_speeds` | `True` (default): signed wave speeds by automatic differentiation of the flux plus a per-cell eigenvalue solve, which enables `riemann="hll"`. `False`: you set `m.eigenvalues(...)` or `m.wave_speeds(...)` yourself. |
+| `exact_speeds` | `True` (default): signed wave speeds by automatic differentiation of the flux plus a per-cell eigenvalue solve, which enables `riemann=HLL()`. `False`: you set `m.eigenvalues(...)` or `m.wave_speeds(...)` yourself. |
 | `robust`       | `True`: smooth floors `max(x, eps) = ((x + eps) + abs(x - eps)) / 2` on `M00` (division) and `C20`/`C02` (square root), so the flux stays finite near the realizability boundary. `False` (default): the bare path, which may produce non-finite values on a degenerate state. |
 | `blocks`       | Optional block structure of the flux Jacobian, passed through to the wave-speed solve (a dict `{"x": [...], "y": [...]}` of index lists). Default: the full matrix. Ignored when `exact_speeds=False`. |
 | `eps_m00`, `eps_cov` | Floor thresholds used when `robust=True`.                                               |
 | `sources`      | Optional callable `(model, M) -> list[Expr]`, one source per moment, wired with `m.source(...)`. `M` is a dict mapping `(p, q)` to the conservative `Var`. Use `lorentz_sources` (below). |
-| `roe`          | `True`: also emit the generic moment Roe dissipation (`m.roe_from_jacobian`), with `|A|` via `pops::roe_abs_apply` and a spectral-radius Rusanov fallback. Additive to `exact_speeds`, so it enables `riemann="roe"` for a moment hierarchy. Needs the `aot` or `production` backend. `False` (default): no Roe path. |
+| `roe`          | `True`: also emit the generic moment Roe dissipation (`m.roe_from_jacobian`), with `|A|` via `pops::roe_abs_apply` and a spectral-radius Rusanov fallback. Additive to `exact_speeds`, so it enables `riemann=Roe()` for a moment hierarchy. Needs the `aot` or `production` backend. `False` (default): no Roe path. |
 
 You do not call `m.flux(...)` or `m.eigenvalues(...)` on the returned model when you use the
 generator: both are derived from the closure. The flux is the order shift `Fx[M_pq] = M_{p+1,q}`,
@@ -133,16 +133,18 @@ model:
 
 ```python
 import pops
+from pops.numerics.riemann import HLL
+from pops.numerics.reconstruction import FirstOrder
 compiled = gmom.build_moment_model("mom", 4, my_closure).compile("mom.so", pops.pops_include())
 sim = pops.System(n=64, L=1.0, periodic=True)
 sim.add_equation("mom", model=compiled,
-                 spatial=pops.FiniteVolume(limiter="none", riemann="hll"),
+                 spatial=pops.FiniteVolume(limiter=FirstOrder(), riemann=HLL()),
                  time=pops.Explicit())
 ```
 
-`riemann="hll"` requires the signed wave speeds that `exact_speeds=True` generates; `riemann="rusanov"`
-needs only the maximum speed and works either way. `riemann="roe"` is available once the model is built
-with `build_moment_model(roe=True)`, which emits the generic moment Roe dissipation; only `riemann="hllc"`
+`riemann=HLL()` requires the signed wave speeds that `exact_speeds=True` generates; `riemann=Rusanov()`
+needs only the maximum speed and works either way. `riemann=Roe()` is available once the model is built
+with `build_moment_model(roe=True)`, which emits the generic moment Roe dissipation; only `riemann=HLLC()`
 remains rejected for a moment model, being specific to the four-variable Euler system. For the Riemann-solver choices
 see [fluxes, sources, and eigenvalues](../concepts/fluxes-sources-eigenvalues.md); for the spatial and
 time classes see the [Python API](python-api.md).

@@ -22,6 +22,8 @@ On verifie :
  (3) NON-TRIVIALITE : production+SSPRK3 DIFFERE de production+SSPRK2 -- preuve que ssprk3 est bien
      selectionne (pas un ssprk2 silencieux).
 """
+from pops.numerics.variables import Conservative
+from pops.numerics.riemann import Rusanov
 import os
 import shutil
 import sys
@@ -107,7 +109,7 @@ try:
 
     def build_ref_ssprk3():
         s = pops.System(n=n, L=L, periodic=True)
-        s.add_block("gas", spec, spatial=pops.Spatial(minmod=True, flux="rusanov", recon="conservative"),
+        s.add_block("gas", spec, spatial=pops.Spatial(minmod=True, flux=Rusanov(), recon=Conservative()),
                     time=pops.Explicit(method="ssprk3"))
         s.set_poisson(rhs="charge_density", solver="geometric_mg")
         s.set_state("gas", Uflat)

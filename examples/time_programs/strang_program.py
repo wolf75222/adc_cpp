@@ -21,6 +21,8 @@ Run::
 Requires a compiler + a visible Kokkos (``POPS_KOKKOS_ROOT``); prints a skip notice and exits 0
 otherwise. cf. docs/sphinx/reference/time-program.md.
 """
+from pops.numerics.reconstruction import FirstOrder
+from pops.numerics.riemann import Rusanov
 import sys
 
 try:
@@ -77,7 +79,7 @@ def make_sim():
     """The native reference System (lower-level add_block path); driven by set_time_scheme('strang')."""
     sim = pops.System(n=N, L=1.0, periodic=True)
     sim.add_block("ions", transport_model(),
-                  spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                  spatial=pops.FiniteVolume(limiter=FirstOrder(), riemann=Rusanov()),
                   time=pops.Explicit(method="euler"))
     sim.set_poisson("charge_density", "geometric_mg")  # inert: BackgroundDensity n0=0, flux reads no phi
     sim.set_state("ions", initial_state())
@@ -107,8 +109,8 @@ def main():
     prog = pops.System(n=N, L=1.0, periodic=True)
     prog.install(compiled,
                  instances={"ions": {"model": transport_model(),
-                                     "spatial": pops.FiniteVolume(limiter="none",
-                                                                  riemann="rusanov"),
+                                     "spatial": pops.FiniteVolume(limiter=FirstOrder(),
+                                                                  riemann=Rusanov()),
                                      "initial": initial_state()}},
                  solvers={"phi": pops.lib.fields.GeometricMG()})
 

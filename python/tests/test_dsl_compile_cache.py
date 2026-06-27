@@ -17,6 +17,9 @@ On verifie :
 
 Lance avec python3, meme PYTHONPATH que les autres tests DSL.
 """
+from pops.numerics.riemann import HLLC
+from pops.numerics.reconstruction.limiters import Minmod
+from pops.numerics.variables import Primitive
 import os
 import shutil
 import tempfile
@@ -158,8 +161,8 @@ def end_to_end_checks():
 
             # (b) branchable via add_equation et tourne
             s = pops.System(n=n, periodic=True)
-            s.add_equation("gas", cm, spatial=pops.FiniteVolume(limiter="minmod", riemann="hllc",
-                                                               variables="primitive"))
+            s.add_equation("gas", cm, spatial=pops.FiniteVolume(limiter=Minmod(), riemann=HLLC(),
+                                                               variables=Primitive()))
             s.set_poisson(rhs="charge_density", solver="geometric_mg")
             s.set_state("gas", initial_state(n))
             nsteps = s.run(t_end=0.02, cfl=0.4)
@@ -190,8 +193,8 @@ def end_to_end_checks():
         cm_ex = m.compile(ex_path, INCLUDE, backend="aot")
         assert cm_ex.so_path == ex_path and os.path.exists(ex_path), "so_path explicite casse"
         s = pops.System(n=n, periodic=True)
-        s.add_equation("gas", cm_ex, spatial=pops.FiniteVolume(limiter="minmod", riemann="hllc",
-                                                              variables="primitive"))
+        s.add_equation("gas", cm_ex, spatial=pops.FiniteVolume(limiter=Minmod(), riemann=HLLC(),
+                                                              variables=Primitive()))
         s.set_poisson(rhs="charge_density", solver="geometric_mg")
         s.set_state("gas", initial_state(n))
         assert s.run(t_end=0.02, cfl=0.4) > 0, "run via so_path explicite instable"

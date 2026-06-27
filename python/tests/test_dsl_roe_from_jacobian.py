@@ -15,6 +15,8 @@ Density/Momentum roles and no primitive 'p' (unlike m.enable_roe).
 
 Invariants by assert; prints "OK test_dsl_roe_from_jacobian" on success.
 """
+from pops.numerics.reconstruction import FirstOrder
+from pops.numerics.riemann import Roe
 import os
 import shutil
 import sys
@@ -98,7 +100,7 @@ try:
 
     sim = pops.System(n=n, L=1.0, periodic=True)
     sim.add_equation("mom", model=compiled,
-                     spatial=pops.FiniteVolume(limiter="none", riemann="roe"),
+                     spatial=pops.FiniteVolume(limiter=FirstOrder(), riemann=Roe()),
                      time=pops.Explicit())
     sim.set_state("mom", U0)
     for _ in range(10):
@@ -113,7 +115,7 @@ try:
         os.path.join(tmp, "g2noroe.so"), INCLUDE, backend="aot")
     s2 = pops.System(n=16, L=1.0, periodic=True)
     msg = err_msg(lambda: s2.add_equation(
-        "mom", model=cm_no, spatial=pops.FiniteVolume(limiter="none", riemann="roe"),
+        "mom", model=cm_no, spatial=pops.FiniteVolume(limiter=FirstOrder(), riemann=Roe()),
         time=pops.Explicit()))
     chk(msg is not None, f"roe=False: riemann='roe' rejete ({(msg or '')[:48]}...)")
 finally:

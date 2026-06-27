@@ -20,6 +20,9 @@ On valide :
 Lance avec python3. Les gardes (a) tournent SANS compilateur ; (b)/(c) sautent proprement si aucun
 compilateur C++ n'est disponible (le modele magnetise a roles passe par le DSL compile).
 """
+from pops.numerics.variables import Conservative
+from pops.numerics.reconstruction.limiters import Minmod
+from pops.numerics.riemann import Rusanov
 import os
 import shutil
 
@@ -86,8 +89,8 @@ def build_sim(compiled, time, n=32, L=1.0, B0=4.0):
     sim.set_poisson(bc="dirichlet")
     sim.set_magnetic_field(B0 * np.ones((n, n)))
     sim.add_equation("ions", model=compiled,
-                     spatial=pops.FiniteVolume(limiter="minmod", riemann="rusanov",
-                                              variables="conservative"),
+                     spatial=pops.FiniteVolume(limiter=Minmod(), riemann=Rusanov(),
+                                              variables=Conservative()),
                      time=time)
     rho0, u0, v0 = smooth_init(n, L)
     sim.set_primitive_state("ions", rho=rho0, u=u0, v=v0)

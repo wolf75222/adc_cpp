@@ -9,6 +9,9 @@ grossiere et nombre de patchs a la precision machine (< 1e-12 ; le solve MG elli
 FP d'ordre 1e-16). On verifie aussi les garde-fous (aot+amr_system refuse ; CompiledModel target=system
 refuse sur AMR). Auto-saute sans compilateur. Lance avec python3.
 """
+from pops.numerics.variables import Conservative
+from pops.numerics.reconstruction.limiters import Minmod
+from pops.numerics.riemann import Rusanov
 import os
 import shutil
 import tempfile
@@ -79,7 +82,7 @@ def main():
         def poisson(s):
             s.set_poisson("charge_density", "geometric_mg")
 
-        spatial = pops.FiniteVolume(limiter="minmod", riemann="rusanov", variables="conservative")
+        spatial = pops.FiniteVolume(limiter=Minmod(), riemann=Rusanov(), variables=Conservative())
         H = _amr(n, L, lambda s: (s.add_equation("gas", co, spatial=spatial), poisson(s)))
         N = _amr(n, L, lambda s: (s.add_block("gas", spec, spatial=spatial, time=pops.Explicit()),
                                   poisson(s)))

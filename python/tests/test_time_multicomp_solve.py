@@ -24,6 +24,8 @@ component 0 alone and leave the rest unsolved.
     same offline CG bit-for-bit. Self-skips (exit 0) without numpy / _pops / install_program / a compiler
     / a visible Kokkos -- never fakes the engine.
 """
+from pops.numerics.reconstruction import FirstOrder
+from pops.numerics.riemann import Rusanov
 import sys
 
 
@@ -238,7 +240,7 @@ def _run_one(t, pops, np, ncomp, init):
         return None
 
     sim.add_equation("blk", compiled_model,
-                     spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                     spatial=pops.FiniteVolume(limiter=FirstOrder(), riemann=Rusanov()),
                      time=pops.Explicit(method="euler"))
     sim.set_state("blk", init)
     sim.install_program(compiled.so_path)

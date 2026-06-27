@@ -21,6 +21,7 @@ l'invariant CENTRAL :
        meme : tout l'etat vit sur le rang 0).
   T4 - my_rank / n_ranks exposes (0 / 1 en serie).
 """
+from pops.numerics.reconstruction.limiters import Minmod
 import os
 import tempfile
 
@@ -37,7 +38,7 @@ def _build(n=16):
                             transport=pops.IsothermalFlux(),
                             source=pops.PotentialForce(charge=1.0),
                             elliptic=pops.ChargeDensity(charge=1.0)),
-                  spatial=pops.FiniteVolume(limiter="minmod"), time=pops.Explicit())
+                  spatial=pops.FiniteVolume(limiter=Minmod()), time=pops.Explicit())
     x = (np.arange(n) + 0.5) / n
     X, Y = np.meshgrid(x, x, indexing="xy")
     sim.set_density("ions", (1.0 + 0.4 * np.exp(-50.0 * ((X - 0.4) ** 2 + (Y - 0.5) ** 2))).ravel())

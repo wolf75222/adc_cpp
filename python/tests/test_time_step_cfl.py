@@ -15,6 +15,8 @@ Section (A) (pure Python) is minimal -- this is runtime behavior; the substantiv
 (end-to-end), which needs _pops + a compiler + a visible Kokkos (POPS_KOKKOS_ROOT) and self-skips cleanly
 otherwise. It never fakes the engine.
 """
+from pops.numerics.reconstruction import FirstOrder
+from pops.numerics.riemann import Rusanov
 import sys
 
 
@@ -67,7 +69,7 @@ N = 24
 def make_sim(time):
     sim = pops.System(n=N, L=1.0, periodic=True)
     sim.add_block("ions", transport_model(),
-                  spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"), time=time)
+                  spatial=pops.FiniteVolume(limiter=FirstOrder(), riemann=Rusanov()), time=time)
     sim.set_poisson("charge_density", "geometric_mg")
     x = (np.arange(N) + 0.5) / N
     X, Y = np.meshgrid(x, x, indexing="ij")

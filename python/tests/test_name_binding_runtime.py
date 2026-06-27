@@ -19,6 +19,8 @@ covered host-side by test_name_binding_codegen.py.
 
 Runs as a plain script (``python3 test_name_binding_runtime.py``, the CI invocation) and under pytest.
 """
+from pops.numerics.reconstruction import FirstOrder
+from pops.numerics.riemann import Rusanov
 import sys
 
 
@@ -111,7 +113,7 @@ def _run():
                 cm = passive_model("nb_blk_" + blk).compile(backend="production")
             except RuntimeError as exc:  # no compiler / no Kokkos
                 _skip("model compile could not build the .so: %s" % str(exc)[:160])
-            sim.add_equation(blk, cm, spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+            sim.add_equation(blk, cm, spatial=pops.FiniteVolume(limiter=FirstOrder(), riemann=Rusanov()),
                              time=pops.Explicit(method="euler"))
         for blk in add_order:
             sim.set_state(blk, ic[blk][None, :, :])

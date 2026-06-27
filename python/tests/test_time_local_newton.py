@@ -22,6 +22,8 @@ uses -- iterating to ``max_c |r_c| < tol`` or the budget. No heap / std::functio
     offline Newton taking > 1 iteration and its residual dropping by many orders. Skips (exit 0) without
     numpy / _pops / a compiler / a visible Kokkos, or if the .so compile fails -- never faking the engine.
 """
+from pops.numerics.reconstruction import FirstOrder
+from pops.numerics.riemann import Rusanov
 import sys
 
 
@@ -236,7 +238,7 @@ def section_b(t):
     except RuntimeError as exc:
         _skip("model compile could not build the .so: %s" % str(exc)[:160])
     sim.add_equation("blk", compiled_model,
-                     spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                     spatial=pops.FiniteVolume(limiter=FirstOrder(), riemann=Rusanov()),
                      time=pops.Explicit(method="euler"))
 
     # A KNOWN positive field with spatial variation (each cell solves its own scalar Newton).

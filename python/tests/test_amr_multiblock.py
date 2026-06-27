@@ -11,6 +11,9 @@ sur UNE hierarchie AMR PARTAGEE, avec un Poisson de SYSTEME a second membre SOMM
 
 Test PUR Python (aucune compilation .so) : ne gate sur rien, toujours execute.
 """
+from pops.numerics.reconstruction import FirstOrder
+from pops.numerics.reconstruction.limiters import Minmod
+from pops.numerics.riemann import Rusanov
 import numpy as np
 
 import pops
@@ -30,9 +33,9 @@ def _scalar_charge(q, B0=1.0):
 def _build(n=32, regrid_every=0):
     sim = pops.AmrSystem(n=n, L=1.0, periodic=True, regrid_every=regrid_every)
     sim.add_block("ions", _scalar_charge(+1.0),
-                  spatial=pops.Spatial(limiter="none", flux="rusanov"))
+                  spatial=pops.Spatial(limiter=FirstOrder(), flux=Rusanov()))
     sim.add_block("electrons", _scalar_charge(-1.0),
-                  spatial=pops.Spatial(limiter="minmod", flux="rusanov"))  # SCHEMA DIFFERENT
+                  spatial=pops.Spatial(limiter=Minmod(), flux=Rusanov()))  # SCHEMA DIFFERENT
     sim.set_poisson(bc="periodic")
     sim.set_density("ions", _bump(n, 0.40))
     sim.set_density("electrons", _bump(n, 0.20))
@@ -71,7 +74,7 @@ def main():
     # (d) MONO-BLOC deterministe (chemin AmrCouplerMP intouche) : run x2 -> dmax == 0.
     def run_mono():
         s = pops.AmrSystem(n=n, L=1.0, periodic=True, regrid_every=0)
-        s.add_block("ne", _scalar_charge(+1.0), spatial=pops.Spatial(limiter="none", flux="rusanov"))
+        s.add_block("ne", _scalar_charge(+1.0), spatial=pops.Spatial(limiter=FirstOrder(), flux=Rusanov()))
         s.set_poisson(bc="periodic")
         s.set_density("ne", _bump(n, 0.40))
         s.advance(0.001, 10)

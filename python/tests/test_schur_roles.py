@@ -11,6 +11,8 @@ explicites). Verifie :
   (4) rejet explicite des overrides sur le chemin amr-schur (idem).
 Invariants par assert ; imprime "OK test_schur_roles" en cas de succes.
 """
+from pops.numerics.reconstruction.limiters import Minmod
+from pops.numerics.riemann import Rusanov
 import sys
 
 import numpy as np
@@ -48,7 +50,7 @@ def build(n=20, B0=4.0, schur=None, steps=4):
     sim.set_poisson(rhs="charge_density", solver="geometric_mg", bc="dirichlet")
     sim.set_magnetic_field(B0 * np.ones((n, n)))
     sim.add_equation("e", model=iso_model(),
-                     spatial=pops.FiniteVolume(limiter="minmod", riemann="rusanov"),
+                     spatial=pops.FiniteVolume(limiter=Minmod(), riemann=Rusanov()),
                      time=pops.Split(hyperbolic=pops.Explicit(),
                                     source=schur or pops.CondensedSchur(theta=1.0, alpha=3.0)))
     rho0, u0, v0 = smooth(n)
@@ -81,7 +83,7 @@ psim = pops.System(mesh=pops.PolarMesh(r_min=0.5, r_max=1.0, nr=16, ntheta=16))
 psim.set_poisson(rhs="charge_density", solver="geometric_mg", bc="dirichlet")
 psim.set_magnetic_field(4.0 * np.ones(16 * 16))
 psim.add_equation("e", model=iso_model(),
-                  spatial=pops.FiniteVolume(limiter="minmod", riemann="rusanov"),
+                  spatial=pops.FiniteVolume(limiter=Minmod(), riemann=Rusanov()),
                   time=pops.Split(hyperbolic=pops.Explicit(),
                                  source=pops.CondensedSchur(theta=1.0, alpha=3.0,
                                                            density="rho",
@@ -99,7 +101,7 @@ amr.set_poisson(rhs="charge_density", solver="geometric_mg", bc="dirichlet")
 amr.set_refinement(1e30)
 amr.set_magnetic_field(4.0 * np.ones((16, 16)))
 amr.add_equation("e", model=iso_model(),
-                 spatial=pops.FiniteVolume(limiter="minmod", riemann="rusanov"),
+                 spatial=pops.FiniteVolume(limiter=Minmod(), riemann=Rusanov()),
                  time=pops.Split(hyperbolic=pops.Explicit(),
                                 source=pops.CondensedSchur(theta=1.0, alpha=3.0,
                                                           density="rho",
@@ -118,7 +120,7 @@ amr2.set_refinement(1e30)
 amr2.set_magnetic_field(4.0 * np.ones((16, 16)))
 try:
     amr2.add_equation("e", model=iso_model(),
-                      spatial=pops.FiniteVolume(limiter="minmod", riemann="rusanov"),
+                      spatial=pops.FiniteVolume(limiter=Minmod(), riemann=Rusanov()),
                       time=pops.Split(hyperbolic=pops.Explicit(),
                                      source=pops.CondensedSchur(theta=1.0, alpha=3.0,
                                                                magnetic_field="T_e")))

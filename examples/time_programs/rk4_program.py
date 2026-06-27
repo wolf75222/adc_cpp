@@ -13,6 +13,8 @@ Run::
 Requires a compiler + a visible Kokkos (``POPS_KOKKOS_ROOT``); prints a skip notice and exits 0
 otherwise. cf. docs/sphinx/reference/time-program.md.
 """
+from pops.numerics.reconstruction import FirstOrder
+from pops.numerics.riemann import Rusanov
 import sys
 
 try:
@@ -46,7 +48,7 @@ def build_system():
     """The native reference System (lower-level add_block path), evaluated one RHS stage at a time."""
     sim = pops.System(n=N, L=1.0, periodic=True)
     sim.add_block("plasma", gas_model(),
-                  spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                  spatial=pops.FiniteVolume(limiter=FirstOrder(), riemann=Rusanov()),
                   time=pops.Explicit(method="euler"))
     sim.set_poisson("charge_density", "geometric_mg")
     sim.set_state("plasma", initial_state())
@@ -91,8 +93,8 @@ def main():
     sim = pops.System(n=N, L=1.0, periodic=True)
     sim.install(compiled,
                 instances={"plasma": {"model": gas_model(),
-                                      "spatial": pops.FiniteVolume(limiter="none",
-                                                                   riemann="rusanov"),
+                                      "spatial": pops.FiniteVolume(limiter=FirstOrder(),
+                                                                   riemann=Rusanov()),
                                       "initial": initial_state()}},
                 solvers={"phi": pops.lib.fields.GeometricMG()})
     U0 = np.array(sim.get_state("plasma"))

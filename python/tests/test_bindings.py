@@ -6,6 +6,8 @@ cote C++), le Poisson de systeme (avec paroi), le choix implicite/explicite par 
 multirate, l'integrateur temporel ecrit en Python, et l'AMR generique. Invariants par
 assert ; imprime "OK test_bindings" en cas de succes.
 """
+from pops.numerics.riemann import HLLC, Roe
+from pops.numerics.reconstruction.limiters import Minmod, VanLeer
 import sys
 
 import numpy as np
@@ -50,7 +52,7 @@ def diocotron(B0=1.0, alpha=1.0, n_i0=0.0):
 print("== composition par briques (electrons Euler/HLLC/IMEX + ions isothermes) ==")
 sim = pops.System(n=48)
 sim.add_block("electrons", model=electron(),
-              spatial=pops.Spatial(vanleer=True, flux="hllc"), time=pops.IMEX(substeps=10))
+              spatial=pops.Spatial(vanleer=True, flux=HLLC()), time=pops.IMEX(substeps=10))
 sim.add_block("ions", model=ion(), spatial=pops.Spatial(minmod=True), time=pops.Explicit())
 sim.set_poisson(rhs="charge_density", solver="geometric_mg")
 chk(sim.n_species() == 2, "deux blocs composes")
@@ -151,10 +153,11 @@ def euler_gas():
 ne = 32
 exs = meshx(ne); exx, eyy = np.meshgrid(exs, exs, indexing="xy")
 erho = 1.0 + 0.4 * np.exp(-((exx - 0.5) ** 2 + (eyy - 0.5) ** 2) / 0.02)
-for elim, eflux in (("minmod", "hllc"), ("minmod", "roe"), ("vanleer", "hllc")):
+for elim, eflux in ((Minmod(), HLLC()), (Minmod(), Roe()), (VanLeer(), HLLC())):
+    tag = f"{elim.scheme}+{eflux.scheme}"
     eamr = pops.AmrSystem(n=ne, regrid_every=0, periodic=True)
     eamr.add_block("gas", model=euler_gas(),
-                   spatial=pops.Spatial(**{elim: True}, flux=eflux, primitive=True))
+                   spatial=pops.Spatial(limiter=elim, flux=eflux, primitive=True))
     eamr.set_refinement(threshold=1e9)  # patch seed coherent, sans tagger de cellule
     eamr.set_poisson(); eamr.set_density("gas", erho)
     em0 = eamr.mass()
@@ -162,18 +165,18 @@ for elim, eflux in (("minmod", "hllc"), ("minmod", "roe"), ("vanleer", "hllc")):
         eamr.step_cfl(0.2)
     eda = np.array(eamr.density())
     chk(np.isfinite(eda).all() and eda.min() > 0,
-        f"AMR {elim}+{eflux}+primitif : fini, densite positive")
+        f"AMR {tag}+primitif : fini, densite positive")
     chk(abs(eamr.mass() - em0) / abs(em0) < 1e-6,
-        f"AMR {elim}+{eflux}+primitif : masse conservee (reflux)")
+        f"AMR {tag}+primitif : masse conservee (reflux)")
     esys = pops.System(n=ne, periodic=True)
     esys.add_block("gas", model=euler_gas(),
-                   spatial=pops.Spatial(**{elim: True}, flux=eflux, primitive=True))
+                   spatial=pops.Spatial(limiter=elim, flux=eflux, primitive=True))
     esys.set_poisson(); esys.set_density("gas", erho)
     for _ in range(10):
         esys.step_cfl(0.2)
     eds = np.array(esys.density("gas"))
     erel = np.abs(eda - eds).max() / np.abs(eds).max()
-    chk(erel < 0.05, f"AMR {elim}+{eflux}+primitif vs System : ecart relatif {erel:.1%} < 5%")
+    chk(erel < 0.05, f"AMR {tag}+primitif vs System : ecart relatif {erel:.1%} < 5%")
 
 # --- 4c. Espece gelee (background fixe) : non avancee, mais vue par Poisson ------
 print("== espece gelee (evolve=False) : fond fixe vu par Poisson ==")
@@ -359,7 +362,7 @@ def raises(fn):
 
 
 # HLLC exige un transport compressible (4 var) : refuse sur un scalaire (ExB).
-chk(raises(lambda: pops.System(n=16).add_block("d", diocotron(), spatial=pops.Spatial(flux="hllc"))),
+chk(raises(lambda: pops.System(n=16).add_block("d", diocotron(), spatial=pops.Spatial(flux=HLLC()))),
     "hllc refuse sur transport scalaire")
 # Source fluide (PotentialForce) sur un transport scalaire (ExB) : invalide.
 bad = pops.Model(state=pops.Scalar(), transport=pops.ExB(B0=1.0),

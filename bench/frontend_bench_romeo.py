@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+from pops.numerics.reconstruction.limiters import Minmod
+from pops.numerics.riemann import Rusanov
 import csv
 import os
 import shutil
@@ -71,7 +73,7 @@ def build_bricks(n, U):
     sim.add_equation(
         "gas",
         spec,
-        spatial=pops.FiniteVolume(limiter="minmod", riemann="rusanov"),
+        spatial=pops.FiniteVolume(limiter=Minmod(), riemann=Rusanov()),
     )
     sim.set_poisson(rhs="charge_density", solver="fft")
     sim.set_state("gas", U.reshape(-1))
@@ -93,7 +95,7 @@ def build_dsl(n, U, cache_dir):
         sim.add_equation(
             "gas",
             cm,
-            spatial=pops.FiniteVolume(limiter="minmod", riemann="rusanov"),
+            spatial=pops.FiniteVolume(limiter=Minmod(), riemann=Rusanov()),
         )
         sim.set_poisson(rhs="charge_density", solver="fft")
         sim.set_state("gas", U.reshape(-1))

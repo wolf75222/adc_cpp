@@ -13,6 +13,7 @@ Verifie :
 
 Invariants par assert ; imprime "OK test_newton_options" en cas de succes.
 """
+from pops.numerics.reconstruction.limiters import Minmod
 import sys
 
 import numpy as np
@@ -44,7 +45,7 @@ def gaussian(n):
 
 def run(n=24, steps=4, **imex_kw):
     sim = pops.System(n=n, L=1.0, periodic=True)
-    sim.add_block("e", fluid(), spatial=pops.FiniteVolume(limiter="minmod"),
+    sim.add_block("e", fluid(), spatial=pops.FiniteVolume(limiter=Minmod()),
                   time=pops.IMEX(**imex_kw))
     sim.set_poisson(rhs="charge_density", solver="geometric_mg", bc="periodic")
     sim.set_density("e", gaussian(n).ravel())

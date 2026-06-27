@@ -20,6 +20,7 @@ Verifie :
 
 Invariants par assert ; imprime "OK test_dt_bounds" en cas de succes.
 """
+from pops.numerics.reconstruction.limiters import Minmod
 import os
 import shutil
 import sys
@@ -56,7 +57,7 @@ def gaussian(n):
 
 def build(n=24):
     sim = pops.System(n=n, L=1.0, periodic=True)
-    sim.add_block("ions", iso_model(), spatial=pops.FiniteVolume(limiter="minmod"),
+    sim.add_block("ions", iso_model(), spatial=pops.FiniteVolume(limiter=Minmod()),
                   time=pops.Explicit())
     sim.set_poisson(rhs="charge_density", solver="geometric_mg", bc="periodic")
     sim.set_density("ions", gaussian(n).ravel())
@@ -103,7 +104,7 @@ def build_amr(n=24):
     amr = pops.AmrSystem(n=n, L=1.0, periodic=True, regrid_every=0)
     amr.set_poisson(rhs="charge_density", solver="geometric_mg", bc="periodic")
     amr.set_refinement(1e30)  # mono-niveau : le sujet est la POLITIQUE DE PAS, pas le raffinement
-    amr.add_block("ions", iso_model(), spatial=pops.FiniteVolume(limiter="minmod"),
+    amr.add_block("ions", iso_model(), spatial=pops.FiniteVolume(limiter=Minmod()),
                   time=pops.Explicit())
     amr.set_density("ions", gaussian(n).ravel())
     return amr
@@ -125,7 +126,7 @@ chk(amr2.last_dt_bound() == "global:cap_amr",
 
 print("== (C2) AMR multi-blocs : borne globale via AmrRuntime ==")
 amr3 = build_amr()
-amr3.add_block("e2", iso_model(), spatial=pops.FiniteVolume(limiter="minmod"),
+amr3.add_block("e2", iso_model(), spatial=pops.FiniteVolume(limiter=Minmod()),
                time=pops.Explicit())  # 2e bloc -> moteur multi-blocs (AmrRuntime)
 amr3.set_density("e2", gaussian(24).ravel())
 amr3.add_dt_bound("cap_multi", lambda: cap_amr)
@@ -166,7 +167,7 @@ def scalar_model(name, stab_speed=None, stab_dt=None, src_freq=None):
 
 def build_dsl(cm, n=16):
     sim = pops.System(n=n, L=1.0, periodic=True)
-    sim.add_equation("s", model=cm, spatial=pops.FiniteVolume(limiter="minmod"),
+    sim.add_equation("s", model=cm, spatial=pops.FiniteVolume(limiter=Minmod()),
                      time=pops.Explicit())
     sim.set_poisson()
     sim.set_density("s", gaussian(n).ravel())
@@ -227,7 +228,7 @@ try:
     amr_dsl = pops.AmrSystem(n=16, L=1.0, periodic=True, regrid_every=0)
     amr_dsl.set_poisson(rhs="charge_density", solver="geometric_mg", bc="periodic")
     amr_dsl.set_refinement(1e30)
-    amr_dsl.add_equation("s", model=cm_dt_amr, spatial=pops.FiniteVolume(limiter="minmod"),
+    amr_dsl.add_equation("s", model=cm_dt_amr, spatial=pops.FiniteVolume(limiter=Minmod()),
                          time=pops.Explicit())
     amr_dsl.set_density("s", gaussian(16).ravel())
     dt_amr = amr_dsl.step_cfl(cfl)

@@ -27,6 +27,8 @@ On verifie :
 
 Modele natif (isotherme + ChargeDensity) : aucun compilateur requis.
 """
+from pops.numerics.reconstruction import FirstOrder
+from pops.numerics.riemann import Rusanov
 import sys
 
 import numpy as np
@@ -59,7 +61,7 @@ def solve_phi(n, solver, eps=1e-3):
                             transport=pops.IsothermalFlux(),
                             source=pops.PotentialForce(charge=1.0),
                             elliptic=pops.ChargeDensity(charge=1.0)),
-                  spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                  spatial=pops.FiniteVolume(limiter=FirstOrder(), riemann=Rusanov()),
                   time=pops.Explicit())
     sim.set_poisson(rhs="charge_density", solver=solver, bc="periodic")
     x = (np.arange(n) + 0.5) / n
@@ -97,7 +99,7 @@ sim.add_block("ions",
                         transport=pops.IsothermalFlux(),
                         source=pops.PotentialForce(charge=1.0),
                         elliptic=pops.ChargeDensity(charge=1.0)),
-              spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+              spatial=pops.FiniteVolume(limiter=FirstOrder(), riemann=Rusanov()),
               time=pops.Explicit())
 sim.set_poisson(rhs="charge_density", solver="fft_spectral", bc="dirichlet",
                 wall="circle", wall_radius=0.4)
@@ -109,7 +111,7 @@ sim2.add_block("ions",
                          transport=pops.IsothermalFlux(),
                          source=pops.PotentialForce(charge=1.0),
                          elliptic=pops.ChargeDensity(charge=1.0)),
-               spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+               spatial=pops.FiniteVolume(limiter=FirstOrder(), riemann=Rusanov()),
                time=pops.Explicit())
 sim2.set_poisson(rhs="charge_density", solver="dct", bc="periodic")
 msg = err_msg(sim2.solve_fields)
@@ -126,7 +128,7 @@ def rhs_with(solver):
                             transport=pops.IsothermalFlux(),
                             source=pops.PotentialForce(charge=1.0),
                             elliptic=pops.ChargeDensity(charge=1.0)),
-                  spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                  spatial=pops.FiniteVolume(limiter=FirstOrder(), riemann=Rusanov()),
                   time=pops.Explicit())
     sim.set_poisson(rhs="charge_density", solver=solver, bc="periodic")
     x = (np.arange(n) + 0.5) / n

@@ -31,6 +31,8 @@ mirrors this exactly (FE step 0, AB2 thereafter), so the comparison is to machin
     stepped WITHOUT ever storing it -> sim.step surfaces a RuntimeError containing
     "history 'missing.R' with lag=1 was requested but not initialized".
 """
+from pops.numerics.reconstruction import FirstOrder
+from pops.numerics.riemann import Rusanov
 import sys
 
 
@@ -214,7 +216,7 @@ def _run_section_b(t):
         print("-- (B) skipped: model compile could not build the .so: %s --" % str(exc)[:200])
         return None
     sim.add_equation("blk", compiled_model,
-                     spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                     spatial=pops.FiniteVolume(limiter=FirstOrder(), riemann=Rusanov()),
                      time=pops.Explicit(method="euler"))
 
     x = (np.arange(n) + 0.5) / n
@@ -281,7 +283,7 @@ def _run_section_c(t):
         print("-- (C) skipped: model compile could not build the .so: %s --" % str(exc)[:200])
         return None
     sim.add_equation("blk", compiled_model,
-                     spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                     spatial=pops.FiniteVolume(limiter=FirstOrder(), riemann=Rusanov()),
                      time=pops.Explicit(method="euler"))
     sim.set_state("blk", np.stack([np.ones((n, n))]))
     sim.install_program(compiled.so_path)

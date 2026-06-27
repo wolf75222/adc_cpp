@@ -22,6 +22,9 @@ Lance comme un simple script python3 (pas pytest : la CI lance ces tests directe
 proprement si le module _pops n'est pas importable (build absent).
 """
 
+from pops.numerics.variables import Conservative
+from pops.numerics.reconstruction.limiters import Minmod
+from pops.numerics.riemann import Rusanov
 import sys
 
 import numpy as np
@@ -69,8 +72,8 @@ def _build(n, L):
     sim.set_poisson(bc="periodic")
     rho0 = ring(n, L)
     sim.add_equation("s", model=iso_model(n0=float(rho0.mean())),
-                     spatial=pops.FiniteVolume(limiter="minmod", riemann="rusanov",
-                                              variables="conservative"),
+                     spatial=pops.FiniteVolume(limiter=Minmod(), riemann=Rusanov(),
+                                              variables=Conservative()),
                      time=pops.Explicit())
     # Vitesse initiale CONSTANTE non nulle : le transport advecte la bosse (test non trivial).
     sim.set_primitive_state("s", rho=rho0, u=0.7 + 0.0 * rho0, v=-0.4 + 0.0 * rho0)

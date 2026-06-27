@@ -52,7 +52,7 @@ silent changes).
 - `hll` (generic with signed waves, requires wave_speeds) is now also routed by the AMR
   (dispatch_amr_block + dispatch_amr_compiled, same requires-gate as System) and documented everywhere
   (Spatial / FiniteVolume / system.hpp / Sphinx). Visible test:
-  `pops.FiniteVolume(limiter="minmod", riemann="hll", variables="primitive")` on the isothermal 3-var
+  `pops.FiniteVolume(limiter=Minmod(), riemann=HLL(), variables=Primitive())` on the isothermal 3-var
   (test_fv_hll_minmod, System + AmrSystem + explicit rejections).
 
 ## 4. Named couplings: multi-box/MPI-safe
@@ -211,7 +211,7 @@ is wired really is; what is not is documented with file:line, never masked).
    (`IsothermalFluxPolar : IsothermalFlux`) inherits `wave_speeds` -> eligible; the scalar ExB
    (`ExBVelocityPolar`, no `wave_speeds`) -> CLEAR rejection. **Default `rusanov` strictly
    bit-identical** (separate branch, untouched). HLLC/Roe stay rejected (Euler 4-var, no polar energy
-   flux brick). Facade: `pops.PolarMesh` + `pops.FiniteVolume(riemann='hll')`;
+   flux brick). Facade: `pops.PolarMesh` + `pops.FiniteVolume(riemann=HLL())`;
    `pops.capabilities()['riemann']['system_polar'] = ['rusanov', 'hll']`. Test:
    `python/tests/test_polar_hll.py` (rusanov reproducible, hll finite AND distinct from rusanov) +
    `test_polar_rejections.test_polar_rejects_hll_on_scalar_exb`.

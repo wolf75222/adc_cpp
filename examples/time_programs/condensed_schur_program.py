@@ -26,6 +26,8 @@ well-posed SPD Helmholtz operator on it. Run::
 Requires a compiler + a visible Kokkos (``POPS_KOKKOS_ROOT``); prints a skip notice and exits 0
 otherwise. cf. docs/sphinx/reference/time-program.md.
 """
+from pops.numerics.reconstruction import FirstOrder
+from pops.numerics.riemann import Rusanov
 import sys
 
 try:
@@ -177,7 +179,7 @@ def main():
     sim = pops.System(n=n, L=1.0, periodic=True)
     sim.install(compiled,
                 instances={"blk": {"model": passive_model("cs_blk"),
-                                   "spatial": pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                                   "spatial": pops.FiniteVolume(limiter=FirstOrder(), riemann=Rusanov()),
                                    "time": pops.Explicit(method="euler"),
                                    "initial": np.stack([b])}})
     sim.step(0.01)  # dt is irrelevant -- the program is a pure solve

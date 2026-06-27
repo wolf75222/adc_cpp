@@ -75,9 +75,10 @@ def test_catalog_descriptors_are_inspectable_and_validate():
     import pops.diagnostics as diagnostics
     import pops.numerics.reconstruction as reconstruction
     import pops.numerics.riemann as riemann
+    import pops.numerics.variables as variables
 
     checked = 0
-    for module in (riemann, reconstruction, diagnostics):
+    for module in (riemann, reconstruction, variables, diagnostics):
         for name in getattr(module, "__all__", ()):
             obj = getattr(module, name)
             if not callable(obj):
@@ -96,7 +97,8 @@ def test_catalog_descriptors_are_inspectable_and_validate():
             assert instance.validate(), "%s.%s().validate() must be truthy" % (
                 module.__name__, name)
             checked += 1
-    assert checked >= 8, "expected to inspect the riemann/reconstruction/diagnostics catalogs"
+    assert checked >= 8, ("expected to inspect the riemann/reconstruction/variables/diagnostics "
+                          "catalogs")
 
 
 def test_compiled_brick_without_a_manifest_is_a_clear_error():

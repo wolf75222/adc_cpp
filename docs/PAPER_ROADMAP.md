@@ -117,7 +117,7 @@ Capabilities wired and exposed, sufficient to push further without new code.
 - **Increasing RESOLUTION and ORDER**: pure tuning (the diocotron case already runs at variable n).
   This is the M3 path of `todo.md` section 6, and the resolution x order sweep is done (see
   `SWEEP_RESULTS.md`). The WENO5-Z + SSPRK3 order increase is now reachable from Python
-  (adc_cpp #88): `pops.Spatial(limiter="weno5")` (shortcut `weno5=True`) selects the
+  (adc_cpp #88): `pops.Spatial(limiter=WENO5())` (shortcut `weno5=True`) selects the
   WENO5-Z reconstruction in `make_block`, and `pops.Explicit(method="ssprk3")` (shortcut
   `ssprk3=True`) the SSPRK3 integrator, via the native path `add_block`. The default stays unchanged
   (Minmod / SSPRK2, bit-identical to pre-#88). WENO5 is now wired ALSO on the `.so` paths
@@ -235,7 +235,7 @@ Capabilities partially present but incomplete for an advanced Hoffart use.
 
 ### DONE (to date)
 
-- **WENO5-Z / SSPRK3 reachable from Python** (adc_cpp #88): `pops.Spatial(limiter="weno5")` +
+- **WENO5-Z / SSPRK3 reachable from Python** (adc_cpp #88): `pops.Spatial(limiter=WENO5())` +
   `pops.Explicit(method="ssprk3")` via the native path `add_block`, default unchanged.
 - **Order x resolution sweep extended to O5 and to n=384/512** (see `SWEEP_RESULTS.md`): order
   `{O1, O2 minmod, O2 vanleer, O5 weno5}`, up to n=512 (high resolution on ROMEO x64cpu).

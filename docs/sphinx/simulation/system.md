@@ -68,6 +68,8 @@ time policy. In multi-block, the block name indexes `set_density(name)` / `densi
 / `mass(name)`.
 
 ```python
+from pops.numerics.riemann import HLLC
+
 n = 48
 electrons = pops.Model(state=pops.FluidState("compressible", gamma=1.4),
                       transport=pops.CompressibleFlux(),
@@ -80,7 +82,7 @@ ions = pops.Model(state=pops.FluidState("isothermal", cs2=0.5),
 
 sim = pops.System(n=n, L=1.0, periodic=True)
 sim.add_block("electrons", model=electrons,
-              spatial=pops.Spatial(vanleer=True, flux="hllc"),
+              spatial=pops.Spatial(vanleer=True, flux=HLLC()),
               time=pops.IMEX(substeps=10))           # stiff: implicit source, subcycled
 sim.add_block("ions", model=ions, spatial=pops.Spatial(minmod=True), time=pops.Explicit())
 sim.set_poisson(rhs="charge_density", solver="geometric_mg")

@@ -131,6 +131,8 @@ formulas; it reproduces exactly the native bricks `ExBVelocity` (transport) and
 
 ```python
 import pops
+from pops.numerics.riemann import Rusanov
+from pops.numerics.reconstruction.limiters import Minmod
 
 B0 = 1.0      # champ magnetique de fond (porte la derive E x B)
 ALPHA = 1.0   # facteur du second membre elliptique alpha (n - n_i0)
@@ -159,7 +161,7 @@ compiled = diocotron_model(n_i0).compile(backend="production")   # -> CompiledMo
 
 sim = pops.System(n=96, L=1.0, periodic=True)
 sim.add_equation("ne", model=compiled,
-                 spatial=pops.FiniteVolume(limiter="minmod", riemann="rusanov"),
+                 spatial=pops.FiniteVolume(limiter=Minmod(), riemann=Rusanov()),
                  time=pops.Explicit())
 sim.set_poisson(rhs="charge_density", solver="geometric_mg")
 sim.set_density("ne", ne0)
@@ -191,6 +193,8 @@ Example, isothermal DSL transport + native source + native elliptic (excerpt fro
 
 ```python
 import pops
+from pops.numerics.riemann import Rusanov
+from pops.numerics.reconstruction.limiters import Minmod
 
 CS2, QOM, Q = 0.7, -1.0, -1.0
 
@@ -217,7 +221,7 @@ compiled = m.compile(backend="aot")                # -> CompiledModel (adder add
 
 sim = pops.System(n=48, L=1.0, periodic=True)
 sim.add_equation("gas", compiled,
-                 spatial=pops.FiniteVolume(limiter="minmod", riemann="rusanov"),
+                 spatial=pops.FiniteVolume(limiter=Minmod(), riemann=Rusanov()),
                  names=["rho", "rho_u", "rho_v"])
 ```
 
@@ -244,7 +248,7 @@ find a quantity by its meaning (and not by a literal index), essential to inter-
 
 The spatial operator can then reconstruct in primitive variables (`rho`, `u`, `p`) rather than
 conservative, more stable for Euler (positivity of `rho` and `p`); see the
-`variables="primitive"` choice of `pops.FiniteVolume` and the details in [ALGORITHMS.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/ALGORITHMS.md).
+`variables=Primitive()` choice of `pops.FiniteVolume` and the details in [ALGORITHMS.md](https://github.com/wolf75222/adc_cpp/blob/master/docs/ALGORITHMS.md).
 
 ## Flux, sources, eigenvalues, elliptic RHS
 

@@ -7,6 +7,8 @@ steps it under profiling, and asserts the report carries the timed "step" phase 
 It never fakes the engine -- it builds a real pops.System; it self-skips only if _pops/numpy is
 unavailable, and otherwise fails loudly (a setup bug must not masquerade as a skip).
 """
+from pops.numerics.reconstruction import FirstOrder
+from pops.numerics.riemann import Rusanov
 import sys
 
 
@@ -58,7 +60,7 @@ sim2.add_block("gas",
                          transport=pops.IsothermalFlux(),
                          source=pops.NoSource(),
                          elliptic=pops.BackgroundDensity(alpha=1.0, n0=0.0)),
-               spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"), time=pops.Explicit())
+               spatial=pops.FiniteVolume(limiter=FirstOrder(), riemann=Rusanov()), time=pops.Explicit())
 rho = np.ones((N, N), dtype=float)
 sim2.set_state("gas", np.stack([rho, 0.1 * rho, 0.0 * rho]))
 

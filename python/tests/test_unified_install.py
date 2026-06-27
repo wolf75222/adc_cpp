@@ -11,6 +11,13 @@ validated on ROMEO / CI-Kokkos (mirrors test_install_requirement_validation.py).
 lowering, and the section-24 capability/aux/solver validation messages are host-testable WITHOUT a
 full run -- exercised here. cf. docs/sphinx/reference/board-like-dsl.md.
 """
+from pops.numerics.reconstruction import FirstOrder
+from pops.numerics.riemann import HLL
+from pops.numerics.riemann import HLLC
+from pops.numerics.variables import Primitive
+from pops.numerics.riemann import Roe
+from pops.numerics.riemann import Rusanov
+from pops.numerics.reconstruction import WENO5
 import sys
 
 try:
@@ -47,10 +54,13 @@ def test_lower_spatial_accepts_runtime_and_lib():
     (Spec-3 catalog descriptor) to the same add_equation spatial args."""
     sim = pops.System(n=N, L=1.0, periodic=True)
     # Runtime descriptor passes through unchanged.
-    rt = pops.FiniteVolume(limiter="weno5", riemann="hll", variables="primitive")
+    rt = pops.FiniteVolume(limiter=WENO5(), riemann=HLL(), variables=Primitive())
     low = sim._lower_spatial(rt)
     assert low is rt, "runtime Spatial must pass through unchanged"
     # lib descriptor: riemann/reconstruction/positivity_floor -> limiter/flux/recon.
+    # NB pops.lib.spatial.FiniteVolume is the Spec-3 CATALOG descriptor: it stores its scheme
+    # choice as STRING options (lowered to typed tokens by _lower_spatial), distinct from the
+    # runtime pops.FiniteVolume which now requires typed pops.numerics descriptors (Spec 5 sec.7).
     libdesc = pops.lib.spatial.FiniteVolume(riemann="hllc", reconstruction="weno5",
                                            positivity_floor=1e-12)
     low = sim._lower_spatial(libdesc)
@@ -97,7 +107,7 @@ def test_riemann_capability_verbatim():
     sim = pops.System(n=N, L=1.0, periodic=True)
     model = _fake_compiled(hllc=False, prim_names=("rho", "u", "v"))
     try:
-        sim._validate_riemann_capability(model, pops.FiniteVolume(riemann="hllc"))
+        sim._validate_riemann_capability(model, pops.FiniteVolume(riemann=HLLC()))
         raise AssertionError("MISMATCH: hllc without capability should raise")
     except RuntimeError as exc:
         assert str(exc) == "riemann HLLC requires capability 'hllc_star_state'", \
@@ -105,7 +115,7 @@ def test_riemann_capability_verbatim():
         print("OK  riemann HLLC requires capability 'hllc_star_state'")
     # Roe without capability / pressure rejects too.
     try:
-        sim._validate_riemann_capability(model, pops.FiniteVolume(riemann="roe"))
+        sim._validate_riemann_capability(model, pops.FiniteVolume(riemann=Roe()))
         raise AssertionError("MISMATCH: roe without capability should raise")
     except RuntimeError as exc:
         assert "roe_dissipation" in str(exc).lower() or "Roe requires capability" in str(exc), \
@@ -113,7 +123,7 @@ def test_riemann_capability_verbatim():
         print("OK  riemann Roe requires its capability")
     # With the capability emitted, the same flux passes.
     ok_model = _fake_compiled(hllc=True, prim_names=("rho", "u", "v", "p"))
-    sim._validate_riemann_capability(ok_model, pops.FiniteVolume(riemann="hllc"))
+    sim._validate_riemann_capability(ok_model, pops.FiniteVolume(riemann=HLLC()))
     print("OK  riemann capability accepted once the model emits it")
 
 
@@ -240,7 +250,7 @@ def test_install_end_to_end_kokkos():
         sim_missing.install(
             compiled,
             instances={"plasma": {"state": "U", "initial": u0,
-                                  "spatial": pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                                  "spatial": pops.FiniteVolume(limiter=FirstOrder(), riemann=Rusanov()),
                                   "time": pops.Explicit(method="euler")}},
             solvers={"phi": pops.lib.fields.GeometricMG()})
         raise AssertionError("MISMATCH: unified install accepted a simulation missing B_z")
@@ -254,7 +264,7 @@ def test_install_end_to_end_kokkos():
     sim_ok.install(
         compiled,
         instances={"plasma": {"state": "U", "initial": u0,
-                              "spatial": pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                              "spatial": pops.FiniteVolume(limiter=FirstOrder(), riemann=Rusanov()),
                               "time": pops.Explicit(method="euler")}},
         aux={"B_z": 3.0 * np.ones(N * N)},
         solvers={"phi": pops.lib.fields.GeometricMG()})
@@ -311,7 +321,7 @@ def test_install_routes_runtime_param_kokkos():
         # No "model" key -> install uses compiled.model (the raw Model) and AUTO-resolves it via
         # AOT (it declares a runtime param); the default pops.Explicit() == SSPRK2 is AOT-compatible.
         instances={"plasma": {"state": "U", "initial": u0,
-                              "spatial": pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                              "spatial": pops.FiniteVolume(limiter=FirstOrder(), riemann=Rusanov()),
                               "time": pops.Explicit()}},
         params={"cs2": 1.0},
         solvers={"phi": pops.lib.fields.GeometricMG()})
@@ -337,7 +347,7 @@ def test_install_routes_runtime_param_kokkos():
         sim_euler.install(
             compiled,
             instances={"plasma": {"state": "U", "initial": u0,
-                                  "spatial": pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                                  "spatial": pops.FiniteVolume(limiter=FirstOrder(), riemann=Rusanov()),
                                   "time": pops.Explicit(method="euler")}},
             params={"cs2": 1.0},
             solvers={"phi": pops.lib.fields.GeometricMG()})
@@ -401,7 +411,7 @@ def test_install_native_end_to_end_kokkos():
     bz = 3.0 * np.ones(N * N)
 
     def _fv():
-        return pops.FiniteVolume(limiter="none", riemann="rusanov")
+        return pops.FiniteVolume(limiter=FirstOrder(), riemann=Rusanov())
 
     # NATIVE via the unified entry: compiled=None, the instance carries the native model + time.
     sim_install = pops.System(n=N, L=1.0, periodic=True)

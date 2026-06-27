@@ -24,6 +24,8 @@ captured into the step closure), reused across every step and every Krylov itera
     1e-6, the solve changed the state, and the offline solve took > 1 iteration. Self-skips (exit 0)
     without numpy / _pops / install_program / a compiler / a visible Kokkos -- never fakes the engine.
 """
+from pops.numerics.reconstruction import FirstOrder
+from pops.numerics.riemann import Rusanov
 import sys
 
 
@@ -233,7 +235,7 @@ def _run_section_b(t):
         print("-- (B) skipped: model compile could not build the .so: %s --" % str(exc)[:200])
         return None
     sim.add_equation("blk", compiled_model,
-                     spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                     spatial=pops.FiniteVolume(limiter=FirstOrder(), riemann=Rusanov()),
                      time=pops.Explicit(method="euler"))
 
     x = (np.arange(n) + 0.5) / n

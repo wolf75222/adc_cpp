@@ -42,6 +42,8 @@ history runtime path); each step solves from phi^n = 0.
 Self-skips (exit 0) without numpy / _pops / install_program / a compiler / a visible Kokkos -- never
 fakes the engine (project policy: no fake pops in tests).
 """
+from pops.numerics.reconstruction import FirstOrder
+from pops.numerics.riemann import Rusanov
 import sys
 
 
@@ -363,7 +365,7 @@ def _run_section_b(t):
             print("-- (B) skipped: model compile could not build the .so: %s --" % str(exc)[:160])
             return None, None
         sim.add_equation("blk", compiled_model,
-                         spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                         spatial=pops.FiniteVolume(limiter=FirstOrder(), riemann=Rusanov()),
                          time=pops.Explicit(method="euler"))
         sim.set_poisson("charge_density", "geometric_mg")
         sim.set_magnetic_field(_BZ * np.ones(_N * _N))
@@ -437,7 +439,7 @@ def _run_section_b(t):
                 sim_n.set_magnetic_field(_BZ * np.ones(_N * _N))
                 sim_n.add_equation(
                     "blk", native_model,
-                    spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                    spatial=pops.FiniteVolume(limiter=FirstOrder(), riemann=Rusanov()),
                     time=pops.Split(hyperbolic=pops.Explicit(method="euler"),
                                    source=pops.CondensedSchur(theta=0.5, alpha=_ALPHA)))
             except Exception as exc:  # noqa: BLE001 -- Split/CondensedSchur wiring unavailable here

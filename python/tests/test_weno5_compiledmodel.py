@@ -17,6 +17,8 @@ On verifie, pour le MEME euler_poisson et limiter="weno5", flux rusanov :
 
 S'auto-saute (exit 0) sans compilateur / en-tetes pops, comme test_dsl_aot / test_dsl_production.
 """
+from pops.numerics.variables import Conservative
+from pops.numerics.riemann import Rusanov
 import os
 import shutil
 import tempfile
@@ -69,7 +71,7 @@ def main():
             sys = pops.System(n=n, L=L, periodic=True)
             lim = {"none": dict(none=True), "minmod": dict(minmod=True),
                    "weno5": dict(weno5=True)}[limiter]
-            sys.add_block("gas", spec, spatial=pops.Spatial(flux="rusanov", recon="conservative",
+            sys.add_block("gas", spec, spatial=pops.Spatial(flux=Rusanov(), recon=Conservative(),
                                                            **lim), time=pops.Explicit())
             sys.set_poisson(rhs="charge_density", solver="geometric_mg")
             sys.set_state("gas", Uflat)
@@ -154,8 +156,8 @@ def main():
 
         def build_ref_step():
             sys = pops.System(n=n, L=L, periodic=True)
-            sys.add_block("gas", spec, spatial=pops.Spatial(weno5=True, flux="rusanov",
-                                                           recon="conservative"),
+            sys.add_block("gas", spec, spatial=pops.Spatial(weno5=True, flux=Rusanov(),
+                                                           recon=Conservative()),
                           time=pops.Explicit())
             sys.set_poisson(rhs="charge_density", solver="geometric_mg")
             sys.set_state("gas", Uflat)

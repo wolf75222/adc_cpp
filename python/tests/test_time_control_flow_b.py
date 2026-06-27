@@ -18,6 +18,8 @@ Builds on ADC-404a (Scalar/Bool IR, P.norm2/P.dot, P.while_). This slice adds:
     and match the offline x_N = target + 0.5^N (x0 - target); if_ applies the body iff the runtime
     condition holds. Self-skips without numpy / _pops / a compiler / Kokkos (never faking the engine).
 """
+from pops.numerics.reconstruction import FirstOrder
+from pops.numerics.riemann import Rusanov
 import sys
 
 
@@ -203,7 +205,7 @@ def _run_section_b(t):
         except RuntimeError as exc:
             print("-- (B) skipped: model compile failed: %s --" % str(exc)[:140])
             return None
-        s.add_equation("blk", cm, spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+        s.add_equation("blk", cm, spatial=pops.FiniteVolume(limiter=FirstOrder(), riemann=Rusanov()),
                        time=pops.Explicit(method="euler"))
         x = (np.arange(n) + 0.5) / n
         X, Y = np.meshgrid(x, x, indexing="ij")

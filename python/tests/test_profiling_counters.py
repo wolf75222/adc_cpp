@@ -12,6 +12,8 @@ Kokkos/ROMEO, so here we assert those lines simply EXIST and read 0 on the nativ
 
 Real engine only: it builds a real pops.System and self-skips only if _pops/numpy is unavailable.
 """
+from pops.numerics.reconstruction import FirstOrder
+from pops.numerics.riemann import Rusanov
 import sys
 
 
@@ -46,7 +48,7 @@ sim.add_block("gas",
                         transport=pops.IsothermalFlux(),
                         source=pops.NoSource(),
                         elliptic=pops.BackgroundDensity(alpha=1.0, n0=0.0)),
-              spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"), time=pops.Explicit())
+              spatial=pops.FiniteVolume(limiter=FirstOrder(), riemann=Rusanov()), time=pops.Explicit())
 rho = np.ones((N, N), dtype=float)
 sim.set_state("gas", np.stack([rho, 0.1 * rho, 0.0 * rho]))
 
@@ -89,7 +91,7 @@ sim_off.add_block("gas",
                             transport=pops.IsothermalFlux(),
                             source=pops.NoSource(),
                             elliptic=pops.BackgroundDensity(alpha=1.0, n0=0.0)),
-                  spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                  spatial=pops.FiniteVolume(limiter=FirstOrder(), riemann=Rusanov()),
                   time=pops.Explicit())
 sim_off.set_state("gas", np.stack([rho, 0.1 * rho, 0.0 * rho]))
 sim_off.step(1e-3)

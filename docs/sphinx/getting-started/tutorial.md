@@ -148,7 +148,8 @@ the neutralizing ionic background `n_i0 = ne0.mean()` (solvability of the period
 
 These three choices are passed to `add_equation` / `set_poisson` (step 7):
 
-- spatial: `pops.FiniteVolume(limiter="minmod", riemann="rusanov")`, MUSCL minmod
+- spatial: `pops.FiniteVolume(limiter=Minmod(), riemann=Rusanov())` (from
+  `pops.numerics.reconstruction.limiters` / `pops.numerics.riemann`), MUSCL minmod
   reconstruction + Rusanov Riemann flux;
 - time: `pops.Explicit()`;
 - Poisson: `sim.set_poisson(rhs="charge_density", solver="geometric_mg")`, right-hand side =

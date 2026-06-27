@@ -26,6 +26,7 @@ CE QUI EST COUVERT ICI (et ses LIMITES, documentees honnetement) :
 
 Invariants par assert ; imprime "OK test_role_aware_bricks" en cas de succes.
 """
+from pops.numerics.reconstruction.limiters import Minmod
 import sys
 
 import numpy as np
@@ -54,7 +55,7 @@ sim.add_block("e",
                         transport=pops.IsothermalFlux(),
                         source=pops.MagneticLorentzForce(charge=q),
                         elliptic=pops.ChargeDensity(charge=0.0)),  # pas de couplage Poisson
-              spatial=pops.FiniteVolume(limiter="minmod"), time=pops.Explicit())
+              spatial=pops.FiniteVolume(limiter=Minmod()), time=pops.Explicit())
 sim.set_poisson(rhs="charge_density", solver="geometric_mg", bc="periodic")
 sim.set_magnetic_field(B0 * np.ones(n * n))
 # etat uniforme rho=1, m=(0, rho*v0) -> div F = 0 -> R == source magnetique.
@@ -74,7 +75,7 @@ sE.add_block("g",
                        transport=pops.CompressibleFlux(),
                        source=pops.MagneticLorentzForce(charge=q),
                        elliptic=pops.ChargeDensity(charge=0.0)),
-             spatial=pops.FiniteVolume(limiter="minmod"), time=pops.Explicit())
+             spatial=pops.FiniteVolume(limiter=Minmod()), time=pops.Explicit())
 sE.set_poisson(rhs="charge_density", solver="geometric_mg", bc="periodic")
 sE.set_magnetic_field(B0 * np.ones(n * n))
 sE.set_primitive_state("g", rho=rho0 * ones, u=0.0 * ones, v=v0 * ones, p=1.0 * ones)
@@ -100,7 +101,7 @@ def run_potential():
                           transport=pops.IsothermalFlux(),
                           source=pops.PotentialForce(charge=-1.0),   # lit c_rho, ecrit c_mx/c_my
                           elliptic=pops.ChargeDensity(charge=-1.0)),  # second membre Poisson = q*u[c_rho]
-                spatial=pops.FiniteVolume(limiter="minmod"), time=pops.Explicit())
+                spatial=pops.FiniteVolume(limiter=Minmod()), time=pops.Explicit())
     s.set_poisson(rhs="charge_density", solver="geometric_mg", bc="periodic")
     s.set_density("e", rho_bump.copy())
     for _ in range(8):

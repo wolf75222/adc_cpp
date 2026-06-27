@@ -39,6 +39,8 @@ Usage
 
 from __future__ import annotations
 
+from pops.numerics.reconstruction.limiters import Minmod
+from pops.numerics.riemann import Rusanov
 import argparse
 import json
 import os
@@ -135,7 +137,7 @@ def compile_and_build(model: "Model", ne0: np.ndarray, L: float, outdir: Path):
                                      POPS_INCLUDE, backend=backend)
             sim = pops.System(n=ne0.shape[0], L=L, periodic=True)
             sim.add_equation("ne", model=compiled,
-                             spatial=pops.FiniteVolume(limiter="minmod", riemann="rusanov"),
+                             spatial=pops.FiniteVolume(limiter=Minmod(), riemann=Rusanov()),
                              time=pops.Explicit())
             sim.set_poisson(rhs="charge_density", solver="geometric_mg")
             sim.set_density("ne", ne0)

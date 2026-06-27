@@ -11,6 +11,9 @@ Builds two identical isothermal Systems that differ ONLY by vacuum_floor and sho
 Native bricks only (no DSL / no compiler). source=NoSource isolates the transport (where the floor
 lives): phi is identical between the two runs, so any difference comes from the velocity bound.
 """
+from pops.numerics.variables import Conservative
+from pops.numerics.reconstruction.limiters import Minmod
+from pops.numerics.riemann import Rusanov
 import sys
 
 import numpy as np
@@ -41,7 +44,7 @@ def run(n, L, vacuum_floor, rho_scale, nsteps, dt):
             source=pops.NoSource(),
             elliptic=pops.BackgroundDensity(alpha=1.0, n0=0.0),
         ),
-        spatial=pops.FiniteVolume(limiter="minmod", riemann="rusanov", variables="conservative"),
+        spatial=pops.FiniteVolume(limiter=Minmod(), riemann=Rusanov(), variables=Conservative()),
         time=pops.Explicit(),
     )
     x = (np.arange(n) + 0.5) * (L / n)

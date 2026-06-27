@@ -28,6 +28,9 @@ Validations :
      erreur claire (le splitting passe par add_equation) ; theta/kind hors domaine -> ValueError.
 """
 
+from pops.numerics.variables import Conservative
+from pops.numerics.reconstruction.limiters import Minmod
+from pops.numerics.riemann import Rusanov
 import sys
 import numpy as np
 
@@ -81,7 +84,7 @@ def build_amr(n=24, L=1.0, B0=4.0, alpha=3.0, theta=1.0, with_schur=True, strang
     sim.add_equation(
         "electrons",
         model=iso_model(cs2=cs2, alpha=alpha),
-        spatial=pops.FiniteVolume(limiter="minmod", riemann="rusanov", variables="conservative"),
+        spatial=pops.FiniteVolume(limiter=Minmod(), riemann=Rusanov(), variables=Conservative()),
         time=time_policy,
     )
     rho0, u0, v0 = smooth_state(n, L)

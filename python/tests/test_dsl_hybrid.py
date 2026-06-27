@@ -14,6 +14,9 @@ Pour le meme etat et le meme schema (minmod + rusanov + conservatif), eval_rhs E
 bloc hybride doivent egaler ceux du bloc natif a la precision machine (< 1e-9). On verifie aussi que
 le bloc hybride AVANCE dans le System (masse conservee en periodique). Lance avec python3.
 """
+from pops.numerics.variables import Conservative
+from pops.numerics.reconstruction.limiters import Minmod
+from pops.numerics.riemann import Rusanov
 import os
 import shutil
 import tempfile
@@ -78,7 +81,7 @@ def main():
     U = init_state(n)
     Uflat = U.reshape(-1).tolist()
     names = ["rho", "rho_u", "rho_v"]
-    spatial = pops.FiniteVolume(limiter="minmod", riemann="rusanov", variables="conservative")
+    spatial = pops.FiniteVolume(limiter=Minmod(), riemann=Rusanov(), variables=Conservative())
 
     # Oracle 100% natif : CompositeModel<IsothermalFlux, PotentialForce, ChargeDensity> via add_block.
     spec = pops.Model(state=pops.FluidState("isothermal", cs2=CS2),
@@ -164,7 +167,7 @@ def main():
         co1j = m1.compile(backend="prototype", so_path=os.path.join(tmp, "h1j.so"), include=INCLUDE)
         assert co1j.adder == "add_dynamic_block"
         jit = pops.System(n=n, L=L, periodic=True)
-        jit.add_equation("gas", co1j, spatial=pops.FiniteVolume(limiter="minmod", riemann="rusanov"),
+        jit.add_equation("gas", co1j, spatial=pops.FiniteVolume(limiter=Minmod(), riemann=Rusanov()),
                          names=names)
         jit.set_poisson(rhs="charge_density", solver="geometric_mg")
         jit.set_state("gas", Uflat)

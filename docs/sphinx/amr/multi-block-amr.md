@@ -10,6 +10,8 @@ treatment (`explicit` or `imex`), and its multirate (`substeps` / `stride`). The
 single-level engine of `System`.
 
 ```python
+from pops.numerics.riemann import HLLC
+
 sim = pops.AmrSystem(n=96, L=1.0, periodic=True)
 
 electrons = pops.Model(state=pops.FluidState("compressible", gamma=1.4),
@@ -22,7 +24,7 @@ ions = pops.Model(state=pops.FluidState("isothermal", cs2=0.5),
                  elliptic=pops.ChargeDensity(charge=+1.0))
 
 sim.add_block("electrons", model=electrons,
-              spatial=pops.Spatial(vanleer=True, flux="hllc"), time=pops.IMEX(substeps=10))
+              spatial=pops.Spatial(vanleer=True, flux=HLLC()), time=pops.IMEX(substeps=10))
 sim.add_block("ions", model=ions,
               spatial=pops.Spatial(minmod=True), time=pops.Explicit())
 sim.set_refinement(0.05)

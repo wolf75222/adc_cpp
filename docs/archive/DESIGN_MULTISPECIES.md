@@ -127,6 +127,8 @@ Python **configures** the system; the cell / AMR / MPI / GPU loops stay in C++.
 
 ```python
 import pops
+from pops.numerics.riemann import Rusanov, HLLC
+from pops.numerics.reconstruction.limiters import Minmod, VanLeer
 
 mesh = pops.Mesh2D(nx=512, ny=512, xlim=(0,1), ylim=(0,1),
                   amr=pops.AMR(levels=3, ratio=2))
@@ -134,12 +136,12 @@ sim  = pops.Simulation(mesh, backend="kokkos")   # cpu / openmp / mpi / kokkos
 
 sim.add_equation(name="electrons",
     model=pops.models.ElectronEuler(charge=-1, mass=1, gamma=5/3),
-    spatial=pops.FiniteVolume(reconstruction="vanleer", flux="hllc"),
+    spatial=pops.FiniteVolume(reconstruction=VanLeer(), riemann=HLLC()),
     time=pops.Implicit(scheme="imex", substeps=10))
 
 sim.add_equation(name="ions",
     model=pops.models.IonEuler(charge=+1, mass=1836, gamma=5/3),
-    spatial=pops.FiniteVolume(reconstruction="minmod", flux="rusanov"),
+    spatial=pops.FiniteVolume(reconstruction=Minmod(), riemann=Rusanov()),
     time=pops.Explicit(scheme="ssprk2", substeps=1))
 
 sim.add_poisson(unknown="phi",

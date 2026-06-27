@@ -13,6 +13,8 @@
     binding) and locally once _pops is rebuilt; skips if _pops lacks install_program, numpy/_pops is
     absent, no compiler/Kokkos is visible, or the .so compile fails -- never faking the engine.
 """
+from pops.numerics.reconstruction import FirstOrder
+from pops.numerics.riemann import Rusanov
 import sys
 
 
@@ -98,7 +100,7 @@ def make_sim():
     n = 24
     sim = pops.System(n=n, L=1.0, periodic=True)
     sim.add_block("ions", transport_model(),
-                  spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                  spatial=pops.FiniteVolume(limiter=FirstOrder(), riemann=Rusanov()),
                   time=pops.Explicit(method="euler"))
     sim.set_poisson("charge_density", "geometric_mg")
     x = (np.arange(n) + 0.5) / n

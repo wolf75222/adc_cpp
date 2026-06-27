@@ -18,6 +18,8 @@ chain the hard-coded `rk4` macro emits (solve_fields + rhs + linear_combine, no 
 
 Pure-Python IR construction is always available; the compiled section gates on the full toolchain.
 """
+from pops.numerics.reconstruction import FirstOrder
+from pops.numerics.riemann import Rusanov
 import sys
 
 
@@ -153,7 +155,7 @@ def _run_section_b(t):
         except RuntimeError as exc:
             print("-- (B) skipped: model compile failed: %s --" % str(exc)[:160])
             return None
-        sim.add_equation("blk", cm, spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+        sim.add_equation("blk", cm, spatial=pops.FiniteVolume(limiter=FirstOrder(), riemann=Rusanov()),
                          time=pops.Explicit(method="euler"))
         sim.set_state("blk", np.stack([rho0]))
         sim.install_program(handle.so_path)

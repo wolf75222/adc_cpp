@@ -20,6 +20,8 @@ Run::
 
     python3 examples/spec4/adc_cases_style_driver.py
 """
+from pops.numerics.reconstruction import FirstOrder
+from pops.numerics.riemann import Rusanov
 import sys
 
 from pops.lib.time import forward_euler
@@ -124,7 +126,7 @@ def main():
         instances={
             "plasma": {
                 "initial": initial,
-                "spatial": pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                "spatial": pops.FiniteVolume(limiter=FirstOrder(), riemann=Rusanov()),
                 "time": pops.Explicit(method="euler"),
             }
         },

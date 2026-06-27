@@ -28,6 +28,8 @@ The compiled .so AMR path REJECTS positivity_floor > 0 (flat ABI, no floor slot)
 facade guards (python/pops/__init__.py, python/amr_system.cpp) and the C++ no-Density reject in
 tests/test_amr_positivity_floor.cpp; not re-tested here to keep this test compiler-free.
 """
+from pops.numerics.riemann import Rusanov
+from pops.numerics.reconstruction import WENO5
 import sys
 
 import numpy as np
@@ -80,7 +82,7 @@ def build(pf, regrid_every=0, refine=1e30):
     s = pops.AmrSystem(n=n, L=1.0, periodic=True, regrid_every=regrid_every)
     s.set_refinement(refine)
     s.add_block("gas", iso_spec(),
-                spatial=pops.Spatial(limiter="weno5", flux="rusanov", positivity_floor=pf),
+                spatial=pops.Spatial(limiter=WENO5(), flux=Rusanov(), positivity_floor=pf),
                 time=pops.Explicit())
     return s
 
@@ -144,9 +146,9 @@ band[:, n // 3:2 * n // 3] = 1.0  # contrast-1e6 band (Density role, component 0
 sm = pops.AmrSystem(n=n, L=1.0, periodic=True)
 sm.set_refinement(1e30)
 sm.add_block("a", iso_spec(),
-             spatial=pops.Spatial(limiter="weno5", flux="rusanov", positivity_floor=1e-8))
+             spatial=pops.Spatial(limiter=WENO5(), flux=Rusanov(), positivity_floor=1e-8))
 sm.add_block("b", iso_spec(),
-             spatial=pops.Spatial(limiter="weno5", flux="rusanov", positivity_floor=1e-8))
+             spatial=pops.Spatial(limiter=WENO5(), flux=Rusanov(), positivity_floor=1e-8))
 sm.set_density("a", band.ravel().copy())
 sm.set_density("b", band.ravel().copy())
 step_n(sm, 5)

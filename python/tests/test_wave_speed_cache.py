@@ -26,6 +26,8 @@ test C++ tests/test_wave_speed_cache_engagement.cpp (compteur de wave_speeds, ca
 les verifs ON==OFF ci-dessous reussiraient meme si le cache devenait un no-op silencieux.
 Modele natif IsothermalFlux (expose wave_speeds) : aucun compilateur requis.
 """
+from pops.numerics.reconstruction import FirstOrder
+from pops.numerics.riemann import HLL, Rusanov
 import sys
 
 import numpy as np
@@ -54,7 +56,9 @@ CS2 = 0.5
 N = 32
 
 
-def make_sim(cache, riemann="hll", limiter="none", time=None):
+def make_sim(cache, riemann=None, limiter=None, time=None):
+    riemann = riemann if riemann is not None else HLL()
+    limiter = limiter if limiter is not None else FirstOrder()
     sim = pops.System(n=N, L=1.0, periodic=True)
     sim.add_block("ions",
                   pops.Model(state=pops.FluidState("isothermal", cs2=CS2),
@@ -93,7 +97,7 @@ s_def.add_block("ions",
                           transport=pops.IsothermalFlux(),
                           source=pops.NoSource(),
                           elliptic=pops.BackgroundDensity(alpha=1.0, n0=0.0)),
-                spatial=pops.FiniteVolume(limiter="none", riemann="hll"),
+                spatial=pops.FiniteVolume(limiter=FirstOrder(), riemann=HLL()),
                 time=pops.Explicit())
 s_def.set_state("ions", U0)
 for _ in range(20):
@@ -102,12 +106,12 @@ chk(np.array_equal(np.array(s_def.get_state("ions")), A_off),
     "FiniteVolume sans wave_speed_cache == cache OFF (bit-identique)")
 
 print("== (3) garde riemann : cache + rusanov -> erreur ==")
-msg = err_msg(lambda: make_sim(cache=True, riemann="rusanov"))
+msg = err_msg(lambda: make_sim(cache=True, riemann=Rusanov()))
 chk("wave_speed_cache" in msg and "hll" in msg,
     f"rusanov + cache rejete ({msg[:60]}...)")
 
 print("== (4) garde temps : cache + IMEX -> erreur ==")
-msg = err_msg(lambda: make_sim(cache=True, riemann="hll", time=pops.IMEX()))
+msg = err_msg(lambda: make_sim(cache=True, riemann=HLL(), time=pops.IMEX()))
 chk("wave_speed_cache" in msg,
     f"IMEX + cache rejete ({msg[:60]}...)")
 
@@ -130,7 +134,7 @@ def make_mode_then_cache():
                             transport=pops.IsothermalFlux(),
                             source=pops.NoSource(),
                             elliptic=pops.BackgroundDensity(alpha=1.0, n0=0.0)),
-                  spatial=pops.FiniteVolume(limiter="none", riemann="hll",
+                  spatial=pops.FiniteVolume(limiter=FirstOrder(), riemann=HLL(),
                                            wave_speed_cache=True),  # doit lever (mode disque actif)
                   time=pops.Explicit())
 
@@ -163,7 +167,7 @@ for backend, adder in (("aot", "add_compiled_block"),
 
     def add_eq_cache(fk=fake):
         s = pops.System(n=16, L=1.0, periodic=True)
-        s.add_equation("g", fk, spatial=pops.FiniteVolume(limiter="none", riemann="hll",
+        s.add_equation("g", fk, spatial=pops.FiniteVolume(limiter=FirstOrder(), riemann=HLL(),
                                                          wave_speed_cache=True),
                        time=pops.Explicit())
     m6 = err_msg(add_eq_cache)

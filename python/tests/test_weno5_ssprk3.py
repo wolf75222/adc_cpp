@@ -2,7 +2,7 @@
 """WENO5-Z + SSPRK3 accessibles depuis l'API Python (pops.Spatial / pops.Explicit).
 
 Verifie :
- (1) pops.Spatial(limiter="weno5") (et le raccourci weno5=True) construit et tourne un bloc
+ (1) pops.Spatial(limiter=WENO5()) (et le raccourci weno5=True) construit et tourne un bloc
      end-to-end : plus d'erreur "limiter inconnu", masse conservee, etat fini. Idem en flux hllc.
  (2) pops.Explicit(method="ssprk3") (et ssprk3=True) selectionne le schema temporel d'ordre 3 ;
      le DEFAUT reste SSPRK2 (kind="explicit").
@@ -15,6 +15,9 @@ Verifie :
      plus de rejet de limiteur (grille .so / bloc natif a block_n_ghost = 3 ghosts) ; sur un .so
      inexistant l'erreur est un echec de dlopen, pas un rejet weno5.
 """
+from pops.numerics.riemann import HLLC, Rusanov
+from pops.numerics.reconstruction import WENO5
+from pops.numerics.reconstruction.limiters import Minmod
 import sys
 
 import numpy as np
@@ -66,17 +69,17 @@ def run(n, limiter, flux, method, nsteps=10, cfl=0.2):
     return s
 
 
-# --- 1. pops.Spatial(limiter="weno5") end-to-end (plus de "limiter inconnu") -----
+# --- 1. pops.Spatial(limiter=WENO5()) end-to-end (plus de "limiter inconnu") -----
 print("== pops.Spatial(limiter='weno5') : construit + tourne ==")
 n = 48
-sw = run(n, "weno5", "rusanov", "ssprk3")
+sw = run(n, WENO5(), Rusanov(), "ssprk3")
 dw = np.array(sw.density("gas"))
 chk(np.isfinite(dw).all() and dw.min() > 0, "weno5+rusanov+ssprk3 : etat fini, densite positive")
 m0 = float(smooth_rho(n).sum())
 chk(abs(sw.mass("gas") - m0) < 1e-7 * abs(m0), "weno5 : masse conservee")
 # raccourci weno5=True + flux hllc
 sw2 = pops.System(n=32, L=1.0, periodic=True)
-sw2.add_block("gas", model=gas(), spatial=pops.Spatial(weno5=True, flux="hllc"),
+sw2.add_block("gas", model=gas(), spatial=pops.Spatial(weno5=True, flux=HLLC()),
               time=pops.Explicit(ssprk3=True))
 sw2.set_poisson(); sw2.set_density("gas", smooth_rho(32))
 for _ in range(8):
@@ -94,7 +97,7 @@ chk(raises(lambda: pops.Explicit(method="rk4")), "Explicit : methode inconnue le
 # --- 3. NO-DEFAULT-CHANGE : minmod + SSPRK2 bit-identique ------------------------
 print("== no-default-change : minmod/SSPRK2 (defaut) bit-identique ==")
 # Oracle : bloc cree avec les valeurs par DEFAUT (Spatial()/Explicit()).
-s_def = run(64, "minmod", "rusanov", "ssprk2")  # method explicite mais == defaut
+s_def = run(64, Minmod(), Rusanov(), "ssprk2")  # method explicite mais == defaut
 d_def = np.array(s_def.density("gas"))
 # Reference : memes etapes, en laissant TOUS les defauts implicites (Spatial(), Explicit()).
 s_ref = pops.System(n=64, L=1.0, periodic=True)

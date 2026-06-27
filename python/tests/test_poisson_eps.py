@@ -7,6 +7,7 @@
    verifie une solution manufacturee LISSE (Dirichlet), la coherence (eps(x) modifie bien phi), la
    non-regression (champ uniforme=1 == operateur sans eps) et le refus avec le solveur 'fft'.
 """
+from pops.numerics.riemann import Rusanov
 import numpy as np
 
 import pops
@@ -36,7 +37,7 @@ def _density(n):
 def phi_set_poisson(eps, n=64):
     sim = pops.System(n=n, L=1.0, periodic=True)
     sim.add_block("gas", model=_charge_model(),
-                  spatial=pops.Spatial(flux="rusanov"), time=pops.Explicit())
+                  spatial=pops.Spatial(flux=Rusanov()), time=pops.Explicit())
     sim.set_density("gas", _density(n).reshape(-1).tolist())
     sim.set_poisson(rhs="charge_density", solver="fft", epsilon=eps)
     sim.solve_fields()
@@ -56,7 +57,7 @@ def main():
     # meme resultat via l'EPM compose (div_eps_grad(2.0))
     sim = pops.System(n=n, L=1.0, periodic=True)
     sim.add_block("gas", model=_charge_model(),
-                  spatial=pops.Spatial(flux="rusanov"), time=pops.Explicit())
+                  spatial=pops.Spatial(flux=Rusanov()), time=pops.Explicit())
     sim.set_density("gas", _density(n).reshape(-1).tolist())
     sim.add_elliptic_model("poisson",
                            pops.elliptic(operator=pops.div_eps_grad(2.0), rhs=pops.charge_density(),

@@ -141,9 +141,11 @@ This is the jet-crossing run:
 
 ```python
 import numpy as np
+from pops.numerics.riemann import Rusanov
+from pops.numerics.reconstruction import FirstOrder
 sim = pops.System(n=64, L=1.0, periodic=True)
 sim.add_equation("mom", model=compiled,
-                 spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                 spatial=pops.FiniteVolume(limiter=FirstOrder(), riemann=Rusanov()),
                  time=pops.Explicit())
 sim.set_state("mom", crossing_state(64, ma=2.0))   # initial 15-moment field, shape (15, 64, 64)
 for _ in range(10):
@@ -151,7 +153,7 @@ for _ in range(10):
 U = np.array(sim.get_state("mom"))                 # (15, 64, 64), finite, mass conserved
 ```
 
-`pops.FiniteVolume(limiter="none", riemann="rusanov")` selects the finite-volume scheme, no slope
+`pops.FiniteVolume(limiter=FirstOrder(), riemann=Rusanov())` selects the finite-volume scheme, no slope
 limiter, and the Rusanov numerical flux; `pops.Explicit()` is the default explicit integrator
 (SSP-RK2). `set_state` loads the full moment field, `step_cfl(0.4)` advances one CFL-limited step.
 `crossing_state` builds the two-jet initial condition (it lives in the case's `model.py`).
@@ -163,17 +165,20 @@ Rusanov. It needs *signed* wave speeds, which the generator produces when you bu
 path:
 
 ```python
+from pops.numerics.riemann import HLL
+from pops.numerics.reconstruction import FirstOrder
+
 m_exact  = gmom.build_moment_model("hyqmom15_exact", 4, hyqmom_closure, exact_speeds=True)
 compiled = m_exact.compile("hyqmom15_exact.so", pops.pops_include(), backend="aot")
 
 sim = pops.System(n=64, L=1.0, periodic=True)
 sim.add_equation("mom", model=compiled,
-                 spatial=pops.FiniteVolume(limiter="none", riemann="hll"),
+                 spatial=pops.FiniteVolume(limiter=FirstOrder(), riemann=HLL()),
                  time=pops.Explicit())
 ```
 
 `exact_speeds=True` is already the generator default; it is shown here to make the intent explicit.
-Asking for `riemann="hll"` on a model that has no signed wave speeds raises an error, which is your
+Asking for `riemann=HLL()` on a model that has no signed wave speeds raises an error, which is your
 cue to rebuild with the exact path.
 
 ### 5b-roe: generic Roe (matches the reference ROE scheme)
@@ -186,16 +191,19 @@ pressure, so it works for a moment hierarchy. It is additive to `exact_speeds` (
 the maximum wave speed for the CFL step), and it needs the `aot` or `production` backend.
 
 ```python
+from pops.numerics.riemann import Roe
+from pops.numerics.reconstruction import FirstOrder
+
 m_roe   = gmom.build_moment_model("hyqmom15_roe", 4, hyqmom_closure, roe=True)
 compiled = m_roe.compile("hyqmom15_roe.so", pops.pops_include(), backend="aot")
 
 sim = pops.System(n=64, L=1.0, periodic=True)
 sim.add_equation("mom", model=compiled,
-                 spatial=pops.FiniteVolume(limiter="none", riemann="roe"),
+                 spatial=pops.FiniteVolume(limiter=FirstOrder(), riemann=Roe()),
                  time=pops.Explicit())
 ```
 
-`riemann="roe"` matches the reference Matlab `space_scheme='ROE'`. The
+`riemann=Roe()` matches the reference Matlab `space_scheme='ROE'`. The
 `adc_cases/hyqmom15/runs/run_fluid_wave.py` case uses this path and pins a one-step ROE golden against
 the reference `flux_ROE` to about `1e-17`; on a smooth eigenmode it measures `L2_roe < L2_hll`.
 
@@ -207,6 +215,8 @@ and a Poisson right-hand side, then turn on the system Poisson solver. The sourc
 
 ```python
 import pops
+from pops.numerics.riemann import HLL
+from pops.numerics.reconstruction import FirstOrder
 
 def lorentz(m_, M_):                      # E = -grad phi
     gx, gy = m_.aux("grad_x"), m_.aux("grad_y")
@@ -225,7 +235,7 @@ compiled = m_vp.compile("hyqmom15_vp.so", pops.pops_include(), backend="aot")
 
 sim = pops.System(n=64, L=1.0, periodic=True)
 sim.add_equation("mom", model=compiled,
-                 spatial=pops.FiniteVolume(limiter="none", riemann="hll"),
+                 spatial=pops.FiniteVolume(limiter=FirstOrder(), riemann=HLL()),
                  time=pops.Explicit())
 sim.set_poisson(rhs="charge_density", solver="geometric_mg")
 ```
@@ -243,10 +253,10 @@ and the `spatial=` argument:
 
 | Goal                  | Build flag            | `spatial=`                                            |
 | --------------------- | --------------------- | ----------------------------------------------------- |
-| Robust start          | (defaults)            | `FiniteVolume(limiter="none", riemann="rusanov")`     |
-| Sharper resolution    | `exact_speeds=True`   | `FiniteVolume(limiter="none", riemann="hll")`         |
-| Least diffusive (reference ROE) | `roe=True`  | `FiniteVolume(limiter="none", riemann="roe")`         |
-| Vlasov-Poisson        | `sources=...` + `elliptic_rhs` | `FiniteVolume(..., riemann="hll")` + `set_poisson(...)` |
+| Robust start          | (defaults)            | `FiniteVolume(limiter=FirstOrder(), riemann=Rusanov())` |
+| Sharper resolution    | `exact_speeds=True`   | `FiniteVolume(limiter=FirstOrder(), riemann=HLL())`     |
+| Least diffusive (reference ROE) | `roe=True`  | `FiniteVolume(limiter=FirstOrder(), riemann=Roe())`     |
+| Vlasov-Poisson        | `sources=...` + `elliptic_rhs` | `FiniteVolume(..., riemann=HLL())` + `set_poisson(...)` |
 | Near-degenerate state | `robust=True`         | unchanged                                             |
 | Realizability (long/high-Ma) | `m.projection([...])` hook | unchanged; pointwise projector applied post-step |
 
@@ -280,8 +290,8 @@ projection applied at every step `dt` stays stable (around `1.2e-3`) over the fu
 
 - The closure raises about missing keys: it must return exactly the order-5 names
   `S50, S05, S41, S14, S32, S23` (the keys with `p + q = order + 1`), no more and no fewer.
-- `riemann="hll"` raises about wave speeds: the model has no signed speeds. Rebuild with
-  `exact_speeds=True` (or use `riemann="rusanov"`, which only needs the maximum speed).
+- `riemann=HLL()` raises about wave speeds: the model has no signed speeds. Rebuild with
+  `exact_speeds=True` (or use `riemann=Rusanov()`, which only needs the maximum speed).
 - The flux returns non-finite values on a degenerate state (a zero `C20`, `C02`, or `M00`): rebuild
   with `robust=True`. The default path is bare on purpose, to stay faithful to a reference that has no
   guards.

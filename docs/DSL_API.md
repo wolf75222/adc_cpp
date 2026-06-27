@@ -64,10 +64,13 @@ The `.so` is cached by `model_hash` : an unchanged model is not recompiled.
 ## 3. Wiring onto System / AmrSystem
 
 ```python
+from pops.numerics.riemann import Rusanov
+from pops.numerics.reconstruction.limiters import VanLeer
+
 sim = pops.System(n=256, periodic=True)
 sim.add_equation("fluide",
                  model=compiled,
-                 spatial=pops.FiniteVolume(limiter="vanleer", riemann="rusanov"),
+                 spatial=pops.FiniteVolume(limiter=VanLeer(), riemann=Rusanov()),
                  time=pops.Explicit(substeps=1))
 # 1er argument positionnel = rhs (valide dans {charge_density, composite}) : passer le solveur
 # par MOT-CLE, pas en positionnel.
@@ -78,10 +81,13 @@ sim.run(t_end=10.0, cfl=0.4)
 ```python
 # AMR : AmrSystemConfig n'a PAS de champ max_level. Champs reels : n, L, regrid_every, periodic,
 # distribute_coarse, coarse_max_grid (regrid_every=0 -> hierarchie figee).
+from pops.numerics.riemann import Rusanov
+from pops.numerics.reconstruction.limiters import VanLeer
+
 amr = pops.AmrSystem(n=128, L=1.0, regrid_every=4, periodic=True)
 amr.add_equation("fluide",
                  model=compiled_amr,
-                 spatial=pops.FiniteVolume(limiter="vanleer", riemann="rusanov"),
+                 spatial=pops.FiniteVolume(limiter=VanLeer(), riemann=Rusanov()),
                  time=pops.Explicit(substeps=1))
 ```
 
@@ -111,6 +117,9 @@ Important points :
   on the `aot` backend : the value is modifiable WITHOUT recompiling via `System.set_block_params`.
 
   ```python
+  from pops.numerics.riemann import Rusanov
+  from pops.numerics.reconstruction.limiters import Minmod
+
   m = pops.physics.facade.Model("iso")
   rho, mx, my = m.conservative_vars("rho", "rho_u", "rho_v")
   cs2 = m.param("cs2", 1.0, kind="runtime")          # param RUNTIME (defaut = 1.0)
@@ -127,7 +136,7 @@ Important points :
 
   sim = pops.System(n=64, periodic=True)
   sim.add_equation("gas", model=compiled,
-                   spatial=pops.FiniteVolume(limiter="minmod", riemann="rusanov"))
+                   spatial=pops.FiniteVolume(limiter=Minmod(), riemann=Rusanov()))
   sim.set_block_params("gas", [4.0])                   # change cs2 au RUNTIME, sans recompiler
   ```
 - `pops.PythonFlux` : numpy host TEST tool, outside the GPU/MPI hot path. Never use in

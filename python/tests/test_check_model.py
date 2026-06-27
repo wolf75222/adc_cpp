@@ -11,6 +11,7 @@ Deux niveaux :
 Verifie le chemin vert ET les detections (round-trip casse, flux non fini, densite non positive).
 Invariants par assert ; imprime "OK test_check_model" en cas de succes.
 """
+from pops.numerics.reconstruction.limiters import Minmod
 import os
 import shutil
 import sys
@@ -84,7 +85,7 @@ sim.add_block("ions",
                         transport=pops.IsothermalFlux(),
                         source=pops.PotentialForce(charge=1.0),
                         elliptic=pops.ChargeDensity(charge=1.0)),
-              spatial=pops.FiniteVolume(limiter="minmod"), time=pops.Explicit())
+              spatial=pops.FiniteVolume(limiter=Minmod()), time=pops.Explicit())
 sim.set_poisson(rhs="charge_density", solver="geometric_mg", bc="periodic")
 x = (np.arange(n) + 0.5) / n
 X, Y = np.meshgrid(x, x, indexing="xy")

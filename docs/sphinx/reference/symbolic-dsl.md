@@ -173,15 +173,15 @@ By default a model carries only the Rusanov bound from `eigenvalues`. Several de
 set of `riemann=` fluxes a model accepts at `add_equation`:
 
 - `wave_speeds(x, y)` declares explicit signed speeds `(smin, smax)` per direction, which enables
-  `riemann="hll"` for a model WITHOUT a primitive `p` (a moment or isothermal system).
+  `riemann=HLL()` for a model WITHOUT a primitive `p` (a moment or isothermal system).
   `wave_speeds_from_jacobian(...)` derives the same pair from the eigenvalues of the flux Jacobian.
 - `enable_hllc()` / `enable_roe()` emit the HLLC / Roe capability from the variable roles plus a
-  primitive `p`, so `riemann="hllc"` / `"roe"` work beyond the four-variable Euler system.
+  primitive `p`, so `riemann=HLLC()` / `Roe()` work beyond the four-variable Euler system.
 - `m.roe_from_jacobian()` is the GENERIC moment Roe emitter: it builds the `roe_dissipation` hook as
   `|A| (UR - UL)` with `A = dF/dU` the autodiff flux Jacobian at the mean interface state, applied via
   the matrix-sign kernel `pops::roe_abs_apply` (spectral-radius Rusanov fallback on a complex or
   singular spectrum). Unlike `enable_roe`, it needs NEITHER fluid roles NOR a primitive `p`, so it
-  makes `riemann="roe"` available for a full moment hierarchy. It is one of THREE mutually exclusive
+  makes `riemann=Roe()` available for a full moment hierarchy. It is one of THREE mutually exclusive
   providers of `roe_dissipation` (with `enable_roe` and the hand-written `roe_dissipation(x, y)`):
   declaring more than one raises. Folded into the model cache key only when used, so an unused model
   stays bit-identical. This is the path the moment generator emits -- see
@@ -546,6 +546,9 @@ requires pops headers and a C++ compiler ; without them, `compile` raises.
 ```python
 import numpy as np
 import pops
+from pops.numerics.riemann import HLLC
+from pops.numerics.reconstruction.limiters import Minmod
+from pops.numerics.variables import Primitive
 
 GAMMA = 1.4
 
@@ -578,8 +581,8 @@ compiled = m.compile(backend="production")           # include / so_path auto, c
 n = 32
 s = pops.System(n=n, L=1.0, periodic=True)
 s.add_equation("gas", compiled,
-               spatial=pops.FiniteVolume(limiter="minmod", riemann="hllc",
-                                        variables="primitive"))
+               spatial=pops.FiniteVolume(limiter=Minmod(), riemann=HLLC(),
+                                        variables=Primitive()))
 s.set_poisson(rhs="charge_density", solver="geometric_mg")
 
 xs = (np.arange(n) + 0.5) / n
@@ -593,10 +596,11 @@ nsteps = s.run(t_end=0.02, cfl=0.4)
 final = np.array(s.get_state("gas")).reshape(4, n, n)
 ```
 
-Note on `pops.FiniteVolume(limiter=, riemann=, variables=)` : `riemann` is the numerical flux
-(`rusanov` / `hll` / `hllc` / `roe`), distinct from the physical flux `m.flux` ; `limiter` among
-`none` / `minmod` / `vanleer` / `weno5` ; `variables` among `conservative` / `primitive`. HLLC / Roe
-require a primitive named `p`.
+Note on `pops.FiniteVolume(limiter=, riemann=, variables=)` : every slot takes a TYPED
+`pops.numerics` descriptor (Spec 5 sec.7 rejects a bare string). `riemann` is the numerical flux
+(`Rusanov()` / `HLL()` / `HLLC()` / `Roe()`), distinct from the physical flux `m.flux` ; `limiter`
+among `FirstOrder()` / `Minmod()` / `VanLeer()` / `WENO5()` ; `variables` among `Conservative()` /
+`Primitive()`. HLLC / Roe require a primitive named `p`.
 
 ## Pitfalls
 

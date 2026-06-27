@@ -20,6 +20,8 @@ The model is a 1-variable block (rho) with ZERO flux and a manufactured LINEAR s
 Requires a compiler + a visible Kokkos (``POPS_KOKKOS_ROOT``); prints a skip notice and exits 0
 otherwise. cf. docs/sphinx/reference/time-program.md.
 """
+from pops.numerics.reconstruction import FirstOrder
+from pops.numerics.riemann import Rusanov
 import sys
 
 try:
@@ -94,7 +96,7 @@ def main():
     sim = pops.System(n=n, L=1.0, periodic=True)
     sim.install(compiled,
                 instances={"blk": {"model": source_model("ab2_block"),
-                                   "spatial": pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                                   "spatial": pops.FiniteVolume(limiter=FirstOrder(), riemann=Rusanov()),
                                    "time": pops.Explicit(method="euler"),
                                    "initial": np.stack([rho0])}})
     dt = 0.01

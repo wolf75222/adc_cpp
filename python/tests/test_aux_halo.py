@@ -14,6 +14,8 @@ On verifie (compilateur requis pour le bout-en-bout, auto-skip sinon) :
   (4) polaire : le halo est accepte + applique (solve_fields_polar) sans casser le champ ;
   (5) AMR : le halo est accepte sur AmrSystem (mono + multi bloc) et n'empeche pas le pas.
 """
+from pops.numerics.reconstruction import FirstOrder
+from pops.numerics.riemann import Rusanov
 import os
 import shutil
 import tempfile
@@ -72,7 +74,7 @@ def test_capabilities_halo():
 def _cart_rhs(compiled, n, vx2d, halo):
     sim = pops.System(n=n, L=1.0, periodic=False)
     sim.add_equation("a", model=compiled,
-                     spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                     spatial=pops.FiniteVolume(limiter=FirstOrder(), riemann=Rusanov()),
                      time=pops.Explicit())
     sim.set_poisson(rhs="charge_density", solver="geometric_mg", bc="dirichlet")
     sim.set_density("a", np.ones((n, n)))
@@ -131,7 +133,7 @@ def test_polar_halo():
         def rhs(halo):
             s = pops.System(mesh=pops.PolarMesh(r_min=0.3, r_max=1.0, nr=nr, ntheta=nth))
             s.add_equation("a", model=compiled,
-                           spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"), time=pops.Explicit())
+                           spatial=pops.FiniteVolume(limiter=FirstOrder(), riemann=Rusanov()), time=pops.Explicit())
             s.set_density("a", np.ones((nth, nr)))
             s.set_aux_field("a", "vx", vx, halo=halo)
             s.solve_fields()
@@ -163,7 +165,7 @@ def test_amr_halo():
     tmp = tempfile.mkdtemp()
     try:
         n = 16
-        sp = pops.FiniteVolume(limiter="none", riemann="rusanov")
+        sp = pops.FiniteVolume(limiter=FirstOrder(), riemann=Rusanov())
         compiled = build_advect_vx().compile(os.path.join(tmp, "avxa.so"), include=INCLUDE,
                                              backend="production", target="amr_system")
         vx = np.tile((np.arange(n) + 0.5) / n, (n, 1))

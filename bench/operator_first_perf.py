@@ -19,6 +19,8 @@ oranges: the generated Program re-solves the elliptic field at each SSPRK3 stage
 stage-consistent semantics -- versus one step-level solve in the native path; pick a transport-only
 model for a clean scheduler-overhead measurement.)
 """
+from pops.numerics.reconstruction import FirstOrder
+from pops.numerics.riemann import Rusanov
 import sys
 import time
 
@@ -79,7 +81,7 @@ def initial_state(n):
 def native_sim():
     sim = pops.System(n=N, L=1.0, periodic=True)
     sim.add_equation("gas", euler_model("perf_native").compile(backend="production"),
-                     spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                     spatial=pops.FiniteVolume(limiter=FirstOrder(), riemann=Rusanov()),
                      time=pops.Explicit(method="ssprk3"))
     sim.set_state("gas", initial_state(N).reshape(-1))
     return sim
@@ -92,7 +94,7 @@ def program_sim():
     compiled = pops.compile_problem(model=m, time=prog)
     sim = pops.System(n=N, L=1.0, periodic=True)
     sim.add_equation("gas", m.compile(backend="production"),
-                     spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                     spatial=pops.FiniteVolume(limiter=FirstOrder(), riemann=Rusanov()),
                      time=pops.Explicit(method="euler"))  # block; the installed Program drives step
     sim.set_state("gas", initial_state(N).reshape(-1))
     sim.install_program(compiled.so_path)

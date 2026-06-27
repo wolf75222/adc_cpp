@@ -26,6 +26,8 @@ one, GMRES minimises the residual over the Krylov subspace and converges.
 The non-symmetric C++ guard (CG stagnates while gmres recovers phi_exact) is also pinned directly in
 tests/test_generic_krylov.cpp, which is fully validatable on every backend without the Python toolchain.
 """
+from pops.numerics.reconstruction import FirstOrder
+from pops.numerics.riemann import Rusanov
 import sys
 
 
@@ -265,7 +267,7 @@ def _run_one(t, pops, np, program, name):
         return None
 
     sim.add_equation("blk", compiled_model,
-                     spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                     spatial=pops.FiniteVolume(limiter=FirstOrder(), riemann=Rusanov()),
                      time=pops.Explicit(method="euler"))
 
     x = (np.arange(n) + 0.5) / n

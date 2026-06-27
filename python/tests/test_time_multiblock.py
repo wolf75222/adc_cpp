@@ -21,6 +21,8 @@ MUST be added in the SAME order the Program declares them via ``P.state``.
     _pops) and locally once _pops is rebuilt; skips if _pops lacks install_program, numpy/_pops is absent,
     no compiler/Kokkos is visible, or the .so compile fails -- never faking the engine.
 """
+from pops.numerics.reconstruction import FirstOrder
+from pops.numerics.riemann import Rusanov
 import sys
 
 
@@ -228,7 +230,7 @@ def section_b(t):
             except RuntimeError as exc:  # no compiler / no Kokkos
                 _skip("model compile could not build the .so: %s" % str(exc)[:160])
             sim.add_equation(blk, cm,
-                             spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                             spatial=pops.FiniteVolume(limiter=FirstOrder(), riemann=Rusanov()),
                              time=pops.Explicit(method="euler"))
         return sim
 

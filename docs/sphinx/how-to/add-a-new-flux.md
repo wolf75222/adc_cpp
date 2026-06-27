@@ -11,23 +11,27 @@ This page assumes you already have a model and a `System`. If not, start with th
 
 ## Choose a flux
 
-Pass the flux through `pops.FiniteVolume`, where the numerical flux is named `riemann`:
+Pass the flux through `pops.FiniteVolume`, where the numerical flux is named `riemann`. Every
+selector is a TYPED `pops.numerics` descriptor (Spec 5 sec.7 rejects a bare string):
 
 ```python
-spatial = pops.FiniteVolume(limiter="minmod", riemann="rusanov")
+from pops.numerics.riemann import Rusanov
+from pops.numerics.reconstruction.limiters import Minmod
+
+spatial = pops.FiniteVolume(limiter=Minmod(), riemann=Rusanov())
 ```
 
-Replace `riemann` with one of these values, matched to your model:
+Replace `riemann` with one of these typed `pops.numerics.riemann` descriptors, matched to your model:
 
-- `rusanov`: the generic minimal flux. It needs only `max_wave_speed`, so it works with any
+- `Rusanov()`: the generic minimal flux. It needs only `max_wave_speed`, so it works with any
   model. Use it as the default.
-- `hll`: a generic flux with signed waves. It requires `model.wave_speeds` (a native
+- `HLL()`: a generic flux with signed waves. It requires `model.wave_speeds` (a native
   isothermal or compressible model, or a DSL model that declares the primitive `p`). It is the
-  path for a non-Euler model with signed waves; pair it with `minmod`.
-- `hllc` and `roe`: contact-resolving (HLLC) and Roe-linearized solvers. They run on the canonical
+  path for a non-Euler model with signed waves; pair it with `Minmod()`.
+- `HLLC()` and `Roe()`: contact-resolving (HLLC) and Roe-linearized solvers. They run on the canonical
   2D Euler layout (4 variables and perfect-gas pressure: a compressible transport), and also
   generically on any model that supplies the capability hooks -- `contact_speed` plus
-  `hllc_star_state` for `hllc` (`HasHLLCStructure`), or `roe_dissipation` for `roe`
+  `hllc_star_state` for HLLC (`HasHLLCStructure`), or `roe_dissipation` for Roe
   (`HasRoeDissipation`), including some 3-variable non-Euler models. In the DSL, emit the hooks with
   `m.enable_hllc()` / `m.enable_roe()`. Both read a pressure, so declare the primitive `p`; without
   it (and without the capability) the wiring raises a `ValueError`.
@@ -37,7 +41,10 @@ Replace `riemann` with one of these values, matched to your model:
 Pass the spatial scheme as the `spatial=` argument of `add_block` or `add_equation`:
 
 ```python
-sim.add_block("gas", model=model, spatial=pops.FiniteVolume(limiter="minmod", riemann="hll"))
+from pops.numerics.riemann import HLL
+from pops.numerics.reconstruction.limiters import Minmod
+
+sim.add_block("gas", model=model, spatial=pops.FiniteVolume(limiter=Minmod(), riemann=HLL()))
 ```
 
 For the full list of limiters, fluxes and reconstruction variables, see the

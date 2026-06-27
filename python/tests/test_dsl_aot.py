@@ -55,9 +55,17 @@ def main():
             phi_aot = np.array(aot.potential()).reshape(n, n)
 
             nat = pops.System(n=n, L=L, periodic=True)
-            lim = {"none": dict(none=True), "minmod": dict(minmod=True),
-                   "vanleer": dict(vanleer=True)}[limiter]
-            nat.add_block("gas", spec, spatial=pops.Spatial(flux=riemann, recon=recon, **lim),
+            # The raw add_compiled_block facade takes string tokens (C++ ABI); the native Spatial
+            # takes typed pops.numerics descriptors (Spec 5 sec.7). Resolve the strings to descriptors.
+            from pops.numerics.riemann import Rusanov, HLL, HLLC, Roe
+            from pops.numerics.reconstruction import FirstOrder
+            from pops.numerics.reconstruction.limiters import Minmod, VanLeer
+            from pops.numerics.variables import Conservative, Primitive
+            lim_obj = {"none": FirstOrder(), "minmod": Minmod(), "vanleer": VanLeer()}[limiter]
+            flux_obj = {"rusanov": Rusanov(), "hll": HLL(), "hllc": HLLC(), "roe": Roe()}[riemann]
+            recon_obj = {"conservative": Conservative(), "primitive": Primitive()}[recon]
+            nat.add_block("gas", spec,
+                          spatial=pops.Spatial(limiter=lim_obj, flux=flux_obj, recon=recon_obj),
                           time=pops.Explicit())
             nat.set_poisson(rhs="charge_density", solver="geometric_mg")
             nat.set_state("gas", Uflat)

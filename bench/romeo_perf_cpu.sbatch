@@ -308,6 +308,8 @@ import numpy as np
 import pops
 from pops.ir.ops import sqrt
 from pops.physics.facade import Model
+from pops.numerics.riemann import Rusanov
+from pops.numerics.reconstruction.limiters import Minmod
 
 GAMMA = 1.4
 
@@ -351,7 +353,7 @@ def build_bricks(n, U):
                      transport=pops.CompressibleFlux(),
                      source=pops.NoSource(),
                      elliptic=pops.BackgroundDensity(alpha=0.0, n0=0.0))
-    sim.add_equation("gas", spec, spatial=pops.FiniteVolume(limiter="minmod", riemann="rusanov"))
+    sim.add_equation("gas", spec, spatial=pops.FiniteVolume(limiter=Minmod(), riemann=Rusanov()))
     sim.set_poisson(rhs="charge_density", solver="fft")
     sim.set_state("gas", U.reshape(-1))
     return sim, (time.perf_counter() - t0) * 1000.0
@@ -368,7 +370,7 @@ def build_dsl(n, U, cache_dir, cache_state):
             raise RuntimeError("bad DSL backend/adderr: %s %s" % (cm.backend, cm.adder))
         t0 = time.perf_counter()
         sim = pops.System(n=n, L=1.0, periodic=True)
-        sim.add_equation("gas", cm, spatial=pops.FiniteVolume(limiter="minmod", riemann="rusanov"))
+        sim.add_equation("gas", cm, spatial=pops.FiniteVolume(limiter=Minmod(), riemann=Rusanov()))
         sim.set_poisson(rhs="charge_density", solver="fft")
         sim.set_state("gas", U.reshape(-1))
         setup_ms = (time.perf_counter() - t0) * 1000.0

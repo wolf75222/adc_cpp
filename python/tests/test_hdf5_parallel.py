@@ -25,6 +25,7 @@ NP>1 (manuel, hors pytest) : sur une machine avec h5py compile MPI + mpi4py, lan
 (depuis python/tests, PYTHONPATH sur le build). manual_np_check() ecrit en parallel=True et verifie,
 sur le rang 0, l'egalite champ a champ avec un dump npz gather-rang-0 du MEME etat.
 """
+from pops.numerics.reconstruction.limiters import Minmod
 import numpy as np
 
 import pops
@@ -77,7 +78,7 @@ def _build(n=16):
                             transport=pops.IsothermalFlux(),
                             source=pops.PotentialForce(charge=1.0),
                             elliptic=pops.ChargeDensity(charge=1.0)),
-                  spatial=pops.FiniteVolume(limiter="minmod"), time=pops.Explicit())
+                  spatial=pops.FiniteVolume(limiter=Minmod()), time=pops.Explicit())
     x = (np.arange(n) + 0.5) / n
     X, Y = np.meshgrid(x, x, indexing="xy")
     sim.set_density("ions", (1.0 + 0.4 * np.exp(-50.0 * ((X - 0.4) ** 2 + (Y - 0.5) ** 2))).ravel())

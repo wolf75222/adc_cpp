@@ -12,6 +12,7 @@ Verifie :
   (3) write npz : champs et horloge presents ; write vtk : .vti lisible (en-tete ImageData).
 Invariants par assert ; imprime "OK test_io_checkpoint" en cas de succes.
 """
+from pops.numerics.reconstruction.limiters import Minmod
 import os
 import sys
 import tempfile
@@ -40,13 +41,13 @@ def build(n=16):
                             transport=pops.IsothermalFlux(),
                             source=pops.PotentialForce(charge=1.0),
                             elliptic=pops.ChargeDensity(charge=1.0)),
-                  spatial=pops.FiniteVolume(limiter="minmod"), time=pops.Explicit())
+                  spatial=pops.FiniteVolume(limiter=Minmod()), time=pops.Explicit())
     sim.add_block("slow",
                   pops.Model(state=pops.FluidState("isothermal", cs2=0.5),
                             transport=pops.IsothermalFlux(),
                             source=pops.PotentialForce(charge=-1.0),
                             elliptic=pops.ChargeDensity(charge=-1.0)),
-                  spatial=pops.FiniteVolume(limiter="minmod"),
+                  spatial=pops.FiniteVolume(limiter=Minmod()),
                   time=pops.Explicit(stride=2))
     x = (np.arange(n) + 0.5) / n
     X, Y = np.meshgrid(x, x, indexing="xy")
@@ -92,7 +93,7 @@ bad.add_block("autre",
               pops.Model(state=pops.FluidState("isothermal", cs2=0.5),
                         transport=pops.IsothermalFlux(), source=pops.NoSource(),
                         elliptic=pops.ChargeDensity(charge=0.0)),
-              spatial=pops.FiniteVolume(limiter="minmod"))
+              spatial=pops.FiniteVolume(limiter=Minmod()))
 try:
     bad.restart(os.path.join(tmp, "chk"))
     chk(False, "composition differente aurait du lever")

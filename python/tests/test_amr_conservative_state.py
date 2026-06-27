@@ -18,6 +18,8 @@ On verifie :
 
 S'auto-saute (exit 0) pour (A)/(D)/(E) sans compilateur C++ ; les gardes (G) tournent toujours.
 """
+from pops.numerics.variables import Conservative
+from pops.numerics.riemann import Rusanov
 import os
 import shutil
 import sys
@@ -147,8 +149,8 @@ try:
 
     def build(setter):
         s = _amr(n)
-        s.add_equation("gas", cm, spatial=pops.Spatial(minmod=True, flux="rusanov",
-                                                      recon="conservative"))
+        s.add_equation("gas", cm, spatial=pops.Spatial(minmod=True, flux=Rusanov(),
+                                                      recon=Conservative()))
         setter(s)
         return s
 

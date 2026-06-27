@@ -30,6 +30,8 @@ On verifie ici, sans dependance externe :
  (9) [compilateur] compile AOT + System riemann='hll' : 10 pas finis, masse conservee.
 S'auto-saute (exit 0) pour (9) sans compilateur C++ ou sans Kokkos (coeur Kokkos-only).
 """
+from pops.numerics.reconstruction import FirstOrder
+from pops.numerics.riemann import HLL
 import os
 import sys
 import tempfile
@@ -313,7 +315,7 @@ except RuntimeError as ex:
 n = 16
 sim = pops.System(n=n, L=1.0, periodic=True)
 sim.add_equation("mom", model=compiled,
-                 spatial=pops.FiniteVolume(limiter="none", riemann="hll"),
+                 spatial=pops.FiniteVolume(limiter=FirstOrder(), riemann=HLL()),
                  time=pops.Explicit())
 x = (np.arange(n) + 0.5) / n
 X, Y = np.meshgrid(x, x, indexing="ij")

@@ -15,6 +15,8 @@ Couvre :
     (c) defaut : un modele simple SANS aux_field garde n_aux=3 ;
     (d) lecture AVANT ecriture -> zeros (documente) ; champ inconnu d'un bloc enregistre -> rejet.
 """
+from pops.numerics.reconstruction import FirstOrder
+from pops.numerics.riemann import Rusanov
 import os
 import shutil
 import tempfile
@@ -158,7 +160,7 @@ def test_end_to_end():
         sim = pops.System(n=n, L=L, periodic=True)
         sim.set_poisson(rhs="charge_density", solver="geometric_mg")
         sim.add_equation("decay", model=compiled,
-                         spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                         spatial=pops.FiniteVolume(limiter=FirstOrder(), riemann=Rusanov()),
                          time=pops.Explicit())
         sim.set_density("decay", np.ones((n, n)))
 
@@ -233,7 +235,7 @@ def test_polar_named_aux():
         nr, nth = 16, 16
         sim = pops.System(mesh=pops.PolarMesh(r_min=0.3, r_max=1.0, nr=nr, ntheta=nth))
         sim.add_equation("decay", model=compiled,
-                         spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                         spatial=pops.FiniteVolume(limiter=FirstOrder(), riemann=Rusanov()),
                          time=pops.Explicit())
         sim.set_density("decay", np.ones((nth, nr)))
 
@@ -283,7 +285,7 @@ def test_amr_named_aux_single_block_regrid():
     tmp = tempfile.mkdtemp()
     try:
         n = 24
-        sp = pops.FiniteVolume(limiter="none", riemann="rusanov")
+        sp = pops.FiniteVolume(limiter=FirstOrder(), riemann=Rusanov())
         lo, hi = n // 3, 2 * n // 3  # central bump [8, 16)^2
 
         # (a) reference : SANS set_aux_field -> kappa=0 -> masse inchangee (meme avec raffinement).
@@ -349,7 +351,7 @@ def test_amr_named_aux_multiblock_regrid():
     tmp = tempfile.mkdtemp()
     try:
         n = 24
-        sp = pops.FiniteVolume(limiter="none", riemann="rusanov")
+        sp = pops.FiniteVolume(limiter=FirstOrder(), riemann=Rusanov())
         lo, hi = n // 3, 2 * n // 3
         decay_so = _compile_amr_decay(tmp, "amrdecay.so")
         c0 = 1.0

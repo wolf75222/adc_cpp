@@ -17,6 +17,8 @@ All three LOWER to the existing Program IR (no new C++ stepper):
     Kokkos): the compiled program is stepped and compared to an INDEPENDENT offline numpy reference of
     the identical recurrence, to machine precision. Self-skips, never fakes the engine.
 """
+from pops.numerics.reconstruction import FirstOrder
+from pops.numerics.riemann import Rusanov
 import sys
 
 
@@ -227,7 +229,7 @@ def _run_ab3(t):
         print("-- (B AB3) skipped: compile could not build the .so: %s --" % str(exc)[:160])
         return
     n = 16
-    sim.add_equation("blk", cm, spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+    sim.add_equation("blk", cm, spatial=pops.FiniteVolume(limiter=FirstOrder(), riemann=Rusanov()),
                      time=pops.Explicit(method="euler"))
     x = (np.arange(n) + 0.5) / n
     X, Y = np.meshgrid(x, x, indexing="ij")
@@ -269,7 +271,7 @@ def _run_imex(t):
         print("-- (B imex) skipped: compile could not build the .so: %s --" % str(exc)[:160])
         return
     n = 16
-    sim.add_equation("plasma", cm, spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+    sim.add_equation("plasma", cm, spatial=pops.FiniteVolume(limiter=FirstOrder(), riemann=Rusanov()),
                      time=pops.Explicit(method="euler"))
     bz = 3.0
     sim.set_magnetic_field(bz * np.ones(n * n))
@@ -332,7 +334,7 @@ def _run_lie(t):
         print("-- (B lie) skipped: compile could not build the .so: %s --" % str(exc)[:160])
         return
     n = 16
-    sim.add_equation("blk", cm, spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+    sim.add_equation("blk", cm, spatial=pops.FiniteVolume(limiter=FirstOrder(), riemann=Rusanov()),
                      time=pops.Explicit(method="euler"))
     x = (np.arange(n) + 0.5) / n
     X, Y = np.meshgrid(x, x, indexing="ij")

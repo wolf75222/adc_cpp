@@ -17,6 +17,8 @@ On verifie :
  (5) garde : bloc inconnu -> erreur explicite.
 Modele natif : aucun compilateur requis.
 """
+from pops.numerics.reconstruction import FirstOrder
+from pops.numerics.riemann import Rusanov
 import sys
 
 import numpy as np
@@ -50,7 +52,7 @@ def make_sim(n=32):
                             transport=pops.IsothermalFlux(),
                             source=pops.NoSource(),
                             elliptic=pops.BackgroundDensity(alpha=1.0, n0=0.0)),
-                  spatial=pops.FiniteVolume(limiter="none", riemann="rusanov"),
+                  spatial=pops.FiniteVolume(limiter=FirstOrder(), riemann=Rusanov()),
                   time=pops.Explicit())
     return sim
 

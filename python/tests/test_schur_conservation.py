@@ -57,6 +57,11 @@ ces tests directement, pytest n'est pas installe). Se saute proprement si le mod
 _pops n'est pas importable (build absent) -> la CI le valide.
 """
 
+from pops.numerics.variables import Conservative
+from pops.numerics.reconstruction.limiters import Minmod, VanLeer
+from pops.numerics.reconstruction import WENO5
+from pops.numerics.variables import Primitive
+from pops.numerics.riemann import Rusanov
 import sys
 
 import numpy as np
@@ -152,8 +157,8 @@ def test_masse():
     sim.set_poisson(bc="periodic")
     sim.set_magnetic_field(B0 * np.ones((n, n)))
     sim.add_equation("ions", model=iso_model(alpha=alpha, n0=n0),
-                     spatial=pops.FiniteVolume(limiter="minmod", riemann="rusanov",
-                                              variables="conservative"),
+                     spatial=pops.FiniteVolume(limiter=Minmod(), riemann=Rusanov(),
+                                              variables=Conservative()),
                      time=split_time(theta=1.0, alpha=alpha))
     sim.set_primitive_state("ions", rho=rho0, u=u0, v=v0)
 
@@ -198,8 +203,8 @@ def _run_momentum(periodic, sym, n=64, L=1.0, B0=4.0, alpha=3.0, N=20, dt_fac=0.
         u0 = v0 = 0.0 * X
         n0 = float(rho0.mean()) if periodic else 0.0
     sim.add_equation("ions", model=iso_model(alpha=alpha, n0=n0),
-                     spatial=pops.FiniteVolume(limiter="minmod", riemann="rusanov",
-                                              variables="conservative"),
+                     spatial=pops.FiniteVolume(limiter=Minmod(), riemann=Rusanov(),
+                                              variables=Conservative()),
                      time=split_time(theta=1.0, alpha=alpha))
     sim.set_primitive_state("ions", rho=rho0, u=u0, v=v0)
     dx2 = (L / n) ** 2
@@ -278,8 +283,8 @@ def _run_energy(with_schur, n=48, L=1.0, B0=4.0, alpha=3.0, gamma=1.4, N=30):
     sim.set_magnetic_field(B0 * np.ones((n, n)))
     time = split_time(theta=1.0, alpha=alpha) if with_schur else pops.Explicit()
     sim.add_equation("ions", model=euler_model(gamma=gamma, alpha=alpha),
-                     spatial=pops.FiniteVolume(limiter="minmod", riemann="rusanov",
-                                              variables="conservative"),
+                     spatial=pops.FiniteVolume(limiter=Minmod(), riemann=Rusanov(),
+                                              variables=Conservative()),
                      time=time)
     rho0, u0, v0 = ring_axisym(n, L)
     p0 = 0.5 + 0.0 * rho0  # pression initiale > 0 partout
@@ -352,13 +357,13 @@ def test_energie_positivite():
 def test_positivite_densite():
     n, L = 64, 1.0
     B0, alpha, cs2 = 4.0, 3.0, 1.0
-    for limiter in ("minmod", "vanleer", "weno5"):
+    for limiter in (Minmod(), VanLeer(), WENO5()):
         sim = pops.System(n=n, L=L, periodic=False)
         sim.set_poisson(bc="dirichlet")
         sim.set_magnetic_field(B0 * np.ones((n, n)))
         sim.add_equation("ions", model=iso_model(cs2=cs2, alpha=alpha),
-                         spatial=pops.FiniteVolume(limiter=limiter, riemann="rusanov",
-                                                  variables="primitive"),  # recon_prim
+                         spatial=pops.FiniteVolume(limiter=limiter, riemann=Rusanov(),
+                                                  variables=Primitive()),  # recon_prim
                          time=split_time(theta=1.0, alpha=alpha))
         # Anneau RAIDE : fond bas (0.2), forte amplitude, paroi fine.
         rho0, u0, v0 = ring_axisym(n, L, rho0=0.2, drho=2.0, r0=0.3, w=0.04)
@@ -368,11 +373,11 @@ def test_positivite_densite():
         for _ in range(40):
             sim.step(dt)
             rho = np.array(sim.density("ions"))
-            assert_finite(rho, "rho (%s)" % limiter)
+            assert_finite(rho, "rho (%s)" % limiter.scheme)
             rho_min_run = min(rho_min_run, float(rho.min()))
         p_min_run = cs2 * rho_min_run  # isotherme : p = cs2 rho
         print("    [POS limiter=%s recon_prim] rho_min_run = %.6e  p_min_run = %.6e"
-              % (limiter, rho_min_run, p_min_run))
+              % (limiter.scheme, rho_min_run, p_min_run))
         chk(rho_min_run > 0.0,
             "(4) densite rho > 0 apres 40 pas (limiter=%s, recon_prim) : rho_min = %.4e"
             % (limiter, rho_min_run))

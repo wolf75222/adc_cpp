@@ -18,6 +18,9 @@ On verifie :
 
 S'auto-saute (exit 0) sans compilateur pour (3)/(4) ; (1)/(2) tournent toujours.
 """
+from pops.numerics.variables import Conservative
+from pops.numerics.reconstruction import WENO5
+from pops.numerics.riemann import Rusanov, HLL
 import os
 import shutil
 import sys
@@ -71,14 +74,14 @@ def run_gas(riemann, n=48, nsteps=10, cfl=0.2):
 
 # --- (1)/(2) HLL natif 4-var (sans compilateur) ----------------------------------------------------
 print("== (1)/(2) HLL sur Euler compressible natif (4-var) ==")
-d_rus, m_rus = run_gas("rusanov")
-d_hll, m_hll = run_gas("hll")
+d_rus, m_rus = run_gas(Rusanov())
+d_hll, m_hll = run_gas(HLL())
 m0 = float(smooth_rho(48).sum())
 chk(np.isfinite(d_hll).all() and d_hll.min() > 0, "(2) HLL : etat fini, densite positive")
 chk(abs(m_hll - m0) < 1e-7 * abs(m0), "(2) HLL : masse conservee (flux conservatif)")
 chk(float(np.max(np.abs(d_hll - d_rus))) > 1e-9, "(2) HLL DIFFERE de Rusanov (branche HLL active, moins diffusif)")
-# flux Riemann inconnu reste rejete
-chk("godunov" in err_msg(lambda: run_gas("godunov")), "(1) flux inconnu 'godunov' toujours rejete")
+# Naming a flux with a bare string is rejected (Spec 5 sec.7): there is no Godunov() descriptor.
+chk("godunov" in err_msg(lambda: run_gas("godunov")), "(1) bare-string flux 'godunov' rejete (Spec 5 sec.7)")
 
 # --- (3)/(4) capacite DSL 3-var isotherme (avec compilateur) ---------------------------------------
 cxx = shutil.which("c++") or shutil.which("g++") or shutil.which("clang++")
@@ -114,8 +117,8 @@ try:
 
     def build(cm, riem):
         s = pops.System(n=40, L=1.0, periodic=True)
-        s.add_equation("f", model=cm, spatial=pops.FiniteVolume(limiter="weno5", riemann=riem,
-                                                              variables="conservative"),
+        s.add_equation("f", model=cm, spatial=pops.FiniteVolume(limiter=WENO5(), riemann=riem,
+                                                              variables=Conservative()),
                        time=pops.Explicit(method="ssprk2"))
         s.set_poisson()
         z = np.zeros((40, 40)); r = 1.0 + 0.2 * smooth_rho(40) / smooth_rho(40).max()
@@ -123,13 +126,13 @@ try:
         return s
 
     # (3) HLL ACCEPTE sur le 3-var qui declare 'p' -> tourne fini.
-    s_hll = build(cm_p, "hll")
+    s_hll = build(cm_p, HLL())
     for _ in range(8):
         s_hll.step_cfl(0.2)
     chk(np.isfinite(np.array(s_hll.density("f"))).all(), "(3) HLL accepte sur DSL 3-var (p declaree) + tourne fini")
 
     # (4) HLL REJETE sur le 3-var SANS 'p' (pas de wave_speeds) -> erreur claire.
-    msg = err_msg(lambda: build(cm_np, "hll"))
+    msg = err_msg(lambda: build(cm_np, HLL()))
     chk("wave_speeds" in msg,
         "(4) HLL rejete sur DSL 3-var sans 'p' (message 'vitesses d'onde'): %r" % msg[:70])
 finally:

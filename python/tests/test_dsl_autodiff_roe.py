@@ -17,6 +17,8 @@ symbolique du DSL + dissipation de Roe ecrite par l'utilisateur.
 Les sections (a), (b), (d) sont PUREMENT symboliques (aucune compilation) ; seule (c) compile.
 Invariants par assert ; imprime "OK test_dsl_autodiff_roe" en cas de succes.
 """
+from pops.numerics.reconstruction.limiters import Minmod
+from pops.numerics.riemann import Roe
 import os
 import shutil
 import sys
@@ -312,14 +314,14 @@ try:
     s_hand = pops.System(n=n, L=1.0, periodic=True)
     s_hand.set_poisson()
     s_hand.add_equation("f", model=cm_hand,
-                        spatial=pops.FiniteVolume(limiter="minmod", riemann="roe"),
+                        spatial=pops.FiniteVolume(limiter=Minmod(), riemann=Roe()),
                         time=pops.Explicit())
     s_hand.set_primitive_state("f", rho=rho0, u=z + 0.1, v=z)
 
     s_ref = pops.System(n=n, L=1.0, periodic=True)
     s_ref.set_poisson()
     s_ref.add_equation("f", model=cm_ref,
-                       spatial=pops.FiniteVolume(limiter="minmod", riemann="roe"),
+                       spatial=pops.FiniteVolume(limiter=Minmod(), riemann=Roe()),
                        time=pops.Explicit())
     s_ref.set_primitive_state("f", rho=rho0, u=z + 0.1, v=z)
 
