@@ -30,9 +30,10 @@ ALLOWED = {
     "model": {"ir"},
     "physics": {"ir", "model"},
     "time": {"ir", "model"},
+    "mesh": set(),  # Spec 5: pure mesh/layout/AMR descriptors; import nothing else in pops.
     "lib": {"ir", "model", "time", "physics"},
     "codegen": {"ir", "model", "physics", "time", "lib"},
-    "runtime": {"ir", "model", "physics", "time", "lib", "codegen"},
+    "runtime": {"ir", "model", "physics", "time", "lib", "mesh", "codegen"},
 }
 LAYERS = set(ALLOWED)
 

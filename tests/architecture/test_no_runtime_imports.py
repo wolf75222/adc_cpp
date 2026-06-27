@@ -1,8 +1,8 @@
 """Spec 4 (36.2, adapted): the symbolic layers must not import the runtime at module scope.
 
-The authoring/IR layers (``ir``, ``model``, ``physics``, ``time``, ``lib``) describe a
-problem; they must stay importable without the compiled extension or the codegen/runtime
-machinery. A MODULE-SCOPE import of ``_pops``, ``pops.codegen`` or ``pops.runtime`` would
+The authoring/IR layers (``ir``, ``model``, ``physics``, ``time``, ``lib``, ``mesh``)
+describe a problem; they must stay importable without the compiled extension or the
+codegen/runtime machinery. A MODULE-SCOPE import of ``_pops``, ``pops.codegen`` or ``pops.runtime`` would
 pull the heavy/native layer in at import time and break that guarantee.
 
 Lazy (in-function / in-method) imports ARE allowed: a builder may import the runtime
@@ -19,7 +19,7 @@ REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
 POPS = REPO_ROOT / "python" / "pops"
 
 # Symbolic (authoring/IR) layers that must not touch the runtime at module scope.
-SYMBOLIC_LAYERS = ("ir", "model", "physics", "time", "lib")
+SYMBOLIC_LAYERS = ("ir", "model", "physics", "time", "lib", "mesh")
 
 # Forbidden module-scope import targets (and their dotted sub-modules).
 FORBIDDEN_ROOTS = ("_pops", "pops.codegen", "pops.runtime", "pops._pops")
