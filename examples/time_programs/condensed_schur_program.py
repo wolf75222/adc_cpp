@@ -12,10 +12,12 @@ with ``P.solve_linear`` (BiCGStab) -- mirroring the native ``CondensedSchurSourc
       operator is the SCALAR Schur-like flux operator A(phi) = phi - alpha*div(grad phi) (the
       div(flux) structure of the condensed Poisson operator on the WIDE-stencil Laplacian), checked
       against an offline NumPy CG on the SAME discrete operator (like divergence_solve.py);
-  (b) shows ``pops.lib.time.condensed_schur(P, "blk", alpha=1.0, theta=1.0)`` lowering the full
-      assemble / solve / reconstruct chain, and the deferred ``theta != 1`` extrapolation raising. The
-      end-to-end parity vs an offline reference is in ``python/tests/test_time_condensed_schur.py``; the
-      native ``pops.CondensedSchur`` source stepper stays fully supported.
+  (b) shows ``pops.lib.time.condensed_schur(P, "blk", alpha=1.0, theta=...)`` lowering the full
+      assemble / solve / reconstruct chain for theta == 1 (backward Euler) AND theta in (0, 1) (the
+      ADC-427 ``n+1`` extrapolation by ``1/theta``); theta outside ``(0, 1]`` is rejected with a
+      ValueError. The end-to-end parity vs an offline reference is in
+      ``python/tests/test_time_condensed_schur.py``; the native ``pops.CondensedSchur`` source stepper
+      stays fully supported.
 
 The wide-stencil centered div(grad) is the Laplacian (x(i+2) - 2 x(i) + x(i-2))/(4 h^2); A is a
 well-posed SPD Helmholtz operator on it. Run::
@@ -115,23 +117,39 @@ def offline_cg(apply, b, tol=1e-10, max_iter=2000):
 
 
 def show_macro():
-    """(b) std.condensed_schur (ADC-421) lowers the theta == 1 condensed-Schur source stage to the full
-    anisotropic assemble / solve / reconstruct chain; the deferred theta != 1 extrapolation raises."""
+    """(b) std.condensed_schur (ADC-421 / ADC-427) lowers the condensed-Schur source stage to the full
+    anisotropic assemble / solve / reconstruct chain: theta == 1 is the backward-Euler path, theta in
+    (0, 1) adds the n+1 extrapolation by 1/theta, and theta outside (0, 1] is rejected (ValueError)."""
+    chain = ("ctx.assemble_schur_coeffs", "ctx.assemble_schur_rhs", "ctx.apply_laplacian_coeff",
+             "ctx.schur_reconstruct")
     P = adctime.Program("condensed_schur_macro")
     libtime.condensed_schur(P, "blk", alpha=1.0, theta=1.0)
     src = P.emit_cpp_program()
-    have_chain = all(frag in src for frag in ("ctx.assemble_schur_coeffs", "ctx.assemble_schur_rhs",
-                                              "ctx.apply_laplacian_coeff", "ctx.schur_reconstruct"))
+    have_chain = all(frag in src for frag in chain)
     print("std.condensed_schur(theta=1) lowers the full coeff/RHS/solve/reconstruct chain:",
           "yes" if have_chain else "NO")
+
+    # theta in (0, 1) (ADC-427): the SAME chain plus the n+1 extrapolation U^n + (1/theta)(U^{n+theta} -
+    # U^n) -- here 1/0.5 = 2.0 -- lowered with the affine algebra, no NotImplementedError.
+    Ph = adctime.Program("condensed_schur_macro_half")
+    libtime.condensed_schur(Ph, "blk", alpha=1.0, theta=0.5)
+    half_src = Ph.emit_cpp_program()
+    half_chain = all(frag in half_src for frag in chain)
+    have_extrap = "static_cast<pops::Real>(2.0)" in half_src  # the 1/theta = 2.0 axpy
+    print("std.condensed_schur(theta=0.5) lowers the chain + the 1/theta extrapolation:",
+          "yes" if (half_chain and have_extrap) else "NO")
+
+    # the validated domain: theta outside (0, 1] is rejected with a ValueError (not NotImplementedError).
     try:
-        libtime.condensed_schur(adctime.Program("p"), "blk", alpha=1.0, theta=0.5)
-    except NotImplementedError as exc:
-        print("std.condensed_schur(theta != 1) raises (deferred n+1 extrapolation):")
+        libtime.condensed_schur(adctime.Program("p"), "blk", alpha=1.0, theta=1.5)
+    except ValueError as exc:
+        domain_ok = True
+        print("std.condensed_schur(theta=1.5) rejects out-of-range theta:")
         print("  %s" % str(exc)[:160])
-        return have_chain
-    print("UNEXPECTED: std.condensed_schur(theta != 1) did not raise")
-    return False
+    else:
+        domain_ok = False
+        print("UNEXPECTED: std.condensed_schur(theta=1.5) did not raise ValueError")
+    return have_chain and half_chain and have_extrap and domain_ok
 
 
 def main():
