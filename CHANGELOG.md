@@ -884,6 +884,14 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Changed
 
+- **Spec 4 runtime layer extracted to `pops.runtime`** (ADC-468, epic ADC-467): the
+  ~3585-line `python/pops/__init__.py` is now a minimal hub (under 120 lines). The
+  runtime objects (System / AmrSystem, the composable bricks and scheme/time policies,
+  the mesh objects, threading, doctor / capabilities, host PythonFlux) live under
+  `pops.runtime`, the only layer that imports the `_pops` extension; the extension load
+  moves to `pops._bootstrap` and the version to `pops._version`. `pops.integrate` moves
+  to `pops.runtime.integrate` (the `pops.integrate` name is preserved). No public API or
+  hot-path change.
 - **Spec 4 consumer migration off the flat shims** (ADC-473, epic ADC-467): every
   in-repo consumer now imports the model-authoring symbols from their package homes
   instead of the transitional `pops.dsl` / `pops.moments` re-export shims. The

@@ -102,7 +102,11 @@ def main():
         meth = None
     chk(meth is not None,
         "(1a) pops.System.set_source_stage defini sur la facade (pas seulement __getattr__)")
-    chk(callable(meth) and getattr(meth, "__qualname__", "") == "System.set_source_stage",
+    # The facade method now lives on the _SystemInstall mixin (Spec-4 PR-F runtime split):
+    # System composes the install/aux/io mixins, so the qualname is _SystemInstall.set_source_stage.
+    # The intent of (1b) is "a real method on the class hierarchy, not the __getattr__ delegate";
+    # accept either the historical System.* qualname or the mixin's.
+    chk(callable(meth) and getattr(meth, "__qualname__", "").endswith(".set_source_stage"),
         "(1b) c'est bien la methode de la facade (qualname=%r)"
         % getattr(meth, "__qualname__", None))
 
