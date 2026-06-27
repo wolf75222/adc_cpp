@@ -1,11 +1,9 @@
 """pops.lib.time.predictor_corrector -- Predictor-corrector scheme (operator-first, Spec 2).
 
 Exports: predictor_corrector_local_linear.
-
-# SPEC4-TODO: repoint to pops.time once it's a package.
 """
 
-from ._helpers import _opcall  # noqa: PLC0415
+from ._helpers import _opcall
 
 
 def predictor_corrector_local_linear(P, block, *, fields_operator, explicit_rate_operator,

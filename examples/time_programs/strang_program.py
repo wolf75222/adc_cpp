@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Strang splitting H(dt/2); S(dt); H(dt/2) as a compiled time Program (epic ADC-399 / ADC-410).
 
-Builds the Strang composition ONCE as Program IR via the ``pops.time.std.strang`` combinator (no
+Builds the Strang composition ONCE as Program IR via the ``pops.lib.time.std.strang`` combinator (no
 scheme-specific C++ stepper), compiles it to a ``problem.so``, installs it, advances N steps
 C++-side, and checks it reproduces the native engine Strang macro-step
 (``pops.Strang`` via ``set_time_scheme("strang")``) BIT-for-bit. Mirrors
@@ -28,6 +28,7 @@ try:
 
     import pops
     from pops import time as adctime
+    import pops.lib.time as libtime  # ready schemes live in pops.lib.time (Spec 4)
 except Exception as exc:  # noqa: BLE001
     print("skip strang_program (pops/numpy unavailable: %s)" % exc)
     sys.exit(0)
@@ -56,9 +57,9 @@ def no_op_source(prog, U, frac):  # noqa: ARG001  -- frac unused: S is the ident
 
 
 def strang_program(name="strang_example", block="ions"):
-    """The compiled Strang program H(dt/2); S(dt); H(dt/2) built via pops.time.std.strang."""
+    """The compiled Strang program H(dt/2); S(dt); H(dt/2) built via pops.lib.time.std.strang."""
     P = adctime.Program(name)
-    adctime.std.strang(P, block, half_flow, no_op_source)
+    libtime.std.strang(P, block, half_flow, no_op_source)
     return P
 
 

@@ -2,21 +2,15 @@
 
 Exports: adams_bashforth, adams_bashforth2, bdf.
 Private helpers: _AB_WEIGHTS, _bdf_local_linear, _bdf_implicit_flux.
-
-# SPEC4-TODO: repoint to pops.time once it's a package.
 """
 
-
-def _stage_rhs(P, U, sources, flux):
-    # SPEC4-TODO: repoint to pops.lib.time._stage_rhs once time.py is a package.
-    from pops import time as _t  # noqa: PLC0415
-    return _t._stage_rhs(P, U, sources, flux)
+from ._helpers import _stage_rhs
+from .euler import forward_euler as _forward_euler_macro
 
 
 def _forward_euler(P, block, sources, flux):
-    # Local reference to avoid a circular import with euler.py; mirrors forward_euler exactly.
-    from pops import time as _t  # noqa: PLC0415
-    _t.forward_euler(P, block, sources=sources, flux=flux)
+    # AB1 degenerates to Forward Euler; reuse the local euler macro for byte-identical IR.
+    _forward_euler_macro(P, block, sources=sources, flux=flux)
 
 
 # Adams-Bashforth weights b_j on R_{n-j} (j = 0..order-1), per order (ADC-423). AB1 is Forward Euler.

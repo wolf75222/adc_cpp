@@ -46,8 +46,10 @@ scalar used as a Python `bool`, an unknown source, etc. all raise with an action
 
 ### Standard library
 
-`pops.time.std` provides macros that *lower to the same IR* (they are not separate C++ steppers). A
-macro is an ordinary Python function that builds IR nodes -- it never computes arrays.
+`pops.lib.time` provides ready schemes (and a `pops.lib.time.std` bundle) that *lower to the same IR*
+(they are not separate C++ steppers). A macro is an ordinary Python function that builds IR nodes -- it
+never computes arrays. The schemes live in `pops.lib.time`; `pops.time` is the temporal language only
+(`Program`, the scheduler, the optimizer passes).
 
 | Macro | Scheme | Lowers to |
 |---|---|---|
@@ -80,7 +82,7 @@ P = pops.time.Program("fe")
 
 @P.step
 def _(P):
-    pops.time.std.forward_euler(P, "plasma")   # same IR as calling it inline
+    pops.lib.time.std.forward_euler(P, "plasma")   # same IR as calling it inline
 ```
 
 ## Compiling and running
@@ -130,7 +132,7 @@ L = P.linear_source("lorentz")        <=>    L = P.call("lorentz", fields)
 An operator-first program mentions no flux, source, Poisson or Lorentz; it composes operator calls,
 linear combinations, solves and a commit. The same generic program then runs against any model that
 provides operators with the expected signatures. The model-free type system, the operator kinds and
-the `pops.time.std` operator-first macros are documented in {doc}`operator-modules`; see
+the `pops.lib.time` operator-first macros are documented in {doc}`operator-modules`; see
 `examples/operator_modules/predictor_corrector_operator_first.py`.
 
 ## Optimization passes
@@ -162,7 +164,7 @@ a report rather than a transform that could change numerics.
 
 | Capability | Status |
 |---|---|
-| `pops.time.Program` builder IR + `pops.time.std` macros | available |
+| `pops.time.Program` builder IR + `pops.lib.time` macros | available |
 | `Program.emit_cpp_program` codegen, **Forward Euler** (`forward_euler_program.py`) | available, runs end-to-end |
 | `pops.compile_problem` + cache + `debug=` + `sim.install_program` + `pops.CompiledTime` | available |
 | Named sources / linear sources on `pops.physics.facade.Model` (`m.source_term`, `m.linear_source`) | available |

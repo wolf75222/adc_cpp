@@ -1,17 +1,22 @@
 """Spec 3: a library time scheme is a MACRO that builds operator-first IR, not a stepper.
 
-`pops.lib.time.*` and `pops.time.std.*` are MacroBricks: they construct a Program from
-operator names using only the kernel primitives (P.call / linear_combine /
-solve_local_linear / commit). This example builds a predictor-corrector with the library
-macro and shows (a) `pops.lib.time` is a thin forwarder to `pops.time.std` (identical IR),
-and (b) every node the macro emits is a kernel primitive op -- there is no parallel
-runtime stepper. So a user can always rewrite the same scheme by hand against the kernel.
+The `pops.lib.time` schemes are MacroBricks: they construct a Program from operator names
+using only the kernel primitives (P.call / linear_combine / solve_local_linear / commit).
+This example builds a predictor-corrector two ways and shows (a) the Spec-3 macro-catalog
+entry `pops.lib.time.macros.time.predictor_corrector` forwards to the same
+`pops.lib.time.std.predictor_corrector_local_linear` (identical IR), and (b) every node
+the macro emits is a kernel primitive op -- there is no parallel runtime stepper. So a
+user can always rewrite the same scheme by hand against the kernel.
+
+(Spec 4 s6 / s14: the ready schemes and their `std` bundle live in `pops.lib.time`, not in
+the time-language module `pops.time`; the catalog forwards to `pops.lib.time.std`.)
 
 Run: python3 examples/spec3/manual_vs_lib_predictor_corrector.py
 """
 from pops.math import sqrt, grad, div, laplacian, ddt
 from pops.physics import Model
-import pops.lib as lib
+import pops.lib.time as libtime
+import pops.lib.time.macros as libmacros
 import pops.time as adctime
 
 
@@ -49,28 +54,29 @@ KERNEL_OPS = {"state", "solve_fields", "rhs", "source", "apply", "linear_source"
               "linear_combine", "solve_local_linear", "solve_fields_from_blocks"}
 
 
-def build(via_lib):
+def build(via_catalog):
     m = build_model()
-    P = adctime.Program("pc_lib" if via_lib else "pc_std")
+    P = adctime.Program("pc_catalog" if via_catalog else "pc_std")
     P.bind_operators(m.module)
-    macro = lib.time.predictor_corrector if via_lib else adctime.std.predictor_corrector_local_linear
+    macro = (libmacros.time.predictor_corrector if via_catalog
+             else libtime.std.predictor_corrector_local_linear)
     macro(P, "plasma", fields_operator="fields_from_state",
           explicit_rate_operator="explicit_rate", implicit_operator="implicit_operator")
     return P
 
 
 def main():
-    lib_prog, std_prog = build(True), build(False)
+    catalog_prog, std_prog = build(True), build(False)
 
-    # (a) pops.lib.time is a thin forwarder to pops.time.std: identical IR.
-    assert _ir(lib_prog) == _ir(std_prog), "pops.lib.time must forward to pops.time.std"
+    # (a) the Spec-3 catalog macro forwards to pops.lib.time.std: identical IR.
+    assert _ir(catalog_prog) == _ir(std_prog), "the catalog macro must forward to pops.lib.time.std"
 
     # (b) the macro emits only kernel primitive ops -- no parallel stepper.
-    emitted = {v.op for v in lib_prog._values}
+    emitted = {v.op for v in catalog_prog._values}
     assert emitted <= KERNEL_OPS, "unexpected non-kernel op(s): %s" % (emitted - KERNEL_OPS)
 
     print("ops emitted by the macro:", sorted(emitted))
-    print("pops.lib.time IR == pops.time.std IR:", _ir(lib_prog) == _ir(std_prog))
+    print("catalog macro IR == pops.lib.time.std IR:", _ir(catalog_prog) == _ir(std_prog))
     print("\nOK: the library scheme is a macro over the operator-first kernel.")
 
 

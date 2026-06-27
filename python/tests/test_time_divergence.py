@@ -17,7 +17,7 @@ compiled solve is verified against an OFFLINE numpy CG on that SAME wide-stencil
     - a standalone divergence-of-a-known-field check: the offline centered FV divergence of
       f = (cos 2pi x, sin 2pi y) matches the analytic div f = -2pi sin 2pi x + 2pi cos 2pi y to the
       discretization error -- the reference the compiled ctx.divergence reproduces;
-    - ``pops.time.std.condensed_schur`` (now implemented, ADC-421) lowers at theta == 1 and raises for
+    - ``pops.lib.time.std.condensed_schur`` (now implemented, ADC-421) lowers at theta == 1 and raises for
       the deferred theta != 1 extrapolation (the full end-to-end parity is test_time_condensed_schur.py).
 
 (B) End-to-end parity (skips unless the full toolchain is present): the div(grad) Helmholtz Program is
@@ -29,8 +29,10 @@ import sys
 
 
 def _pops_time():
+    global lt  # ready schemes live in pops.lib.time (Spec 4)
     try:
         import pops.time as t
+        import pops.lib.time as lt  # ready schemes live in pops.lib.time (Spec 4)
     except Exception as exc:  # pops not importable here -> skip, never fake
         print("skip test_time_divergence (pops.time unavailable: %s)" % exc)
         sys.exit(0)
@@ -134,18 +136,18 @@ def test_condensed_schur_macro_lowers(t):
     # adds the n+1 momentum extrapolation by factor 1/theta on top (no longer a deferred stub). theta out
     # of (0, 1] raises ValueError. The end-to-end parity lives in test_time_condensed_schur.py.
     P = t.Program("p")
-    t.std.condensed_schur(P, "blk", alpha=1.0, theta=1.0)
+    lt.std.condensed_schur(P, "blk", alpha=1.0, theta=1.0)
     assert P.validate() is True, "the condensed-Schur macro must validate"
     src = P.emit_cpp_program()
     assert "ctx.assemble_schur_coeffs" in src and "ctx.schur_reconstruct" in src, src
     # ADC-427: theta != 1 now lowers (the extrapolation is plain affine algebra), no longer raises.
     P2 = t.Program("p2")
-    t.std.condensed_schur(P2, "blk", alpha=1.0, theta=0.5)
+    lt.std.condensed_schur(P2, "blk", alpha=1.0, theta=0.5)
     assert P2.validate() is True, "condensed_schur(theta != 1) must validate (ADC-427)"
     assert "ctx.schur_reconstruct" in P2.emit_cpp_program(), "theta=0.5 must lower the reconstruct chain"
     # theta out of (0, 1] is still rejected (loud).
     try:
-        t.std.condensed_schur(t.Program("p3"), "blk", alpha=1.0, theta=1.5)
+        lt.std.condensed_schur(t.Program("p3"), "blk", alpha=1.0, theta=1.5)
     except ValueError as exc:
         assert "theta must be in (0, 1]" in str(exc), str(exc)
     else:

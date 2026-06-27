@@ -28,6 +28,7 @@ on real emitted C++ without a model. Run with python3 (PYTHONPATH = built pops p
 import pytest
 
 adctime = pytest.importorskip("pops.time")
+libtime = pytest.importorskip("pops.lib.time")  # ready schemes (Spec 4)
 
 
 def _commit_signature(prog):
@@ -163,7 +164,7 @@ _ALPHA = 1.0
 
 
 def test_condensed_schur_buffer_writers_never_removed():
-    """REGRESSION (the safe-by-default whitelist). ``pops.time.condensed_schur`` assembles its RHS with
+    """REGRESSION (the safe-by-default whitelist). ``pops.lib.time.condensed_schur`` assembles its RHS with
     ``P.schur_rhs(rhs, phi_n, U, ...)`` -- a top-level op whose RESULT is DISCARDED. Its real effect is
     filling the caller-allocated ``rhs`` scalar_field buffer, which ``P.solve_linear(rhs=rhs)`` then
     reads BY BUFFER IDENTITY, not via a dataflow input edge. A blacklist marks ``schur_rhs`` dead and
@@ -174,7 +175,7 @@ def test_condensed_schur_buffer_writers_never_removed():
     extra linear_combine copy / extrapolation / schur_energy buffer-writers)."""
     for theta, c_E in ((1.0, None), (0.5, None), (0.5, 3), (1.0, 3)):
         P = adctime.Program("cs")
-        adctime.std.condensed_schur(P, "blk", alpha=_ALPHA, theta=theta, c_E=c_E)
+        libtime.std.condensed_schur(P, "blk", alpha=_ALPHA, theta=theta, c_E=c_E)
         before = P.emit_cpp_program()
         assert "assemble_schur_rhs" in before, "fixture lost its schur RHS assembly"
 

@@ -33,8 +33,10 @@ import tempfile
 
 
 def _pops_time():
+    global lt  # ready schemes live in pops.lib.time (Spec 4)
     try:
         import pops.time as t
+        import pops.lib.time as lt  # ready schemes live in pops.lib.time (Spec 4)
     except Exception as exc:  # pops not importable here -> skip, never fake
         print("skip test_time_history_checkpoint (pops.time unavailable: %s)" % exc)
         sys.exit(0)
@@ -137,7 +139,7 @@ def _rho0(np, n):
 
 
 def _compile_program(pops, t, builder, prog_name, model_name):
-    """compile_problem for the program built by @p builder (e.g. t.std.adams_bashforth2). Returns the
+    """compile_problem for the program built by @p builder (e.g. lt.std.adams_bashforth2). Returns the
     handle or None if the toolchain is absent."""
     P = t.Program(prog_name)
     builder(P, "blk")
@@ -164,7 +166,7 @@ def _run_section_b(t):
         print("-- (B) skipped: _pops lacks the install_program/history bindings (rebuild _pops) --")
         return None
 
-    compiled = _compile_program(pops, t, t.std.adams_bashforth2, "ab2_ckpt", "ab2_prog_b")
+    compiled = _compile_program(pops, t, lt.std.adams_bashforth2, "ab2_ckpt", "ab2_prog_b")
     if compiled is None:
         return None
 
@@ -250,8 +252,8 @@ def _run_section_c(t):
         print("-- (C) skipped: _pops lacks the install_program/history bindings (rebuild _pops) --")
         return None
 
-    ab2 = _compile_program(pops, t, t.std.adams_bashforth2, "ab2_c", "ab2_prog_c")
-    fe = _compile_program(pops, t, t.std.forward_euler, "fe_c", "fe_prog_c")
+    ab2 = _compile_program(pops, t, lt.std.adams_bashforth2, "ab2_c", "ab2_prog_c")
+    fe = _compile_program(pops, t, lt.std.forward_euler, "fe_c", "fe_prog_c")
     if ab2 is None or fe is None:
         return None
     assert ab2.program_hash != fe.program_hash, \

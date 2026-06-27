@@ -1,8 +1,6 @@
 """pops.lib.time.strang -- Strang and Lie splitting macros, and the condensed Schur source stage.
 
 Exports: strang, lie, condensed_schur.
-
-# SPEC4-TODO: repoint to pops.time once it's a package.
 """
 
 

@@ -12,6 +12,7 @@ try:
     from pops.ir.expr import Const
     from pops.physics.facade import Model
     from pops import time as adctime
+    import pops.lib.time as libtime  # ready schemes live in pops.lib.time (Spec 4)
 except Exception as exc:  # pops not importable here -> skip, never fake
     print("skip test_module_codegen (pops unavailable: %s)" % exc)
     sys.exit(0)
@@ -34,7 +35,7 @@ def _model():
 def test_metadata_block_emitted():
     m = _model()
     P = adctime.Program("pc").bind_operators(m)
-    adctime.std.predictor_corrector_local_linear(
+    libtime.std.predictor_corrector_local_linear(
         P, "plasma", fields_operator="fields_from_state",
         explicit_rate_operator="explicit_rhs", implicit_operator="lorentz")
     src = P.emit_cpp_program(model=m)
@@ -62,7 +63,7 @@ def test_metadata_block_emitted():
 def test_metadata_not_in_step_body():
     m = _model()
     P = adctime.Program("pc").bind_operators(m)
-    adctime.std.predictor_corrector_local_linear(
+    libtime.std.predictor_corrector_local_linear(
         P, "plasma", fields_operator="fields_from_state",
         explicit_rate_operator="explicit_rhs", implicit_operator="lorentz")
     src = P.emit_cpp_program(model=m)

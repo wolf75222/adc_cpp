@@ -72,7 +72,7 @@ class _ProgramAuthoring(_ProgramConstants):
 
             @P.step
             def _(P):
-                pops.time.std.forward_euler(P, "plasma")
+                pops.lib.time.std.forward_euler(P, "plasma")
 
         produces byte-identical IR (same ``_ir_hash``) to calling ``std.forward_euler(P, "plasma")``
         inline. Returns the Program so a one-liner ``P = pops.time.Program("p").step(build)`` also reads

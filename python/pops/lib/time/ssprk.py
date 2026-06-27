@@ -1,13 +1,6 @@
-"""pops.lib.time.ssprk -- Strong Stability Preserving Runge-Kutta schemes (SSPRK2 / SSPRK3).
+"""pops.lib.time.ssprk -- Strong Stability Preserving Runge-Kutta schemes (SSPRK2 / SSPRK3)."""
 
-# SPEC4-TODO: repoint to pops.time once it's a package.
-"""
-
-
-def _stage_rhs(P, U, sources, flux):
-    # SPEC4-TODO: repoint to pops.lib.time._stage_rhs once time.py is a package.
-    from pops import time as _t  # noqa: PLC0415
-    return _t._stage_rhs(P, U, sources, flux)
+from ._helpers import _stage_rhs
 
 
 def ssprk2(P, block, *, sources=("default",), flux=True):

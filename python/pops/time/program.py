@@ -8,16 +8,6 @@ module scope). The class is composed from focused authoring mixins.
 
 cf. docs/sphinx/reference/time-program.md (Phase 8) and the ADC-399 epic.
 """
-import types
-
-from pops.time.equations import (
-    ButcherTableau, RK4_TABLEAU, SSPRK2_TABLEAU,
-    adams_bashforth, adams_bashforth2, condensed_schur, forward_euler, imex_local, lie, rk,
-    rk4, ssprk2, ssprk3, strang,
-)
-from pops.time.equations_implicit import (
-    bdf, explicit_rk, imex_local_linear, predictor_corrector_local_linear,
-)
 from pops.time.program_authoring import _ProgramAuthoring
 from pops.time.program_core import _ProgramCore
 from pops.time.program_inspect import _ProgramInspect
@@ -132,13 +122,3 @@ class CompiledTime:
 
     def __repr__(self):
         return "CompiledTime(substeps=%d, stride=%d, cfl=%r)" % (self.substeps, self.stride, self.cfl)
-
-
-std = types.SimpleNamespace(forward_euler=forward_euler, ssprk2=ssprk2, ssprk3=ssprk3, rk4=rk4,
-                            rk=rk, RK4_TABLEAU=RK4_TABLEAU, SSPRK2_TABLEAU=SSPRK2_TABLEAU,
-                            ButcherTableau=ButcherTableau,
-                            adams_bashforth=adams_bashforth, adams_bashforth2=adams_bashforth2,
-                            strang=strang, lie=lie, imex_local=imex_local, bdf=bdf,
-                            condensed_schur=condensed_schur,
-                            predictor_corrector_local_linear=predictor_corrector_local_linear,
-                            explicit_rk=explicit_rk, imex_local_linear=imex_local_linear)

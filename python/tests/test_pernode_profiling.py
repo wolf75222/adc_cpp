@@ -16,19 +16,20 @@ import re
 import pytest
 
 t = pytest.importorskip("pops.time")
+lt = pytest.importorskip("pops.lib.time")  # ready schemes (Spec 4)
 
 
 def _forward_euler():
-    """A small real Program: forward Euler over one block via pops.time.std."""
+    """A small real Program: forward Euler over one block via pops.lib.time.std."""
     P = t.Program("pernode_fe")
-    t.std.forward_euler(P, "gas")
+    lt.std.forward_euler(P, "gas")
     return P
 
 
 def _ssprk3():
     """A multi-stage Program (three rhs / two intermediate lincomb / one commit)."""
     P = t.Program("pernode_ssprk3")
-    t.std.ssprk3(P, "gas")
+    lt.std.ssprk3(P, "gas")
     return P
 
 

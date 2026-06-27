@@ -885,6 +885,7 @@ Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning
 
 ### Changed
 
+- **Spec 4 ready time schemes home to `pops.lib.time`** (ADC-477, epic ADC-467, sections 6 / 14): the ready time-stepping schemes (forward_euler / ssprk2 / ssprk3 / rk4 / rk / adams_bashforth / strang / lie / condensed_schur / imex_local / bdf / explicit_rk / imex_local_linear / predictor_corrector_local_linear), their `std` bundle and the `_stage_rhs` helper now live in `pops.lib.time` (the scheme library); `pops.time` keeps ONLY the temporal language (`Program`, `CompiledTime`, the `Value` / `StageStateSet` values, the `Schedule` scheduler, and the `eliminate_*` / `optimize` IR-optimizer wrappers). This inverts the Spec-3 leftover where `pops.time` was canonical and `pops.lib.time` forwarded to it (the `pops.lib.time` scheme files no longer take the lazy `pops.time` hop), and keeps `pops.time` free of any `pops.lib.time` import (the acyclic layering time -> {ir, model}). `pops.time.std` is removed; use `pops.lib.time.std` (the bundle mirrors the old attribute surface, byte-identical IR). The IR each scheme builds is unchanged (`_ir_hash` byte-identical before and after).
 - **Spec 4 runtime layer extracted to `pops.runtime`** (ADC-468, epic ADC-467): the
   ~3585-line `python/pops/__init__.py` is now a minimal hub (under 120 lines). The
   runtime objects (System / AmrSystem, the composable bricks and scheme/time policies,

@@ -8,7 +8,7 @@ no silent CPU fallback, no per-step Python.
 
 This benchmark times the SSPRK3 step loop for the SAME 2D Euler model two ways:
   1. native     -- ``pops.Explicit(method="ssprk3")`` driving ``sim.step``;
-  2. program    -- ``pops.time.std.ssprk3`` -> ``compile_problem`` -> ``sim.install_program``,
+  2. program    -- ``pops.lib.time.std.ssprk3`` -> ``compile_problem`` -> ``sim.install_program``,
                    which lowers to the same three Shu-Osher stages.
 It reports ms/step for each and the generated/native ratio. Needs a compiler + Kokkos
 (``POPS_KOKKOS_ROOT``); prints a skip notice and exits 0 otherwise (run it on ROMEO).
@@ -29,6 +29,7 @@ try:
     from pops.ir.ops import sqrt
     from pops.physics.facade import Model
     from pops import time as adctime
+    import pops.lib.time as libtime  # ready schemes live in pops.lib.time (Spec 4)
 except Exception as exc:  # noqa: BLE001
     print("skip operator_first_perf (pops/numpy unavailable: %s)" % exc)
     sys.exit(0)
@@ -87,7 +88,7 @@ def native_sim():
 def program_sim():
     m = euler_model("perf_program")
     prog = adctime.Program("ssprk3_perf")
-    adctime.std.ssprk3(prog, "gas", sources=[], flux=True)
+    libtime.std.ssprk3(prog, "gas", sources=[], flux=True)
     compiled = pops.compile_problem(model=m, time=prog)
     sim = pops.System(n=N, L=1.0, periodic=True)
     sim.add_equation("gas", m.compile(backend="production"),

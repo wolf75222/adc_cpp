@@ -13,6 +13,7 @@ try:
     from pops.ir.expr import Const
     from pops.physics.facade import Model
     from pops import time as adctime
+    import pops.lib.time as libtime  # ready schemes live in pops.lib.time (Spec 4)
 except Exception as exc:  # pops not importable here -> skip, never fake
     print("skip test_operator_introspection (pops unavailable: %s)" % exc)
     sys.exit(0)
@@ -58,7 +59,7 @@ def test_dsl_model_introspection():
 def test_compiled_problem_introspection():
     m = _model()
     P = adctime.Program("pc").bind_operators(m)
-    adctime.std.predictor_corrector_local_linear(
+    libtime.std.predictor_corrector_local_linear(
         P, "plasma", fields_operator="fields_from_state",
         explicit_rate_operator="explicit_rhs", implicit_operator="lorentz")
     # A CompiledProblem built directly: introspection reads model metadata, never the .so.

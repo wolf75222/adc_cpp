@@ -27,8 +27,8 @@ Multi-step:
 Predictor-corrector:
     predictor_corrector_local_linear
 
-# SPEC4-TODO: repoint all lazy `from pops import time as _t` references to
-# pops.time once time.py is a package.
+Bundle:
+    std (a SimpleNamespace mirroring the historical pops.time.std surface)
 """
 
 from .euler import forward_euler
@@ -38,6 +38,7 @@ from .strang import strang, lie, condensed_schur
 from .imex import imex_local, imex_local_linear
 from .multistep import adams_bashforth, adams_bashforth2, bdf
 from .predictor_corrector import predictor_corrector_local_linear
+from .std import std
 
 __all__ = [
     # Euler
@@ -65,4 +66,6 @@ __all__ = [
     "bdf",
     # Predictor-corrector
     "predictor_corrector_local_linear",
+    # Bundle
+    "std",
 ]

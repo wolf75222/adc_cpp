@@ -1,15 +1,9 @@
 """pops.lib.time.rk -- Classic explicit Runge-Kutta schemes (RK4, generic rk) and Butcher tableaux.
 
 Exports: rk4, rk, explicit_rk, ButcherTableau, RK4_TABLEAU, SSPRK2_TABLEAU.
-
-# SPEC4-TODO: repoint to pops.time once it's a package.
 """
 
-
-def _stage_rhs(P, U, sources, flux):
-    # SPEC4-TODO: repoint to pops.lib.time._stage_rhs once time.py is a package.
-    from pops import time as _t  # noqa: PLC0415
-    return _t._stage_rhs(P, U, sources, flux)
+from ._helpers import _opcall, _stage_rhs
 
 
 def rk4(P, block, *, sources=("default",), flux=True):
@@ -118,7 +112,6 @@ def explicit_rk(P, block, *, rhs_operator, fields_operator=None, tableau=None, A
     affine stage chain as :func:`rk`. Pass a ``ButcherTableau`` / ``(A, b, c)`` via ``tableau`` or the
     raw ``A`` / ``b`` / ``c``. ``fields_operator`` is optional (a pure-flux rate needs no fields).
     """
-    from ._helpers import _opcall  # noqa: PLC0415
     if tableau is None:
         if A is None or b is None:
             raise ValueError("explicit_rk: provide a tableau or A and b")

@@ -1,9 +1,9 @@
 """pops.lib.time.imex -- IMEX (implicit-explicit) time-stepping schemes.
 
 Exports: imex_local, imex_local_linear.
-
-# SPEC4-TODO: repoint to pops.time once it's a package.
 """
+
+from ._helpers import _opcall
 
 
 def imex_local(P, block, *, linear_source, sources=("default",), flux=True, theta=1.0):
@@ -49,7 +49,6 @@ def imex_local_linear(P, block, *, explicit_operator, implicit_operator, fields_
     composing the typed ``explicit_operator`` and ``implicit_operator`` (and an optional
     ``fields_operator``) by name. Requires ``P.bind_operators(module)``.
     """
-    from ._helpers import _opcall  # noqa: PLC0415
     if not (0.0 < theta <= 1.0):
         raise ValueError("imex_local_linear: theta must be in (0, 1]")
     u = P.state(block)

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Compiled pops.time.std.strang reproduces native pops.Strang on a simple case (ADC-410).
+"""Compiled pops.lib.time.std.strang reproduces native pops.Strang on a simple case (ADC-410).
 
 The Strang splitting macro H(dt/2); S(dt); H(dt/2) is expressed ONCE as Program IR via the
-``pops.time.std.strang`` combinator (no scheme-specific C++ stepper). This test demonstrates that the
+``pops.lib.time.std.strang`` combinator (no scheme-specific C++ stepper). This test demonstrates that the
 COMPILED Strang composition runs end to end C++-side and reproduces the native engine Strang macro-step
 (SystemStepper::step_strang) to BIT precision on a simple, faithfully replicable case.
 
@@ -49,6 +49,7 @@ def _skip(msg):
 
 
 from pops import time as adctime  # noqa: E402  -- IR construction is pure Python, always available
+import pops.lib.time as libtime  # ready schemes live in pops.lib.time (Spec 4)
 
 
 # ============================ (A) IR construction + codegen: pure Python =======================
@@ -67,10 +68,10 @@ def no_op_source(prog, U, frac):  # noqa: ARG001  -- frac unused: S is the ident
 
 
 def strang_program(name="strang_parity", block="ions"):
-    """The compiled Strang program H(dt/2); S(dt); H(dt/2) built via pops.time.std.strang (no special
+    """The compiled Strang program H(dt/2); S(dt); H(dt/2) built via pops.lib.time.std.strang (no special
     Strang class -- the same combinator + affine algebra over dt)."""
     P = adctime.Program(name)
-    adctime.std.strang(P, block, half_flow, no_op_source)
+    libtime.std.strang(P, block, half_flow, no_op_source)
     return P
 
 

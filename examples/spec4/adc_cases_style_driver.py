@@ -8,7 +8,7 @@ sequencing) lives here; the scenario-specific half (grid choice, the actual init
 condition, diagnostics) is a clearly-marked stub that BELONGS IN adc_cases.
 
     model    = pops.physics.Model(...)           # reusable physics
-    program  = pops.time.forward_euler(...)      # reusable scheme (library macro)
+    program  = pops.lib.time.forward_euler(...)  # reusable scheme (library macro)
     compiled = pops.compile_problem(model, program)
     sim.install(compiled, instances={...}, solvers={...})   # Spec section 22 entry point
 
@@ -22,9 +22,10 @@ Run::
 """
 import sys
 
+from pops.lib.time import forward_euler
 from pops.math import ddt, div, grad, laplacian, sqrt
 from pops.physics import Model
-from pops.time import Program, forward_euler
+from pops.time import Program
 
 
 def build_model():
@@ -65,11 +66,9 @@ def build_model():
 def build_program(module):
     """Reusable scheme: one Forward-Euler step from the time-scheme library.
 
-    Spec 4 ships ``forward_euler`` both as ``pops.time.forward_euler`` and as
-    ``pops.lib.time.forward_euler``. On the PR-D branch the ``pops.lib.time.euler``
-    forwarder still reaches a moved-away ``pops.time._stage_rhs`` helper and raises
-    ``AttributeError`` (PR-E/PR-F punch-list); we use the working ``pops.time`` entry
-    point here and they should be unified before release.
+    Spec 4 (s6 / s14) homes the ready schemes in ``pops.lib.time``: a scheme is a library
+    macro that BUILDS ``pops.time.Program`` IR, so we import ``forward_euler`` from
+    ``pops.lib.time`` and the Program (the time language) from ``pops.time``.
     """
     program = Program("forward_euler_driver")
     program.bind_operators(module)

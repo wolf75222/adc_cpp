@@ -15,7 +15,7 @@ SAME discrete operator. The single conservative variable doubles as the scalar f
 ``(I - alpha*div(grad)) phi = U`` and commits ``phi`` back into the block.
 
 This is the scalar divergence + Krylov building block of the condensed-Schur Program (acceptance 32);
-the FULL anisotropic ``pops.time.std.condensed_schur`` macro (ADC-421) is in
+the FULL anisotropic ``pops.lib.time.std.condensed_schur`` macro (ADC-421) is in
 ``condensed_schur_program.py`` and ``python/tests/test_time_condensed_schur.py``. The native
 ``pops.CondensedSchur`` source stepper remains supported. Run::
 
