@@ -309,6 +309,18 @@ class CompiledProblem:
                 "%s: this CompiledProblem carries no Program (the lowered pops.time.Program is "
                 "unavailable on this handle), so the IR / C++ / schedule cannot be dumped." % who)
         return program
+    def inspect_amr(self, layout=None):
+        """STATIC AMR report on this compiled artifact (Spec 5 sec.8.12 / sec.8.4).
+
+        A compiled time ``Program`` carries NO AMR layout descriptor (it lowers a whole-system time
+        program, a single-level ``System`` concept today -- ``AmrSystem`` has no ``install_program``
+        seam). So this delegates to the top-level :func:`pops.inspect_amr` on an EXPLICIT ``layout``
+        argument (an ``pops.mesh.layouts.AMR`` / ``Uniform`` descriptor), and with ``layout=None``
+        returns the native AMR envelope report -- never a fabricated hierarchy the artifact does not
+        carry. @p layout an optional AMR / Uniform layout descriptor (default: the native envelope).
+        """
+        from pops import inspect_amr
+        return inspect_amr(layout)
 
     def __str__(self):
         """A short, deterministic, array-free summary (Spec 5 sec.12.1, #40-41).
@@ -420,6 +432,21 @@ class CompiledModel:
                 comps.append(0.5 + 0.0 * bump)
         sim._s.set_state("check", np.stack(comps).ravel())
         return sim.check_model("check", raise_on_error=raise_on_error, rtol=rtol, atol=atol)
+
+    def inspect_amr(self, layout=None):
+        """STATIC AMR report on this compiled MODEL (Spec 5 sec.8.12 / sec.8.4).
+
+        A ``CompiledModel`` is a per-block physics ``.so``; ``target='amr_system'`` means it is
+        loadable on the native AMR hierarchy (``add_equation``), but the model carries NO layout
+        descriptor (the levels / ratio / regrid policy belong to the ``AmrSystem`` it is installed
+        in, not to the model). So this delegates to the top-level :func:`pops.inspect_amr` on an
+        EXPLICIT ``layout`` argument and returns the native AMR envelope report for ``layout=None``;
+        for a target='system' model the report still describes the native AMR envelope (a model is
+        AMR-installable only with target='amr_system'). It never fabricates a hierarchy. @p layout
+        an optional AMR / Uniform layout descriptor (default: the native envelope).
+        """
+        from pops import inspect_amr
+        return inspect_amr(layout)
 
     def __repr__(self):
         return ("CompiledModel(backend=%r, target=%r, so_path=%r, n_vars=%d, gamma=%r, n_aux=%d, "

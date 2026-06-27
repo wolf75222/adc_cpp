@@ -314,6 +314,25 @@ class AmrSystem(_AmrSystemEquation, _AmrSystemIO):
                             "(pops.dsl.CoupledSource(...).compile(...)): the AMR coupled source is "
                             "MULTI-BLOCK and described in formulas")
 
+    @property
+    def amr(self):
+        """The live AMR runtime inspection handle (Spec 5 sec.8.12), an
+        :class:`pops.runtime.amr.AmrRuntimeView`.
+
+        Bound to THIS built hierarchy: ``sim.amr.patch_table()`` /
+        ``sim.amr.hierarchy_snapshot()`` / ``sim.amr.explain_regrid()`` /
+        ``explain_ghosts()`` / ``explain_reflux()`` / ``explain_checkpoint()`` return short, inert
+        reports of the patches that actually exist, the regrid cadence in force, and the
+        ghost / reflux / checkpoint route limitations. The view READS the runtime (the box
+        accessors + the retained config); it builds / allocates / steps NOTHING.
+
+        ``System.amr`` does not exist: the inspection surface is AMR-specific (a uniform System
+        carries no hierarchy). Use ``pops.inspect_amr(layout)`` for the STATIC authoring report.
+        """
+        from pops.runtime.amr import AmrRuntimeView  # lazy: keeps the constructor import-light.
+
+        return AmrRuntimeView(self)
+
     def __str__(self):
         """Short, array-free summary: block names on the AMR hierarchy (Spec 5 sec.12.1).
 
