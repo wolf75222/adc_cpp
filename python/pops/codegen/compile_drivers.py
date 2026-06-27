@@ -47,6 +47,7 @@ from pops.codegen.compile_emit import (
     emit_cpp_aot_source,
     emit_cpp_native_loader,
 )
+from pops.codegen.backends import lower_backend
 
 
 # ---------------------------------------------------------------------------
@@ -209,6 +210,10 @@ def compile_model(model, so_path=None, include=None, backend="auto", name=None, 
     from pops.codegen.toolchain import resolve_auto_backend
 
     m = model
+    # ADDITIVE (Spec 5 sec.8.15): accept a typed backend descriptor (Production()/AOT()/JIT())
+    # as well as the legacy string; lower it to the token the _BACKENDS table keys on. A plain
+    # string passes through unchanged so the existing consumers keep working.
+    backend = lower_backend(backend)
     if backend == "auto":
         backend, _auto_reason = resolve_auto_backend(include)
     if backend not in _BACKENDS:
@@ -366,6 +371,9 @@ def compile_problem(so_path=None, *, model=None, time=None, backend="production"
     import tempfile
     from pops.codegen.loader import CompiledProblem
 
+    # ADDITIVE (Spec 5 sec.8.15): accept a typed backend descriptor (Production()) as well as the
+    # legacy string; lower it before the production-only guard so both selectors behave the same.
+    backend = lower_backend(backend)
     if backend != "production":
         raise ValueError("compiled time programs require backend='production'")
     if target != "system":

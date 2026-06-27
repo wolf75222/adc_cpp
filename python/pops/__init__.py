@@ -31,6 +31,7 @@ from pops.runtime.threading import set_threads, has_kokkos, parallel_info  # noq
 from pops.runtime.doctor import doctor, capabilities  # noqa: F401
 from pops.runtime.mesh import CartesianMesh, PolarMesh, AuxHalo  # noqa: F401
 from pops.runtime.python_flux import PythonFlux  # noqa: F401
+from pops.runtime.profile import Profile, PerformanceSummary  # noqa: F401
 from pops.runtime.bricks import (  # noqa: F401
     Scalar, FluidState, ExB, CompressibleFlux, IsothermalFlux,
     NoSource, PotentialForce, GravityForce, MagneticLorentzForce, PotentialMagneticForce,
@@ -42,7 +43,8 @@ from pops.runtime.bricks import (  # noqa: F401
     Ionization, Collision, ThermalExchange,
     Spatial, FiniteVolume, Explicit, _role_to_stable, _norm_implicit,
     IMEX, SourceImplicit, SourceImplicitBE, IMEXRK, Implicit, Role,
-    CondensedSchur, Split, Strang,
+    CondensedSchur, ElectrostaticLorentzSchur, Split, Strang,
+    Dirichlet, Neumann, Periodic,
 )
 
 __all__ = [
@@ -52,11 +54,13 @@ __all__ = [
     "NoSource", "PotentialForce", "GravityForce", "MagneticLorentzForce", "PotentialMagneticForce",
     "ChargeDensity", "BackgroundDensity", "GravityCoupling",
     "Spatial", "FiniteVolume", "Explicit", "IMEX", "IMEXRK", "SourceImplicit", "SourceImplicitBE",
-    "Implicit", "Split", "Strang", "CondensedSchur", "Role", "integrate",
+    "Implicit", "Split", "Strang", "CondensedSchur", "ElectrostaticLorentzSchur", "Role", "integrate",
+    "Dirichlet", "Neumann", "Periodic",
     "elliptic", "div_eps_grad", "charge_density", "composite_rhs",
     "electric_field_from_potential", "EllipticSolver", "EllipticModel",
     "Ionization", "Collision", "ThermalExchange",
-    "PythonFlux", "time", "model", "math", "physics", "lib", "mesh",
+    "PythonFlux", "Profile", "PerformanceSummary",
+    "time", "model", "math", "physics", "lib", "mesh",
     "params", "output", "external", "fields", "linalg", "solvers",
     "abi_key", "capabilities", "inspect_capabilities", "inspect_amr",
     "set_threads", "has_kokkos", "parallel_info", "doctor",

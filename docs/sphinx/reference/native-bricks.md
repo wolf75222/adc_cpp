@@ -35,6 +35,12 @@ the compatible transport brick. It is the `state=` argument of `pops.Model(...)`
 a `ValueError`). The `gamma` / `cs2` arguments are stored even when the `kind` does not use them
 ; only the one of the chosen `kind` is reported into the spec.
 
+Typed constructors (Spec 5 sec.14.2.5) name the `kind` with a type instead of a magic string,
+ADDITIVELY (the `kind=` form keeps working) : `pops.FluidState.compressible(gamma=1.4)` ==
+`pops.FluidState(kind="compressible", gamma=1.4)` and `pops.FluidState.isothermal(cs2=0.5,
+vacuum_floor=0.0)` == `pops.FluidState(kind="isothermal", cs2=0.5, vacuum_floor=0.0)`. They build
+the SAME inert state object and produce a bit-identical `ModelSpec` through `pops.Model(...)`.
+
 `vacuum_floor` (isothermal only, native path only) bounds the velocity at quasi-vacuum : when
 `> 0` the model reads `u = m / max(rho, vacuum_floor)`, capping the wave speed and the advective
 flux where the flow evacuates the background (`rho -> ~0`). It leaves the conserved state
@@ -153,6 +159,17 @@ sim.add_elliptic_model(
     bc="dirichlet", wall="circle", wall_radius=0.40,
 )
 ```
+
+#### Native boundary bricks (typed `bc=` token)
+
+The native elliptic (Poisson) boundary is selected by the `bc=` string token (`"auto"` /
+`"periodic"` / `"dirichlet"` / `"neumann"`). The typed constructors `pops.Periodic()` /
+`pops.Dirichlet()` / `pops.Neumann()` (Spec 5 sec.14.2.5) name that choice with a type ; each
+exposes a `.bc` attribute and a `.lower()` method that return the SAME token, so
+`sim.set_poisson(bc=pops.Dirichlet().bc)` == `sim.set_poisson(bc="dirichlet")`. They are inert
+(they only carry / lower the token) and are DISTINCT from `pops.fields.bcs` (the per-face field
+VALUE conditions of a `pops.fields` elliptic problem) and from `pops.mesh.boundaries` (the domain
+TOPOLOGY descriptors) ; this brick is the native Poisson-solver boundary token.
 
 ## Composing a model
 
@@ -295,6 +312,12 @@ MG) and reconstructs the velocity. Everything is C++ (no per-cell Python callbac
 `CondensedSchur` requires from the block the roles `Density` / `MomentumX` / `MomentumY` and a `B_z` field
 (`set_magnetic_field`) ; a missing role / `B_z` raises an explicit error at `add_equation`. It
 is wired in cartesian and in polar ; the polar counterpart is single-rank (`n_ranks > 1` raises).
+
+`pops.ElectrostaticLorentzSchur(theta=0.5, alpha=1.0, ...)` (Spec 5 sec.14.2.5) is the typed
+constructor for the (currently unique) `kind` : it is a `CondensedSchur` subclass that pins
+`kind="electrostatic_lorentz"` and carries every other argument identically, so `pops.Split` /
+`pops.Strang` / `add_equation` accept it unchanged. Passing `kind=` to it is a `TypeError`
+(the kind is fixed by the type).
 
 ### Multirate : substeps and stride
 

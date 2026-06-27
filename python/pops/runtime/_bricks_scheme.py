@@ -180,6 +180,18 @@ class Spatial:
         self.positivity_floor = pf
         self.wave_speed_cache = bool(wave_speed_cache)
 
+    def __str__(self):
+        # Spec 5 sec.12.1: a SHORT, deterministic one-line summary of the chosen scheme (the
+        # default object repr leaks a memory address, so print() was unreadable). Only the
+        # non-default knobs (positivity floor, wave-speed cache) are appended, to keep the line
+        # tight on the common path. __repr__ is intentionally left as the default for debug.
+        body = "limiter=%s, flux=%s, recon=%s" % (self.limiter, self.flux, self.recon)
+        if self.positivity_floor:
+            body += ", positivity_floor=%g" % self.positivity_floor
+        if self.wave_speed_cache:
+            body += ", wave_speed_cache=True"
+        return "Spatial(%s)" % body
+
     @classmethod
     def _from_tokens(cls, limiter, flux, recon, *, positivity_floor=None, wave_speed_cache=False):
         """Build a Spatial from ALREADY-canonical string tokens (internal lowering only).

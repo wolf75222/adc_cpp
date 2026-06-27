@@ -414,6 +414,12 @@ class CondensedSchur:
                     or self.energy_spec or self.bz_aux_component >= 0)
 
 
+# The typed constructor ElectrostaticLorentzSchur(...) for the (currently unique) CondensedSchur
+# kind lives in _bricks_typed (Spec 5 sec.14.2.5 typed native-brick constructors), beside the typed
+# native boundary bricks, to keep this module under the 500-line cap. pops.runtime.bricks re-exports
+# it next to CondensedSchur.
+
+
 class Split:
     """Temporal policy EXPLICIT / IMPLICIT SPLITTING: an EXPLICIT hyperbolic transport stage
     (pops.Explicit, SSPRK) followed by a separate SOURCE stage (cf. docs/SCHUR_CONDENSATION_DESIGN.md

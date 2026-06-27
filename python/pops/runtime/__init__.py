@@ -27,3 +27,6 @@ Example::
     sim.set_density("ne", ne_numpy)
     sim.step_cfl(0.4)
 """
+from pops.runtime.profile import PerformanceSummary, Profile  # noqa: F401
+
+__all__ = ["Profile", "PerformanceSummary"]

@@ -20,6 +20,10 @@ from .library_codegen import emit_library_cpp  # noqa: F401
 from .optimization import Optimization, ConservativeFusion, Disabled  # noqa: F401
 from .math_options import StrictMath, FastMath, DebugMath, GpuRegisterAware  # noqa: F401
 from . import optimization, math_options  # noqa: F401
+# Spec 5 (sec.8.15 / criterion 22): typed compile-backend descriptors (Production/AOT/JIT)
+# that lower to the legacy backend string the drivers consume.
+from .backends import Production, AOT, JIT, lower_backend  # noqa: F401
+from . import backends  # noqa: F401
 
 __all__ = [
     "pops_header_signature",
@@ -35,4 +39,5 @@ __all__ = [
     "Optimization", "ConservativeFusion", "Disabled",
     "StrictMath", "FastMath", "DebugMath", "GpuRegisterAware",
     "optimization", "math_options",
+    "Production", "AOT", "JIT", "lower_backend", "backends",
 ]

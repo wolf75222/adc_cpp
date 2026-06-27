@@ -36,6 +36,29 @@ class FluidState:
             raise ValueError("FluidState: vacuum_floor >= 0 (0 = inactive)")
         self.vacuum_floor = float(vacuum_floor)
 
+    @classmethod
+    def compressible(cls, gamma=1.4):
+        """Typed constructor for the COMPRESSIBLE fluid state (Spec 5 sec.14.2.5).
+
+        ``pops.FluidState.compressible(gamma=1.4)`` is the typed equivalent of
+        ``pops.FluidState(kind="compressible", gamma=1.4)``: it builds the SAME inert state object
+        (kind="compressible", carrying gamma -> spec.gamma via Model) instead of selecting the kind
+        with a magic string. Pairs with CompressibleFlux (4 variables [rho, rho_u, rho_v, E]).
+        """
+        return cls(kind="compressible", gamma=gamma)
+
+    @classmethod
+    def isothermal(cls, cs2=0.5, vacuum_floor=0.0):
+        """Typed constructor for the ISOTHERMAL fluid state (Spec 5 sec.14.2.5).
+
+        ``pops.FluidState.isothermal(cs2=0.5, vacuum_floor=0.0)`` is the typed equivalent of
+        ``pops.FluidState(kind="isothermal", cs2=0.5, vacuum_floor=0.0)``: it builds the SAME inert
+        state object (kind="isothermal", carrying cs2 -> spec.cs2 and vacuum_floor ->
+        spec.vacuum_floor via Model). Pairs with IsothermalFlux (3 variables [rho, rho_u, rho_v]).
+        See the class docstring for the vacuum_floor (ADC-77) semantics.
+        """
+        return cls(kind="isothermal", cs2=cs2, vacuum_floor=vacuum_floor)
+
 
 # --- Transport bricks ---------------------------------------------------
 class ExB:

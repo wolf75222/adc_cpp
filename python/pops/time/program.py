@@ -45,6 +45,14 @@ class Program(_ProgramCore, _ProgramLocal, _ProgramSolve, _ProgramAuthoring,
         # per node id).
         self._coupled_scratch = {}
 
+    def __str__(self):
+        """Short, deterministic, array-free summary -- never the full SSA IR.
+
+        Prints the program name, the op count and the committed block names (Spec 5 sec.12.1):
+        a one-line header, not a node-by-node dump.
+        """
+        return "Program(name=%r, ops=%d, blocks=%s)" % (
+            self.name, len(self._values), sorted(self._commits))
 
     # --- C++ codegen (lowering to a problem.so source) lives in pops.codegen; the authoring
     # Program delegates via a LAZY import so pops.time stays free of any codegen/_pops edge. ---

@@ -2,11 +2,13 @@
 
 Public façade that re-exports the value objects split across ``_bricks_model`` (state /
 transport / source / elliptic bricks + Model composer + hybrid composition + EPM),
-``_bricks_scheme`` (couplings + Spatial / FiniteVolume + Explicit) and ``_bricks_time`` (the
-implicit / split time policies + Role + the mask helpers). Split into three modules to satisfy
-the <=500-line cap ; this module keeps ``from pops.runtime.bricks import *`` working as the
-single import point. ``abi_key`` (the module ABI key on the extension) is re-exported here too,
-surfaced through the runtime layer (it comes from ``pops._bootstrap``).
+``_bricks_scheme`` (couplings + Spatial / FiniteVolume + Explicit), ``_bricks_time`` (the
+implicit / split time policies + Role + the mask helpers) and ``_bricks_typed`` (the Spec 5
+sec.14.2.5 typed native-brick constructors : the native elliptic boundary bricks ``Dirichlet`` /
+``Neumann`` / ``Periodic`` and ``ElectrostaticLorentzSchur``). Split into modules to satisfy the
+<=500-line cap ; this module keeps ``from pops.runtime.bricks import *`` working as the single
+import point. ``abi_key`` (the module ABI key on the extension) is re-exported here too, surfaced
+through the runtime layer (it comes from ``pops._bootstrap``).
 """
 
 from pops._bootstrap import abi_key
@@ -29,6 +31,9 @@ from pops.runtime._bricks_time import (
     IMEX, SourceImplicit, SourceImplicitBE, IMEXRK, Implicit, Role,
     CondensedSchur, Split, Strang,
 )
+from pops.runtime._bricks_typed import (
+    Dirichlet, Neumann, Periodic, ElectrostaticLorentzSchur,
+)
 
 __all__ = [
     "abi_key",
@@ -42,5 +47,6 @@ __all__ = [
     "Ionization", "Collision", "ThermalExchange",
     "Spatial", "FiniteVolume", "Explicit", "_role_to_stable", "_norm_implicit",
     "IMEX", "SourceImplicit", "SourceImplicitBE", "IMEXRK", "Implicit", "Role",
-    "CondensedSchur", "Split", "Strang",
+    "CondensedSchur", "ElectrostaticLorentzSchur", "Split", "Strang",
+    "Dirichlet", "Neumann", "Periodic",
 ]

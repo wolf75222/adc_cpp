@@ -16,6 +16,42 @@ from pops.runtime._system_diagnostics import _SystemDiagnostics
 from pops.runtime._system_install import _SystemInstall
 from pops.runtime._system_io import _SystemIO
 from pops.runtime._system_unified_install import _SystemUnifiedInstall
+from pops.runtime.profile import PerformanceSummary, Profile
+
+
+class _ProfileSession:
+    """The typed profiling context manager System.profile() returns (Spec 5 sec.12.5).
+
+    ``__enter__`` resets + enables the native profiler; ``__exit__`` snapshots the report into a
+    :class:`PerformanceSummary` and disables the profiler. ``summary()`` works inside OR after the
+    ``with`` block (it re-reads the live report while open, returns the closing snapshot after).
+    The off-by-default contract holds: nothing here enables until the block is entered.
+    """
+
+    def __init__(self, system, profile):
+        self._system = system
+        self._profile = profile
+        self._summary = None
+
+    def __enter__(self):
+        self._system.reset_profiling()
+        self._system.enable_profiling()
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self._summary = PerformanceSummary(self._system.profile_report(), self._profile)
+        self._system.disable_profiling()
+        return False
+
+    def summary(self):
+        """Return a :class:`PerformanceSummary` of the run.
+
+        Inside the ``with`` block it reads the live native report; after the block it returns the
+        snapshot taken on ``__exit__``.
+        """
+        if self._summary is not None:
+            return self._summary
+        return PerformanceSummary(self._system.profile_report(), self._profile)
 
 
 class System(_SystemInstall, _SystemUnifiedInstall, _SystemAuxState,
@@ -66,6 +102,29 @@ class System(_SystemInstall, _SystemUnifiedInstall, _SystemAuxState,
             steps += 1
         return steps
 
+    def profile(self, profile=None):
+        """Typed profiling context manager (Spec 5 sec.12.5, criteria 41-44).
+
+        Usage::
+
+            with sim.profile(pops.Profile.Basic()) as prof:
+                sim.run(0.1)
+            print(prof.summary())
+
+        @p profile is a :class:`pops.Profile` level (``Profile.Basic()`` / ``Profile.Advanced()``);
+        with no argument the level comes from ``POPS_PROFILE`` (unset / ``off`` -> Basic()). The
+        manager enables the native profiler on entry and disables it on exit, so a plain run (no
+        ``with sim.profile()``) leaves profiling off -- the off-by-default contract. ``prof.summary()``
+        returns a :class:`pops.PerformanceSummary`.
+        """
+        if profile is None:
+            profile = Profile.from_env(default=Profile.Basic())
+        elif not isinstance(profile, Profile):
+            raise TypeError(
+                "System.profile: expected a pops.Profile (Profile.Basic()/Advanced()), got %r"
+                % type(profile).__name__)
+        return _ProfileSession(self, profile)
+
     def block_names(self):
         """Names of the added blocks, in order (useful for a Python integrator).
 
@@ -73,6 +132,17 @@ class System(_SystemInstall, _SystemUnifiedInstall, _SystemAuxState,
         add_dynamic_block (.so JIT) and add_compiled_block (.so AOT), not only add_block.
         """
         return list(self._s.block_names())
+
+    def __str__(self):
+        """Short, array-free summary: the installed block names (Spec 5 sec.12.1).
+
+        Deliberately field-data-free -- it prints the block registry, never a Fab dump.
+        """
+        try:
+            blocks = self.block_names()
+        except Exception:  # pragma: no cover - defensive: _System not fully wired
+            blocks = []
+        return "System(blocks=%s)" % (blocks,)
 
     @staticmethod
     def abi_key():
