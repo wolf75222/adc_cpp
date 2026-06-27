@@ -27,7 +27,7 @@ delivered during the audit already corrected them**, an independent confirmation
 
 ## 2. DSL compiler resolution chain (new, centralized)
 
-`_default_cxx()` ([dsl.py](../python/pops/dsl.py)): explicit `cxx=` -> `$POPS_CXX` -> **build
+`_default_cxx()` ([codegen/toolchain.py](../python/pops/codegen/toolchain.py)): explicit `cxx=` -> `$POPS_CXX` -> **build
 compiler** (`__cxx_compiler__`, if present on the machine) -> PATH (`c++`/`g++`/`clang++`,
 legacy). The Kokkos/CUDA path keeps its priority (`POPS_KOKKOS_CXX`, explicit `nvcc_wrapper`).
 
