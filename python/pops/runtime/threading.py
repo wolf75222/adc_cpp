@@ -14,6 +14,29 @@ All readers/writers live in ``pops.runtime``, so the flag never leaks across lay
 
 _first_system_built = False
 
+# POPS_THREADS: default thread count for set_threads() called with no argument. An explicit
+# set_threads(n) ALWAYS wins; the env only supplies the default. Transparent coercion: an
+# unparseable or non-positive value is ignored (falls back to os.cpu_count()), never raised.
+_THREADS_ENV_VAR = "POPS_THREADS"
+
+
+def _threads_from_env():
+    """Resolve a positive thread count from ``POPS_THREADS``, or None when unset/unusable.
+
+    Returns None (so the caller falls back to ``os.cpu_count()``) when the variable is unset,
+    blank, non-integer, or < 1. This mirrors the lenient parsing used elsewhere (POPS_PROFILE,
+    POPS_FOREACH_SERIAL_THRESHOLD): a bad value is ignored, not rejected.
+    """
+    import os
+    raw = os.environ.get(_THREADS_ENV_VAR)
+    if raw is None or not raw.strip():
+        return None
+    try:
+        value = int(raw.strip())
+    except ValueError:
+        return None
+    return value if value >= 1 else None
+
 
 def has_kokkos():
     """True if _pops was compiled with Kokkos (multi-thread/GPU possible), False if SERIAL.
@@ -33,14 +56,19 @@ def set_threads(n=None):
 
         import pops
         pops.set_threads(8)     # 8 threads
-        pops.set_threads()      # all cores (os.cpu_count())
+        pops.set_threads()      # POPS_THREADS if set, else all cores (os.cpu_count())
         sim = pops.System(n=256)
+
+    With no argument the default is taken from ``POPS_THREADS`` (a positive integer); an explicit
+    ``n`` ALWAYS wins, and an unset / unparseable env value falls back to ``os.cpu_count()``.
 
     A SERIAL module or a late call are flagged by a warning (without raising an exception)."""
     import os
     import warnings
-    if n is None:                       # default : all available logical cores
-        n = os.cpu_count() or 1
+    if n is None:                       # default : POPS_THREADS, else all logical cores
+        n = _threads_from_env()
+        if n is None:
+            n = os.cpu_count() or 1
     n = int(n)
     if n < 1:
         raise ValueError("pops.set_threads : n must be >= 1")

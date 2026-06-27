@@ -6,12 +6,14 @@ runtime stays inert. Each variable below is documented with its effect, its
 default, and the exact file that reads it, so this page never describes a knob
 that the code does not actually honor.
 
-There are two families:
+There are three families:
 
 - **Codegen / toolchain** knobs, read by the Python DSL compilation path when it
   builds a problem `.so` (`pops.codegen`). They override auto-detection of the
   compiler, the headers, the Kokkos install, the optimization flags, and the
   cache directory.
+- **Python runtime defaults**, read by `pops.runtime` to supply a default for a
+  Python call that takes no argument. An explicit Python argument always wins.
 - **Runtime diagnostics**, read by the C++ core. They are off by default and have
   no effect on numerics or outputs when unset.
 
@@ -33,6 +35,18 @@ the DSL loader `.so`; they change neither the ABI key nor the numerics.
 | `POPS_KOKKOS_USE_NVCC_WRAPPER` | Opt-in switch to select the `nvcc_wrapper` found under `<kokkos>/bin`. Truthy values: `1`, `on`, `true`, `yes`, `y`. CUDA selection is never implicit: without this flag (or `POPS_KOKKOS_CXX`) the host compiler is used, so a CPU job on a Kokkos install that ships an `nvcc_wrapper` is not silently broken. | Unset / false (host compiler). | `_native_kokkos_compiler()` in `python/pops/codegen/toolchain.py` |
 | `POPS_DSL_OPTFLAGS` | Overrides the optimization flags of the `production`/`aot` DSL `.so` (whitespace-split). Enters the cache key, so changing it produces a distinct cached `.so`. Affects neither the ABI nor portability. | `-O3 -DNDEBUG`. | `_dsl_optflags()` in `python/pops/codegen/cache.py` |
 | `POPS_CACHE_DIR` | Directory for the out-of-source `.so` cache written by `m.compile()` when no explicit `so_path` is given. | `$XDG_CACHE_HOME/pops/dsl`, else `~/.cache/pops/dsl`. | `pops_cache_dir()` in `python/pops/codegen/cache.py` |
+
+## Python runtime defaults
+
+These are read by `pops.runtime` to default a no-argument Python call. They only
+supply a default: an explicit Python argument always overrides the environment,
+and an unset or unparseable value falls back to the built-in default (no stricter
+rejection than passing the argument directly).
+
+| Variable | Effect | Default | Read in |
+|----------|--------|---------|---------|
+| `POPS_THREADS` | Default thread count for `pops.set_threads()` called with no argument (a positive integer). An explicit `pops.set_threads(n)` always wins; an unset / non-integer / `< 1` value is ignored. | Unset (falls back to `os.cpu_count()`). | `_threads_from_env()` in `python/pops/runtime/threading.py` |
+| `POPS_PROFILE` | Default level for `sim.profile()` called with no argument: `advanced` / `full` -> `Profile.Advanced()`, `off` / `0` / `false` / `no` / `none` -> the call's own default (`Profile.Basic()`), anything else -> `Profile.Basic()`. An explicit `sim.profile(Profile.Advanced())` always wins. | Unset (the call's default level). | `Profile.from_env()` in `python/pops/runtime/profile.py` |
 
 ## Runtime diagnostics
 
@@ -72,8 +86,7 @@ them today has no effect.
   it. Use `so_path=` on `m.compile(...)` to control the `.so` output instead.
 - `POPS_DUMP_IR`, `POPS_DUMP_CPP` -- no env-gated dump of the IR or the emitted
   C++ exists.
-- `POPS_PROFILE`, `POPS_AUTOTUNE` -- there is no environment-driven profiling or
-  autotuning hook.
+- `POPS_AUTOTUNE` -- there is no environment-driven autotuning hook.
 - `POPS_JIT_BACKDOOR` -- absent. No backdoor into the JIT path exists, implicit or
   otherwise. If such a debug-only escape hatch is ever added, it must be explicit
   and opt-in, never triggered implicitly.

@@ -194,7 +194,8 @@ reviewed = "6f84dc22b95d6f69edd347e153ae037f6dfe1401"
 owner = "Romain"
 mode = "warning"
 depends_on = ["python/pops/codegen/toolchain.py", "python/pops/codegen/cache.py",
-              "python/pops/runtime/threading.py", "include/pops/mesh/execution/for_each.hpp",
+              "python/pops/runtime/threading.py", "python/pops/runtime/profile.py",
+              "include/pops/mesh/execution/for_each.hpp",
               "include/pops/numerics/elliptic/mg/geometric_mg.hpp",
               "include/pops/runtime/system/system_field_solver.hpp"]
 tested_by = []
