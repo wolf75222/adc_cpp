@@ -3,10 +3,13 @@
 :class:`Problem` is the inert, typed top-level assembly a user authors before lowering:
 a mesh ``layout``, one or more physics ``block`` declarations, the elliptic ``field``
 problems, the runtime ``param`` declarations, the static ``aux`` inputs, the ``output``
-policies and the ``time`` scheme. Like :class:`pops.fields.FieldProblem` it is a
-:class:`pops.descriptors.Descriptor`: it declares its requirements / capabilities /
-options and answers ``available(context)`` / :meth:`validate` with an EXPLAINABLE status
-before the runtime is ever touched. It computes nothing.
+policies and the ``time`` scheme. A :class:`Problem` is an ASSEMBLY that CONTAINS
+descriptors; it is NOT itself a :class:`pops.descriptors.Descriptor` (Spec 5 sec.6 table /
+sec.15: "Problem non -- assemblage contenant des descriptors"). It still answers the same
+inspectable surface -- it declares its requirements / capabilities / options and answers
+``available(context)`` / :meth:`validate` with an EXPLAINABLE status before the runtime is
+ever touched -- by implementing those methods DIRECTLY, not by inheriting a descriptor base.
+It computes nothing.
 
 ``pops.compile(problem, time=...)`` lowers the assembly through the EXISTING codegen
 (``compile_problem``) and ``pops.bind(compiled, ...)`` wires it onto the EXISTING runtime
@@ -15,7 +18,7 @@ codegen and no runtime of its own; the heavy ``.so`` compile + install + run pat
 Kokkos-gated and validated on CI / ROMEO. Every not-yet-wired route fails LOUD (a clear
 ``NotImplementedError``), never silently.
 """
-from pops.descriptors import Availability, Descriptor
+from pops.descriptors import Availability
 from pops.fields import FieldProblem
 from pops.mesh.cartesian import CartesianMesh
 from pops.mesh.layouts import AMR, Uniform
@@ -79,7 +82,7 @@ class _AMRPolicyHandle:
         return self._problem
 
 
-class Problem(Descriptor):
+class Problem:
     """A typed, inert top-level assembly: layout + blocks + fields + params + aux + outputs.
 
     ``Problem(layout=Uniform(CartesianMesh()), name="plasma")`` then chained::
@@ -94,9 +97,17 @@ class Problem(Descriptor):
     :class:`~pops.mesh.cartesian.CartesianMesh`. :meth:`validate` runs structural checks and
     raises a LOUD ``NotImplementedError`` for the deferred routes (more than one block, a
     non-Poisson field, a non-empty output policy); ``compile`` / ``bind`` lower the rest.
+
+    A Problem CONTAINS descriptors (the layout, the blocks' physics, the field problems) but is
+    NOT itself a :class:`pops.descriptors.Descriptor` (Spec 5 sec.6 table / sec.15). It exposes
+    the same inspectable surface -- ``requirements`` / ``capabilities`` / ``options`` /
+    ``available`` / ``validate`` / ``inspect`` / ``lower`` -- implemented DIRECTLY here, so it
+    duck-types as a route-describing object without inheriting a descriptor identity.
     """
 
     category = "problem"
+    #: A Problem names a pure-Python assembly, not a single native C++ symbol.
+    native_id = None
 
     def __init__(self, layout=None, name=None):
         self._name = str(name) if name else "Problem"
@@ -267,9 +278,21 @@ class Problem(Descriptor):
         every native status as ``unknown`` with that reason rather than fabricating a value.
         """
         return build_route_matrix(self)
+    def lower(self, context=None):
+        """The inert lowering record for the assembly (metadata only; no computation).
+
+        Mirrors the descriptor :meth:`lower` shape so a Problem duck-types as a route-describing
+        object, without being a :class:`pops.descriptors.Descriptor`. It runs no numeric loop and
+        touches no runtime; ``pops.compile`` does the real lowering through ``compile_problem``.
+        """
+        return {"name": self._name, "category": self.category,
+                "native_id": self.native_id, "options": self.options()}
 
     def inspect(self):
-        info = super().inspect()
+        # The base inspect() dict, inlined (a Problem is no longer a Descriptor subclass).
+        info = {"name": self._name, "category": self.category, "native_id": self.native_id,
+                "options": self.options(), "requirements": self.requirements(),
+                "capabilities": self.capabilities()}
         info["layout"] = self._layout.inspect()
         info["blocks"] = {
             name: {"physics": getattr(spec["physics"], "name", repr(spec["physics"])),

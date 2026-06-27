@@ -101,6 +101,45 @@ def test_catalog_descriptors_are_inspectable_and_validate():
                           "catalogs")
 
 
+def test_problem_is_not_a_descriptor():
+    # Spec 5 sec.6 table / sec.15: a Problem is an ASSEMBLY that CONTAINS descriptors (its layout,
+    # the blocks' physics, the field problems). It is NOT itself a Descriptor. The architecture
+    # promise: isinstance(Problem(...), Descriptor) is False, yet every Problem method still works
+    # (it duck-types the inspectable surface), and the parts it holds ARE descriptors.
+    import pops
+    from pops.descriptors import Descriptor, DescriptorProtocol
+
+    prob = pops.Problem(name="arch").block("ne", physics=type("M", (), {"name": "m"})())
+    assert not isinstance(prob, Descriptor), (
+        "Spec 5 sec.6: a Problem must NOT be a pops.descriptors.Descriptor (it is an assembly "
+        "that contains descriptors, not one itself)")
+    # The inspectable surface survives the de-Descriptor change (structural duck typing).
+    assert isinstance(prob, DescriptorProtocol)
+    assert prob.validate.__self__ is prob  # validate() is implemented directly on Problem.
+    assert prob.inspect()["category"] == "problem"
+    assert prob.lower()["name"] == "arch"
+    # The layout it CONTAINS is still a descriptor (the assembly holds descriptors).
+    assert isinstance(prob.layout, Descriptor)
+
+
+def test_optimization_math_rejects_a_bare_string():
+    # Spec 5 sec.14.2 / #20-21: the codegen Optimization math= / fuse= selectors are TYPED objects;
+    # a bare string is rejected at construction (not silently mis-set and crashed later), while the
+    # typed StrictMath() / FastMath() / ... usage keeps working.
+    from pops.codegen import Optimization, FastMath, StrictMath
+
+    with pytest.raises(TypeError) as excinfo:
+        Optimization(math="fast")
+    message = str(excinfo.value)
+    assert "optimization math" in message and "fast" in message
+    assert "StrictMath()" in message and "FastMath()" in message
+    with pytest.raises(TypeError):
+        Optimization(fuse="conservative")
+    # Typed usage is intact and the default stays StrictMath.
+    assert isinstance(Optimization().math, StrictMath)
+    assert Optimization(math=FastMath()).options()["math"] == "FastMath"
+
+
 def test_compiled_brick_without_a_manifest_is_a_clear_error():
     # The compiled-brick load path refuses a brick whose manifest does not exist. read_manifest
     # on a missing .json raises FileNotFoundError (an OSError); resolving a CompiledBrickRef whose
