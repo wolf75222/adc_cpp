@@ -8,6 +8,28 @@ Only the public surface is documented here (internal symbols are not listed). Fo
 annotated walkthroughs, see the [quickstart](../getting-started/first-run.md); named compositions
 (scenarios) live in the [`adc_cases`](https://github.com/wolf75222/adc_cases) repository.
 
+## Python sub-packages (Spec 4)
+
+The `pops` package is organized into typed sub-packages with a strictly acyclic
+import graph. The old flat modules (`pops.dsl`, the flat `pops.moments`, etc.) are
+deleted; no backward-compatibility shims exist.
+
+| Sub-package | Responsibility |
+|-------------|---------------|
+| `pops.ir` | Symbolic IR nodes, ops, values, lowering, visitors. Imported by every layer above it. |
+| `pops.model` | Typed model core: `Module`, spaces, `Operator`, `OperatorRegistry`. Imports `pops.ir` only. |
+| `pops.physics` | Math/physics authoring facade (`pops.physics.Model`). Lowers to a `pops.model.Module`. |
+| `pops.time` | Temporal language: `Program`, schedules, equations. |
+| `pops.lib` | Descriptors, time schemes, moment closures (`pops.lib.moments`), provided standard models. |
+| `pops.codegen` | The only C++ emitter. Free functions (`emit_cpp_*`, `module_codegen`) that take a model. |
+
+Key rule: `pops.physics`, `pops.time`, and `pops.lib` never import `pops.codegen` or `_pops`.
+`pops.codegen` holds C++ emission as free functions so authoring packages stay decoupled from the
+toolchain. See the full design: {doc}`../design/spec4-package-architecture`.
+
+The top-level `pops` namespace re-exports the most-used symbols so existing simulation code
+(`pops.System`, `pops.Model(...)`, `pops.compile_problem(...)`) continues to work unchanged.
+
 ```{note}
 The `autoclass` / `autofunction` blocks below only render if the `pops` module has been
 built (`-DPOPS_BUILD_PYTHON=ON`) and is importable at doc build time. See

@@ -180,7 +180,7 @@ mode = "warning"
 depends_on = ["python/pops", "python/bindings/core/bindings.cpp", "python/bindings/system/base/system.cpp", "python/bindings/amr/amr_system.cpp"]
 tested_by = []
 testable = false
-reviewed = "3052304085221bd1ac3c61166881ea3710d60b41"
+reviewed = "49582ee0dd7bc2d9c0ce68d9551f8fc427420b63"
 
 [docs."docs/sphinx/reference/backend-matrix.md"]
 owner = "Romain"
@@ -851,5 +851,21 @@ testable = false
 owner = "Romain"
 mode = "warning"
 depends_on = []
+tested_by = []
+testable = false
+
+# --- Design (Spec 4 architecture docs) -------------------------------------------------------------
+
+[docs."docs/sphinx/design/index.md"]
+owner = "Romain"
+mode = "warning"
+depends_on = []
+tested_by = []
+testable = false
+
+[docs."docs/sphinx/design/spec4-package-architecture.md"]
+owner = "Romain"
+mode = "warning"
+depends_on = ["python/pops/__init__.py", "python/pops/ir/__init__.py", "python/pops/model/__init__.py", "python/pops/codegen/__init__.py"]
 tested_by = []
 testable = false

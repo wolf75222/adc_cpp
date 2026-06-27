@@ -14,7 +14,10 @@ the canonical symbolic representation; helpers that *emit* C++ source strings
 (_cpp_expand, _cse_emit, _cpp_roe, etc.) remain in pops.dsl.
 """
 
-import numpy as np
+# numpy backs only the .eval() host interpreter (Sqrt/Abs/Sign below); IR construction and the
+# to_cpp() codegen never touch it. It is imported lazily inside eval() so pops.ir stays importable
+# in a bare interpreter -- e.g. the build-time scripts/gen_solver_kernel.py codegen, which emits
+# C++ from the IR and never evaluates it (so numpy need not be installed for the C++ build).
 
 
 # =============================================================================
@@ -124,7 +127,9 @@ class Neg(Expr):
 
 class Sqrt(Expr):
     def __init__(self, a): self.a = a
-    def eval(self, env): return np.sqrt(self.a.eval(env))
+    def eval(self, env):
+        import numpy as np
+        return np.sqrt(self.a.eval(env))
     def deps(self): return self.a.deps()
     def to_cpp(self): return "std::sqrt(%s)" % self.a.to_cpp()
     def _str(self): return "sqrt(%s)" % self.a
@@ -134,7 +139,9 @@ class Abs(Expr):
     """Absolute value ``|a|`` (e.g. ``|lambda_k|`` of a Roe dissipation). Emitted as std::fabs at codegen
     (equal to the ternary a<0?-a:a outside -0.0). Not differentiable by dsl.diff (no sign node)."""
     def __init__(self, a): self.a = a
-    def eval(self, env): return np.abs(self.a.eval(env))
+    def eval(self, env):
+        import numpy as np
+        return np.abs(self.a.eval(env))
     def deps(self): return self.a.deps()
     def to_cpp(self): return "std::fabs(%s)" % self.a.to_cpp()
     def _str(self): return "abs(%s)" % self.a
@@ -146,7 +153,9 @@ class Sign(Expr):
     cellule (ADC-177 : clamps de projection en max/min via abs/sign, sans if). Derivee nulle presque
     partout (saut en 0, mesure nulle), cf. dsl.diff."""
     def __init__(self, a): self.a = a
-    def eval(self, env): return np.sign(self.a.eval(env))
+    def eval(self, env):
+        import numpy as np
+        return np.sign(self.a.eval(env))
     def deps(self): return self.a.deps()
     def to_cpp(self):
         s = self.a.to_cpp()
