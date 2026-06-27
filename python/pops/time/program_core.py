@@ -8,6 +8,11 @@ from pops.time.values import (
     Value, _Coeff, _CoupledResult, _Operator, _resolve_handle, _state_base_name, _to_affine,
 )
 
+# Sentinel marking "the caller did not pass this legacy rhs kwarg". It lets P.rhs distinguish
+# terms=[...] (the typed front door) from the legacy flux=/sources=/fluxes= surface and reject
+# mixing the two, while keeping the historical default semantics when neither path is used.
+_UNSET = object()
+
 
 class _ProgramCore(_ProgramConstants):
     """State / field / RHS / source / apply construction (the operator-first builder core)."""
@@ -296,10 +301,26 @@ class _ProgramCore(_ProgramConstants):
                     "operator %r expects %s %r but got a value over %r"
                     % (op.name, t.kind, t.name, arg_name))
 
-    def rhs(self, name=None, state=None, fields=None, flux=True, sources=None, fluxes=None):
+    def rhs(self, name=None, state=None, fields=None, flux=_UNSET, sources=_UNSET, fluxes=_UNSET,
+            terms=None):
         """Build R = -div F(U) + sum of the requested named ``sources``. ``fields`` is the explicit
         FieldContext any field-dependent source reads (no implicit global aux). Named sources are
         never summed implicitly: ``sources`` lists exactly the ones to include.
+
+        ``terms`` (Spec 5 sec.14.2.4, ADC-479 criterion 27) is the TYPED right-hand-side composition:
+        instead of the legacy ``flux=``/``sources=``/``fluxes=`` booleans/name-lists, pass a single
+        list of typed terms -- a :class:`pops.numerics.terms.Flux` plus the source terms to fold in::
+
+            R = P.rhs(U, fields=f, terms=[Flux(), electric])
+
+        It is PURE front-door sugar: each term lowers onto the EXISTING ``flux=``/``sources=`` path,
+        so the IR is byte-identical to the equivalent legacy call. A ``Flux()`` in the list sets
+        ``flux=True`` (its absence -> ``flux=False``); every source term (a
+        :class:`pops.numerics.terms.SourceTerm` / :class:`~pops.numerics.terms.LocalTerm`, an
+        :class:`pops.model.OperatorHandle` from ``m.source_term``, or a plain source NAME string)
+        appends its name to ``sources``. ``terms=`` is MUTUALLY EXCLUSIVE with ``flux=``/``sources=``/
+        ``fluxes=`` (passing both raises a clear ``ValueError``); a non-term object in the list (e.g. a
+        bare ``bool`` -- ``Flux()`` is a term, not a bool) raises a clear ``TypeError``.
 
         ``sources`` selects which sources are folded in (ADC-425, spec criterion 17): ``None`` (the
         argument default) keeps the legacy behavior (``-div F`` + the model's default/composite source,
@@ -325,6 +346,23 @@ class _ProgramCore(_ProgramConstants):
         evaluated flux fields: so splitting the physical flux into named pieces that sum to it
         reproduces the same -div F to round-off. Mixing ``"default"`` with named fluxes is rejected
         (the two divergence stencils differ); request either the default or a set of named fluxes."""
+        # terms= is the typed front door (Spec 5 sec.14.2.4): it is MUTUALLY EXCLUSIVE with the legacy
+        # flux=/sources=/fluxes= kwargs and lowers onto them, so the rest of the body (and the IR) is
+        # unchanged. Resolve the three legacy kwargs to either their caller value or the historical
+        # default; when terms= is given, parse it into flux/sources here instead.
+        if terms is not None:
+            conflict = [n for n, v in (("flux", flux), ("sources", sources), ("fluxes", fluxes))
+                        if v is not _UNSET]
+            if conflict:
+                raise ValueError(
+                    "rhs: terms= is mutually exclusive with %s; pass the typed terms list OR the "
+                    "legacy flux=/sources=/fluxes= kwargs, not both" % "/".join(conflict))
+            flux, sources = self._terms_to_flux_sources(terms)
+            fluxes = None
+        else:
+            flux = True if flux is _UNSET else flux
+            sources = None if sources is _UNSET else sources
+            fluxes = None if fluxes is _UNSET else fluxes
         state, fields = _resolve_handle(state), _resolve_handle(fields)
         if isinstance(name, Value):
             raise ValueError("rhs: pass state=/fields= by keyword (first arg is the debug name)")
@@ -338,6 +376,41 @@ class _ProgramCore(_ProgramConstants):
         attrs = {"flux": bool(flux), "sources": src, "fluxes": list(fluxes) if fluxes else None}
         inputs = (state, fields) if fields is not None else (state,)
         return self._new("rhs", "rhs", inputs, attrs, name, state.block)
+
+    def _terms_to_flux_sources(self, terms):
+        """Lower a typed ``terms=[...]`` list (Spec 5 sec.14.2.4) onto the legacy ``(flux, sources)``.
+
+        A :class:`pops.numerics.terms.Flux` sets ``flux=True`` (its absence -> ``flux=False``); every
+        source term contributes its NAME to ``sources`` in list order. Accepted source forms (each maps
+        cleanly onto an existing ``sources=`` name): a :class:`~pops.numerics.terms.SourceTerm` /
+        :class:`~pops.numerics.terms.LocalTerm` descriptor (its ``.name`` must be set), an
+        :class:`pops.model.OperatorHandle` from ``m.source_term`` (its ``.name``), or a plain source
+        name ``str``. A non-term object (e.g. a bare ``bool``) is a clear ``TypeError``."""
+        from pops.numerics.terms import Flux, LocalTerm, SourceTerm
+        from pops.model import OperatorHandle
+        flux = False
+        sources = []
+        for t in terms:
+            if isinstance(t, Flux):
+                flux = True
+            elif isinstance(t, (SourceTerm, LocalTerm)):
+                # An unnamed SourceTerm/LocalTerm has no source name to fold in (its .name would be the
+                # class name, which is not a declared m.source_term); reject it transparently.
+                if t._name is None:
+                    raise ValueError(
+                        "rhs: a %s in terms= must be named (the name of a declared m.source_term); "
+                        "got an unnamed %s" % (type(t).__name__, type(t).__name__))
+                sources.append(t.name)
+            elif isinstance(t, OperatorHandle):
+                sources.append(t.name)
+            elif isinstance(t, str) and t:
+                sources.append(t)
+            else:
+                raise TypeError(
+                    "rhs: terms= entries must be a pops.numerics.terms.Flux/SourceTerm/LocalTerm, a "
+                    "source OperatorHandle (from m.source_term), or a source name str; got %r "
+                    "(note: Flux() is a term, not a bool)" % (t,))
+        return flux, sources
 
     def linear_combine(self, name=None, expr=None):
         """Materialize an affine combination of State/RHS values into a new State. Accepts
