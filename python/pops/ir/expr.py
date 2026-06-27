@@ -196,6 +196,42 @@ class _BoardNode:
     __hash__ = None
 
 
+# --- elliptic field-operator algebra base (Spec 5 sec.9.2, ADC-491) -----------------------
+# Laplacian inherits this base; the concrete terms (Reaction / CoeffGradient / DivCoeffGrad /
+# EllipticSum) and the helpers (_as_elliptic / principal_kinds) live in pops.ir.elliptic to
+# keep this file within the size budget. Inert IR only; the C++ elliptic solver executes.
+class _EllipticTerm(_BoardNode):
+    """A summand of an elliptic field-operator left-hand side.
+
+    Elliptic terms compose with ``+`` / ``-`` / unary ``-`` into a
+    ``pops.ir.elliptic.EllipticSum``; ``==`` builds the field :class:`Equation`.
+    """
+
+    def _elliptic_terms(self):
+        return [self]
+
+    def _principal_kinds(self):
+        return {self._kind()}
+
+    def _kind(self):
+        raise NotImplementedError
+
+    def __neg__(self):  # concrete terms (Laplacian / Reaction / ...) override this
+        raise NotImplementedError
+
+    def __add__(self, other):
+        from .elliptic import EllipticSum, _as_elliptic
+        return EllipticSum(self._elliptic_terms() + _as_elliptic(other)._elliptic_terms())
+
+    def __radd__(self, other):
+        from .elliptic import EllipticSum, _as_elliptic
+        return EllipticSum(_as_elliptic(other)._elliptic_terms() + self._elliptic_terms())
+
+    def __sub__(self, other):
+        from .elliptic import _as_elliptic
+        return self.__add__(-_as_elliptic(other))
+
+
 class Partial(_BoardNode):
     """A first partial derivative ``scale * d(field)/dx_axis`` (axis 0=x, 1=y).
 
@@ -241,16 +277,26 @@ class Gradient(_BoardNode):
     def __neg__(self):
         return Gradient(self.field, -self.scale)
 
+    def __mul__(self, coeff):
+        # coeff * grad(phi) -- a coefficient-scaled gradient (the flux of div(coeff*grad)).
+        from .elliptic import CoeffGradient
+        return CoeffGradient(self.field, coeff, self.scale)
+
+    __rmul__ = __mul__
+
     def __repr__(self):
         return "Gradient(%r)" % (self.field,)
 
 
-class Laplacian(_BoardNode):
+class Laplacian(_EllipticTerm):
     """``scale * Laplacian(field)`` -- the elliptic operator of a field solve."""
 
     def __init__(self, field, scale=1.0):
         self.field = field
         self.scale = float(scale)
+
+    def _kind(self):
+        return "laplacian"
 
     def __neg__(self):
         return Laplacian(self.field, -self.scale)
@@ -345,6 +391,13 @@ class Unknown(_BoardNode):
     def __rmatmul__(self, operator):
         """``operator @ unknown("U*")`` -- the left-hand side of an implicit solve."""
         return OpApply(operator, self)
+
+    def __mul__(self, coeff):
+        # coeff * phi -- a zeroth-order reaction term (the k*phi of a screened Poisson).
+        from .elliptic import Reaction
+        return Reaction(self, coeff)
+
+    __rmul__ = __mul__
 
     def __repr__(self):
         return "unknown(%r)" % (self.name,)

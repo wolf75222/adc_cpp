@@ -11,6 +11,8 @@ __all__ = [
     # IR node types (advanced / introspection)
     "Equation", "Gradient", "Partial", "Laplacian", "Divergence",
     "TimeDerivative", "Unknown", "OpApply", "Integral", "RateTerm", "RateExpr",
+    # elliptic field-operator algebra (Spec 5 sec.9.2)
+    "Reaction", "CoeffGradient", "DivCoeffGrad", "EllipticSum", "principal_kinds",
 ]
 
 from pops.ir.expr import (  # noqa: F401
@@ -26,6 +28,13 @@ from pops.ir.expr import (  # noqa: F401
     Unknown,
     OpApply,
     Integral,
+)
+from pops.ir.elliptic import (  # noqa: F401  (Spec 5 sec.9.2 elliptic field-operator algebra)
+    Reaction,
+    CoeffGradient,
+    DivCoeffGrad,
+    EllipticSum,
+    principal_kinds,
 )
 from pops.ir.expr import _as_rate  # noqa: F401  (used internally by RateTerm)
 from pops.ir.ops import (  # noqa: F401

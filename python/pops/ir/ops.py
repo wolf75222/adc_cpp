@@ -20,6 +20,7 @@ Board free functions
 
 from .expr import Sqrt, Abs, Sign, _wrap
 from .expr import Gradient, Partial, Laplacian, Divergence, TimeDerivative, Unknown, Integral
+from .elliptic import CoeffGradient, DivCoeffGrad
 from .values import EigWitness, StateRef
 
 
@@ -119,7 +120,19 @@ def laplacian(field):
 
 
 def div(flux):
-    """The divergence of a flux; write ``-div(F)`` for the hyperbolic ``-div F``."""
+    """The divergence of a flux or of an elliptic gradient.
+
+    ``div(F)`` of a model flux handle builds the hyperbolic ``-div F`` term. ``div`` of a
+    gradient builds the elliptic principal operator instead: ``div(grad(phi))`` is the
+    Laplacian, and ``div(coeff*grad(phi))`` is the variable / anisotropic
+    :class:`~pops.ir.expr.DivCoeffGrad` (Spec 5 sec.9.2 ``-div(eps grad phi)``).
+    """
+    if isinstance(flux, CoeffGradient):
+        return DivCoeffGrad(flux.field, flux.coeff, flux.scale)
+    if isinstance(flux, Gradient):
+        return Laplacian(flux.field, flux.scale)
+    # Fall-through: a model flux handle (string / source object) -> hyperbolic flux term.
+    # Keep this branch LAST so any non-gradient operand is the hyperbolic divergence.
     return Divergence(flux)
 
 

@@ -10,20 +10,18 @@ shapes:
 They only refine the declared capabilities and the validation; the runtime / codegen treat
 them as a :class:`FieldProblem`.
 """
-from pops.math import Equation, Laplacian
+from pops.math import Equation, principal_kinds
 from .problem import FieldProblem
 
-
-def _has_laplacian(node):
-    """True if @p node (or its negation, or a leading-coefficient scaling) is a Laplacian."""
-    return isinstance(node, Laplacian)
+# An elliptic LHS must carry a principal operator: a Laplacian or a div(coeff*grad).
+_PRINCIPAL_OPERATORS = {"laplacian", "div_coeff_grad"}
 
 
 class PoissonProblem(FieldProblem):
     """A standard Poisson problem ``-laplacian(phi) == rhs``.
 
-    Refines :class:`FieldProblem` by requiring the equation's principal operator to be a
-    Laplacian (so a non-elliptic equation is rejected up front).
+    Refines :class:`FieldProblem` by requiring the equation's principal operator to be an
+    elliptic Laplacian / div(coeff*grad) (so a non-elliptic equation is rejected up front).
     """
 
     category = "poisson_problem"
@@ -35,15 +33,20 @@ class PoissonProblem(FieldProblem):
 
     def validate(self, context=None):
         super().validate(context)
-        if isinstance(self.equation, Equation) and not _has_laplacian(self.equation.lhs):
-            raise ValueError(
-                "%s: a Poisson problem expects a laplacian form on the left-hand side "
-                "(e.g. -laplacian(phi) == rhs); got %r" % (self.name, self.equation.lhs))
+        if isinstance(self.equation, Equation):
+            if not (principal_kinds(self.equation.lhs) & _PRINCIPAL_OPERATORS):
+                raise ValueError(
+                    "%s: a Poisson problem expects an elliptic principal operator on the "
+                    "left-hand side (e.g. -laplacian(phi) == rhs or "
+                    "-div(eps*grad(phi)) == rhs); got %r" % (self.name, self.equation.lhs))
         return True
 
 
 class ScreenedPoissonProblem(PoissonProblem):
-    """A screened Poisson problem ``-laplacian(phi) + k*phi == rhs`` (Debye screening)."""
+    """A screened Poisson problem ``-laplacian(phi) + k*phi == rhs`` (Debye screening).
+
+    Requires a zeroth-order reaction term (``k*phi``) on top of the principal operator.
+    """
 
     category = "screened_poisson_problem"
 
@@ -52,9 +55,26 @@ class ScreenedPoissonProblem(PoissonProblem):
         caps["screened"] = True
         return caps
 
+    def validate(self, context=None):
+        super().validate(context)
+        if isinstance(self.equation, Equation):
+            if "reaction" not in principal_kinds(self.equation.lhs):
+                raise ValueError(
+                    "%s: a screened Poisson expects a zeroth-order reaction term "
+                    "(e.g. -laplacian(phi) + k*phi == rhs); got %r"
+                    % (self.name, self.equation.lhs))
+        return True
+
 
 class AnisotropicPoissonProblem(PoissonProblem):
-    """An anisotropic Poisson problem ``-div(A grad phi) == rhs`` (tensor coefficient)."""
+    """An anisotropic Poisson problem ``-div(A grad phi) == rhs`` (variable / tensor coefficient).
+
+    Requires a ``div(coeff*grad(phi))`` principal operator (the variable-coefficient form).
+
+    NOTE: the form is authorable + validated here, but lowering a variable / tensor
+    coefficient in the elliptic codegen is the coordinated follow-up (ADC-491); today the
+    native elliptic operator solves a constant-coefficient ``div(eps grad)``.
+    """
 
     category = "anisotropic_poisson_problem"
 
@@ -62,6 +82,16 @@ class AnisotropicPoissonProblem(PoissonProblem):
         caps = super().capabilities()
         caps["anisotropic"] = True
         return caps
+
+    def validate(self, context=None):
+        super().validate(context)
+        if isinstance(self.equation, Equation):
+            if "div_coeff_grad" not in principal_kinds(self.equation.lhs):
+                raise ValueError(
+                    "%s: an anisotropic Poisson expects a div(coeff*grad(phi)) principal "
+                    "operator (e.g. -div(eps*grad(phi)) == rhs); got %r"
+                    % (self.name, self.equation.lhs))
+        return True
 
 
 __all__ = ["PoissonProblem", "ScreenedPoissonProblem", "AnisotropicPoissonProblem"]

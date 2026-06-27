@@ -87,12 +87,24 @@ def test_poisson_rejects_non_laplacian_lhs():
         prob.validate()
 
 
-def test_poisson_subclasses_are_field_problems():
-    phi, eq = _poisson_equation()
-    for cls in (ScreenedPoissonProblem, AnisotropicPoissonProblem):
-        prob = cls(unknown=phi, equation=eq, solver=object())
-        assert isinstance(prob, FieldProblem)
-        assert prob.validate() is True
+def test_poisson_subclasses_validate_their_forms():
+    # ADC-491: the Poisson-family shortcuts now validate their DISTINGUISHING elliptic form
+    # (constructible since the board-node elliptic algebra landed), not the plain laplacian.
+    from pops.math import div, grad
+    from pops.fields.coefficients import ScalarCoefficient
+
+    phi = unknown("phi")
+    rho = Var("rho", "cons")
+    screened = ScreenedPoissonProblem(
+        unknown=phi, equation=(-laplacian(phi) + 0.5 * phi == rho), solver=object())
+    assert isinstance(screened, FieldProblem)
+    assert screened.validate() is True
+
+    eps = ScalarCoefficient("eps")
+    aniso = AnisotropicPoissonProblem(
+        unknown=phi, equation=(-div(eps * grad(phi)) == rho), solver=object())
+    assert isinstance(aniso, FieldProblem)
+    assert aniso.validate() is True
 
 
 def test_bcs_construct_and_inspect():
