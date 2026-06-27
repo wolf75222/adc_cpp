@@ -348,6 +348,31 @@ def test_install_routes_runtime_param_kokkos():
         print("OK  a runtime-param instance rejects an AOT-incompatible time (euler) at install")
 
 
+def test_install_cadence_routing():
+    """install(cadence=CompiledTime(...)) absorbs the compiled-program macro-step cadence: it routes
+    to set_program_cadence(substeps, stride). A bad type or a non-default cfl is rejected up front.
+    Host-testable -- set_program_cadence is a pure System-level setter (no installed .so needed)."""
+    sim = pops.System(n=N, L=1.0, periodic=True)
+    if not hasattr(sim._s, "set_program_cadence"):
+        print("skip test_install_cadence_routing (_pops lacks set_program_cadence; rebuild _pops)")
+        return
+    # A CompiledTime is routed to set_program_cadence(substeps, stride) (no error).
+    sim._install_cadence(adctime.CompiledTime(substeps=2, stride=3))
+    # A non-CompiledTime is rejected BEFORE any engine call.
+    try:
+        sim._install_cadence("not a cadence")
+        raise AssertionError("install(cadence=) accepted a non-CompiledTime")
+    except TypeError as exc:
+        assert "CompiledTime" in str(exc), exc
+    # A non-default cfl is deferred (fails loud, not silently ignored).
+    try:
+        sim._install_cadence(adctime.CompiledTime(substeps=1, stride=1, cfl=0.4))
+        raise AssertionError("install(cadence=) accepted a non-default cfl")
+    except NotImplementedError as exc:
+        assert "cfl" in str(exc), exc
+    print("OK  install(cadence=) routes CompiledTime -> set_program_cadence; rejects bad type / cfl")
+
+
 def main():
     test_lower_spatial_accepts_runtime_and_lib()
     test_solver_token_lowering()
@@ -356,6 +381,7 @@ def main():
     test_install_aux_derived_rejected()
     test_install_params_routing()
     test_install_params_routes_declared_runtime_param()
+    test_install_cadence_routing()
     test_install_end_to_end_kokkos()
     test_install_routes_runtime_param_kokkos()
     return 0

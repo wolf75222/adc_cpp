@@ -13,7 +13,7 @@ from pops.runtime.bricks import Spatial, FiniteVolume
 class _SystemUnifiedInstall:
     """The unified ``install`` lowering surface of System."""
 
-    def install(self, compiled, *, instances=None, params=None, aux=None, solvers=None):
+    def install(self, compiled, *, instances=None, params=None, aux=None, solvers=None, cadence=None):
         """Unified install (Spec 3 section 22): wire a compiled handle + per-instance state/spatial +
         params + aux + field solvers in ONE call, then install the compiled time Program.
 
@@ -40,6 +40,10 @@ class _SystemUnifiedInstall:
         @param solvers dict {field: <pops.lib.fields.GeometricMG(...)/pops.GeometricMG(...)>}: lowered to
             set_poisson(solver=...). Only the default Poisson field ("phi"/"charge_density"/"poisson")
             is wired today; a second named elliptic field raises NotImplementedError (deferred).
+        @param cadence optional pops.CompiledTime(substeps=, stride=): the compiled Program's macro-step
+            cadence, applied with set_program_cadence AFTER install_program. A compiled Program is ONE
+            whole-system closure, so its cadence is GLOBAL (one program-level value, not per-block) --
+            hence a single kwarg rather than a per-instance "time". A non-default cfl is deferred.
 
         @throws the verbatim Spec section-24 errors at install for a missing aux / solver / block
             instance / Riemann capability. (A disallowed schedule is rejected earlier, at Program
@@ -102,6 +106,27 @@ class _SystemUnifiedInstall:
         # (5) Install the compiled time Program (binds blocks by name + runs the section-24 .so
         # requirement validation: aux / solver / block instance, verbatim messages).
         self.install_program(so_path)
+
+        # (6) PROGRAM CADENCE (substeps / stride): a compiled Program is ONE whole-system closure, so
+        # its macro-step cadence is GLOBAL (not per-block). Apply it AFTER install_program (the cadence
+        # wraps the installed closure).
+        if cadence is not None:
+            self._install_cadence(cadence)
+
+    def _install_cadence(self, cadence):
+        """Apply a CompiledTime macro-step cadence to the installed program (set_program_cadence).
+
+        set_program_cadence is a SYSTEM-level orchestration around the opaque program closure
+        (program.py): substeps=n re-runs the whole program over eff_dt/n; stride=M runs it once per M
+        macro-steps. A non-default cfl is deferred (pass an explicit dt to sim.step)."""
+        from pops.time.program import CompiledTime
+        if not isinstance(cadence, CompiledTime):
+            raise TypeError("install(cadence=): expected a pops.CompiledTime(substeps=, stride=), "
+                            "got %r" % type(cadence).__name__)
+        if cadence.cfl != "default":
+            raise NotImplementedError(
+                "install(cadence=): a non-default cfl is deferred; pass an explicit dt to sim.step(dt)")
+        self.set_program_cadence(cadence.substeps, cadence.stride)
 
     def _lower_spatial(self, spatial):
         """Lower a spatial selection to an pops.Spatial consumed by add_equation. Accepts an
